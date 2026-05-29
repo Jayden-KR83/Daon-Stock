@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend (syntax + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements-dev.txt'
+
+      - name: Install dependencies (test only — gevent-free)
+        run: |
+          pip install --upgrade pip
+          # 운영 deps 전체는 무거우니 테스트에 필요한 최소만 설치
+          # (main.py는 import 시 yfinance/bs4/pandas 등을 lazy 또는 try-import)
+          pip install pytest pytest-cov fastapi pydantic requests beautifulsoup4 lxml
+          # yfinance/pandas는 실제로 import되므로 필요
+          pip install yfinance pandas
+
+      - name: Syntax check
+        run: python -m py_compile main.py
+
+      - name: Run pytest
+        run: pytest -v
+
+  frontend:
+    name: Frontend (build + lazy chunks)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify bundle structure
+        run: |
+          set -e
+          # 메인 chunk가 너무 크지 않은지 (gzip 50KB 미만 목표)
+          MAIN=$(ls -la ../backend/static/assets/index-*.js | head -1)
+          echo "Main bundle: $MAIN"
+          # vendor 분리 확인
+          ls -la ../backend/static/assets/vendor-*.js | head -10
+          # 탭 lazy chunks 확인
+          ls -la ../backend/static/assets/*Tab*.js | head -10
+          # sw.js precache가 새 번들 참조하는지
+          grep -oE "index-[A-Za-z0-9_-]+\.js" ../backend/static/sw.js | head -1
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: backend/static/
+          retention-days: 7

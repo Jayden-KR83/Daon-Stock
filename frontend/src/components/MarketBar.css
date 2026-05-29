@@ -1,0 +1,82 @@
+/* ── MarketBar — 우→좌 마퀴 ── */
+.mbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  background: var(--clr-surface);
+  border-bottom: 1px solid var(--clr-border-md);
+}
+
+/* 좌우 끝 fade-out 마스크 — Safari/Chrome/FF 모두 지원 */
+.mbar-fade {
+  -webkit-mask-image: linear-gradient(
+    to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%
+  );
+          mask-image: linear-gradient(
+    to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%
+  );
+}
+
+.mbar-empty { min-height: 44px; }
+
+.mbar-track {
+  display: flex;
+  flex-wrap: nowrap;
+  width: max-content;
+  animation-name: mbar-flow;
+  animation-duration: 30s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-fill-mode: none;
+  will-change: transform;
+  transform: translateX(0%);
+}
+.mbar:hover .mbar-track,
+.mbar:active .mbar-track {
+  animation-play-state: paused;
+}
+
+/* 동일한 transform 함수(translateX)로 보간 모호성 제거 */
+@keyframes mbar-flow {
+  from { transform: translateX(0%); }
+  to   { transform: translateX(-50%); }
+}
+
+/* 마퀴는 OS의 prefers-reduced-motion 설정과 무관하게 항상 작동
+   (사용자가 명시적으로 요청한 기능 — 다른 전환·페이드는 OS 설정 존중) */
+
+.mi {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: none;
+  border-right: 1px solid var(--clr-border);
+  background: transparent;
+  min-width: 96px;
+  flex: 0 0 auto;
+  cursor: pointer;
+  transition: background var(--t-base);
+  font-family: inherit;
+  text-decoration: none;
+}
+.mi:hover { background: rgba(14,165,233,.06); }
+.mi:active { background: rgba(14,165,233,.12); }
+
+.mi-spark { display: flex; align-items: center; }
+.mi-info  { display: flex; flex-direction: column; gap: 1px; }
+
+.ml {
+  font-size: 9px; color: var(--clr-text-muted);
+  font-weight: 700; white-space: nowrap;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.mp {
+  font-size: 11px; color: var(--clr-text-strong);
+  font-weight: 800; white-space: nowrap; letter-spacing: -.01em;
+}
+.mu { font-size: 10px; color: var(--clr-pos); font-weight: 700; }
+.md { font-size: 10px; color: var(--clr-neg); font-weight: 700; }

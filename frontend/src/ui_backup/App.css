@@ -1,0 +1,273 @@
+.app-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: #F8FAFC;
+  position: relative;
+}
+
+/* 앱 모드: 중앙 480px 제한 */
+.app-mode-app {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* 웹/앱 전환 토글 버튼 (우측 상단 고정) */
+.view-mode-toggle {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 9999;
+  display: flex;
+  background: #F1F5F9;
+  border-radius: 20px;
+  padding: 3px;
+  gap: 2px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+}
+.vmt-btn {
+  padding: 3px 10px;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748B;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.vmt-btn.active {
+  background: #FFFFFF;
+  color: #0284C7;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+}
+
+/* 앱 모드일 때 BottomNav도 480px 범위 안에 */
+.app-mode-app .bottom-nav {
+  max-width: 480px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.app-main {
+  flex: 1;
+  padding: 0 14px calc(80px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 500px) {
+  .app-main { padding-left: 14px; padding-right: 14px; }
+}
+
+/* ── Section title ── */
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 20px 0 12px;
+}
+
+/* ── Card ── */
+.card {
+  background: #FFFFFF;
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+
+/* ── Row item ── */
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #F1F5F9;
+  cursor: default;
+}
+.row-item:last-child { border-bottom: none; }
+
+/* ── Logo circle ── */
+.logo-circle {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+.logo-circle img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 50%;
+  position: absolute;
+}
+.logo-circle .flag {
+  font-size: 18px;
+  position: absolute;
+}
+
+/* ── Ticker + name ── */
+.stock-ticker { font-size: 14px; font-weight: 700; color: #0F172A; }
+.stock-name   { font-size: 11px; color: #94A3B8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+
+/* ── Price ── */
+.price-main   { font-size: 15px; font-weight: 700; color: #0F172A; text-align: right; }
+.price-change { font-size: 12px; font-weight: 600; text-align: right; margin-top: 2px; }
+
+/* ── Pill badge ── */
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pill-up { background: rgba(22,163,74,.12); color: #16A34A; }
+.pill-dn { background: rgba(220,38,38,.12); color: #DC2626; }
+
+/* ── Summary metric card ── */
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 4px 8px;
+  border-bottom: 1px solid #F1F5F9;
+}
+.metric-row:last-child { border-bottom: none; }
+.metric-label { font-size: 12px; color: #94A3B8; font-weight: 500; }
+.metric-value { font-size: 14px; font-weight: 700; color: #0F172A; text-align: right; }
+.metric-sub   { font-size: 11px; font-weight: 700; text-align: right; margin-top: 2px; }
+
+/* ── Segmented control ── */
+.seg-ctrl {
+  display: flex;
+  background: #F1F5F9;
+  border-radius: 20px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg-btn {
+  flex: 1;
+  padding: 5px 10px;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748B;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.seg-btn.active {
+  background: #FFFFFF;
+  color: #0F172A;
+  box-shadow: 0 1px 4px rgba(0,0,0,.12);
+}
+
+/* ── Input ── */
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  font-size: 16px; /* iOS 자동 줌 방지: 16px 이상 필수 */
+  color: #0F172A;
+  background: #FFFFFF;
+  outline: none;
+  font-family: inherit;
+  transition: border-color .15s;
+}
+.input:focus { border-color: #0EA5E9; box-shadow: 0 0 0 2px rgba(14,165,233,.15); }
+
+/* 데스크탑에서는 14px 유지 */
+@media (min-width: 501px) {
+  .input { font-size: 14px; }
+}
+
+/* ── Primary button ── */
+.btn-primary {
+  background: linear-gradient(135deg, #0EA5E9, #0284C7);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 12px 20px;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity .15s;
+  font-family: inherit;
+}
+.btn-primary:hover { opacity: .9; }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Secondary button ── */
+.btn-secondary {
+  background: transparent;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.btn-secondary:hover { background: rgba(14,165,233,.08); color: #0EA5E9; border-color: #0EA5E9; }
+
+/* ── Icon button ── */
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all .15s;
+}
+.btn-icon:hover { background: #F1F5F9; color: #0F172A; }
+
+/* ── Hero card ── */
+.hero-card {
+  background: linear-gradient(160deg, #EFF6FF 0%, #F0F9FF 100%);
+  border-radius: 24px;
+  padding: 20px;
+  margin: 12px 0 8px;
+  border: 1px solid rgba(14,165,233,.2);
+}
+.hero-app-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94A3B8;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.hero-label { font-size: 12px; color: #94A3B8; font-weight: 500; margin-bottom: 4px; }
+.hero-value { font-size: 34px; font-weight: 900; color: #0F172A; letter-spacing: -.03em; line-height: 1; }
+.hero-pnl   { margin-top: 6px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+
+/* ── Sparkline ── */
+.spark { display: block; }
+
+/* ── Empty state ── */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #94A3B8;
+  font-size: 14px;
+}
+.empty-icon { font-size: 40px; margin-bottom: 12px; }

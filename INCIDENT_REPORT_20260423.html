@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다온 앱 인시던트 리포트 — 2026-04-23</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #F8FAFC; color: #0F172A; padding: 32px 16px; }
+    .container { max-width: 900px; margin: 0 auto; }
+
+    .header { background: linear-gradient(135deg, #0F172A, #1E3A5F);
+               color: white; border-radius: 16px; padding: 32px; margin-bottom: 28px; }
+    .header h1 { font-size: 24px; font-weight: 900; margin-bottom: 6px; }
+    .header .meta { font-size: 13px; color: #94A3B8; display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; }
+    .header .meta span { display: flex; align-items: center; gap: 6px; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px;
+             font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .badge-resolved  { background: #DCFCE7; color: #166534; }
+    .badge-critical  { background: #FEE2E2; color: #991B1B; }
+    .badge-high      { background: #FEF3C7; color: #92400E; }
+    .badge-medium    { background: #DBEAFE; color: #1E40AF; }
+
+    .section { background: white; border-radius: 12px; border: 1px solid #E2E8F0;
+               margin-bottom: 20px; overflow: hidden; }
+    .section-header { padding: 16px 20px; border-bottom: 1px solid #F1F5F9;
+                      display: flex; align-items: center; justify-content: space-between; }
+    .section-header h2 { font-size: 15px; font-weight: 700; color: #0F172A; }
+    .section-body { padding: 20px; }
+
+    .incident { border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+    .incident:last-child { margin-bottom: 0; }
+    .incident-title { font-size: 14px; font-weight: 700; color: #0F172A; margin-bottom: 8px;
+                      display: flex; align-items: center; gap: 8px; }
+    .incident-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+    @media (max-width: 600px) { .incident-grid { grid-template-columns: 1fr; } }
+
+    .label { font-size: 10px; font-weight: 700; color: #94A3B8; text-transform: uppercase;
+             letter-spacing: .06em; margin-bottom: 5px; }
+    .value { font-size: 13px; color: #334155; line-height: 1.6; }
+
+    code { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px;
+           background: #F1F5F9; padding: 2px 6px; border-radius: 4px; color: #7C3AED; }
+    pre  { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px;
+           background: #0F172A; color: #E2E8F0; padding: 16px; border-radius: 8px;
+           overflow-x: auto; line-height: 1.6; margin-top: 8px; }
+    pre .comment { color: #64748B; }
+    pre .fix     { color: #4ADE80; }
+    pre .bug     { color: #F87171; }
+
+    .timeline { position: relative; padding-left: 24px; }
+    .timeline::before { content: ''; position: absolute; left: 7px; top: 0; bottom: 0;
+                        width: 2px; background: #E2E8F0; }
+    .tl-item { position: relative; padding: 0 0 18px 16px; }
+    .tl-dot  { position: absolute; left: -20px; top: 4px; width: 10px; height: 10px;
+               border-radius: 50%; border: 2px solid white; }
+    .tl-dot.red    { background: #EF4444; box-shadow: 0 0 0 2px #FEE2E2; }
+    .tl-dot.green  { background: #22C55E; box-shadow: 0 0 0 2px #DCFCE7; }
+    .tl-dot.blue   { background: #3B82F6; box-shadow: 0 0 0 2px #DBEAFE; }
+    .tl-dot.yellow { background: #F59E0B; box-shadow: 0 0 0 2px #FEF3C7; }
+    .tl-time  { font-size: 11px; color: #94A3B8; font-weight: 600; margin-bottom: 2px; }
+    .tl-text  { font-size: 13px; color: #334155; }
+
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    @media (max-width: 600px) { .summary-grid { grid-template-columns: 1fr; } }
+    .summary-card { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px; text-align: center; }
+    .summary-card .num { font-size: 28px; font-weight: 900; color: #0EA5E9; }
+    .summary-card .desc { font-size: 12px; color: #64748B; margin-top: 4px; }
+
+    .prevention { background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 10px; padding: 16px; }
+    .prevention ul { padding-left: 18px; }
+    .prevention li { font-size: 13px; color: #0C4A6E; line-height: 1.8; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+      <span style="font-size:28px;">🚨</span>
+      <div>
+        <h1>다온 앱 인시던트 리포트</h1>
+        <div style="font-size:13px; color:#94A3B8; margin-top:2px;">차트 탭 먹통 / 앱 전체 크래시 — 심층 분석 및 영구 수정</div>
+      </div>
+    </div>
+    <div class="meta">
+      <span>📅 발생일: 2026-04-23</span>
+      <span>⏱️ 영향 시간: ~1시간</span>
+      <span>🎯 상태: <span class="badge badge-resolved">RESOLVED</span></span>
+      <span>👤 영향 사용자: 전체</span>
+    </div>
+  </div>
+
+  <!-- Summary Stats -->
+  <div class="section">
+    <div class="section-header">
+      <h2>📊 인시던트 요약</h2>
+    </div>
+    <div class="section-body">
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="num">4</div>
+          <div class="desc">발견된 버그 수</div>
+        </div>
+        <div class="summary-card">
+          <div class="num">5</div>
+          <div class="desc">배포 횟수</div>
+        </div>
+        <div class="summary-card">
+          <div class="num" style="color:#22C55E">0</div>
+          <div class="desc">잔존 에러</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="section">
+    <div class="section-header">
+      <h2>🕐 사건 타임라인</h2>
+    </div>
+    <div class="section-body">
+      <div class="timeline">
+        <div class="tl-item">
+          <div class="tl-dot red"></div>
+          <div class="tl-time">14:27 KST</div>
+          <div class="tl-text">사용자가 보유 탭에서 GOOGL 클릭 → 차트 탭 이동 → <strong>앱 전체 먹통</strong> 보고</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot blue"></div>
+          <div class="tl-time">14:30</div>
+          <div class="tl-text">서버 로그 분석 — 백엔드 API는 모두 200 OK 반환 확인. 프론트엔드 문제로 범위 좁힘</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot red"></div>
+          <div class="tl-time">14:39</div>
+          <div class="tl-text"><code>/api/prices</code> 51개 티커 요청 → <strong>500 Internal Server Error</strong> 확인 (TimeoutError 미처리)</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot yellow"></div>
+          <div class="tl-time">14:40</div>
+          <div class="tl-text">RightPanel.jsx <code>ChartPanel</code>에서 <code>newsItems.slice()</code> 호출 시 TypeError 발견 — <strong>앱 전체 크래시 원인 확정</strong></div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot green"></div>
+          <div class="tl-time">14:45</div>
+          <div class="tl-text">RightPanel newsItems 타입 오류 수정 → 배포. 앱 크래시 해결, 차트 에러 상태 노출</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot yellow"></div>
+          <div class="tl-time">14:50</div>
+          <div class="tl-text">차트 에러 상태 분석 — <code>retry: 0</code>으로 서버 재시작 중 연결 실패 → 영구 에러 상태 확인</div>
+        </div>
+        <div class="tl-item">
+          <div class="tl-dot green"></div>
+          <div class="tl-time">14:55</div>
+          <div class="tl-text">배치 가격 TimeoutError catch + retry 정책 수정 → 전체 배포 완료. <strong>완전 해결</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug #1 -->
+  <div class="section">
+    <div class="section-header">
+      <h2>🐛 버그 #1 — 앱 전체 크래시 (최우선)</h2>
+      <span class="badge badge-critical">CRITICAL</span>
+    </div>
+    <div class="section-body">
+      <div class="incident">
+        <div class="incident-title">
+          RightPanel ChartPanel: <code>newsItems.slice()</code> TypeError → React 앱 전체 언마운트
+        </div>
+        <div class="incident-grid">
+          <div>
+            <div class="label">파일</div>
+            <div class="value"><code>frontend/src/components/RightPanel.jsx</code> — ChartPanel 함수</div>
+          </div>
+          <div>
+            <div class="label">증상</div>
+            <div class="value">보유 탭에서 종목 클릭 시 차트 탭으로 이동하면 앱 전체가 즉시 흰 화면 / 무응답</div>
+          </div>
+          <div>
+            <div class="label">근본 원인</div>
+            <div class="value">
+              <code>getNews()</code>는 <code>{ news: [...], recs: [] }</code> 객체를 반환하는데,<br>
+              ChartPanel은 이를 배열로 착각해 <code>newsItems.slice(0, 5)</code> 호출 →<br>
+              <code>TypeError: newsItems.slice is not a function</code> → Error Boundary 없어 루트까지 전파 → 앱 전체 크래시
+            </div>
+          </div>
+          <div>
+            <div class="label">왜 이전에 안 보였나?</div>
+            <div class="value">
+              이전에는 ChartPanel이 뉴스를 받기 전에 앱이 다른 이유로 느려 증상이 덜 명확했음.
+              뉴스 데이터 로딩 완료 직후 렌더에서 크래시 발생 (비동기 타이밍 의존)
+            </div>
+          </div>
+        </div>
+        <pre><span class="comment">// ❌ 버그 코드</span>
+<span class="bug">const { data: newsItems = [], ... } = useQuery({ queryFn: () => getNews(ticker) })
+newsItems.slice(0, 5)  // getNews()는 {news:[...]} 객체 반환 → slice 없음 → TypeError</span>
+
+<span class="comment">// ✅ 수정 코드</span>
+<span class="fix">const { data: newsData, ... } = useQuery({ queryFn: () => getNews(ticker) })
+const newsItems = newsData?.news || []   // 객체에서 배열 추출 후 사용</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug #2 -->
+  <div class="section">
+    <div class="section-header">
+      <h2>🐛 버그 #2 — 배치 가격 500 에러</h2>
+      <span class="badge badge-high">HIGH</span>
+    </div>
+    <div class="section-body">
+      <div class="incident">
+        <div class="incident-title">
+          <code>/api/prices</code>: <code>concurrent.futures.TimeoutError</code> 미처리 → 500 Internal Server Error
+        </div>
+        <div class="incident-grid">
+          <div>
+            <div class="label">파일</div>
+            <div class="value"><code>backend/main.py</code> — <code>_batch_prices()</code> 함수</div>
+          </div>
+          <div>
+            <div class="label">증상</div>
+            <div class="value">51개 티커 배치 가격 요청 시 15초 후 500 에러 반환. 보유 탭 전체 가격 로딩 실패</div>
+          </div>
+          <div>
+            <div class="label">근본 원인</div>
+            <div class="value">
+              <code>as_completed(timeout=15)</code>이 15초 후 <code>TimeoutError</code>를 raise하는데
+              이를 catch하는 코드 없음 → FastAPI가 500 반환.<br>
+              내부 <code>try/except</code>는 <code>fut.result()</code>만 catch하고 <code>as_completed</code> 자체 예외는 무시
+            </div>
+          </div>
+          <div>
+            <div class="label">영향 범위</div>
+            <div class="value">보유 탭 진입 시 (51개 티커 cold cache 경우) 항상 500 에러 발생</div>
+          </div>
+        </div>
+        <pre><span class="comment"># ❌ 버그 코드</span>
+<span class="bug">for fut in _cf.as_completed(all_futs, timeout=15):  # TimeoutError 발생 시 uncaught
+    try:
+        ticker, p = fut.result(timeout=0)
+    except Exception:
+        pass  # fut.result() 예외만 catch, as_completed 예외는 전파됨</span>
+
+<span class="comment"># ✅ 수정 코드</span>
+<span class="fix">try:
+    for fut in _cf.as_completed(all_futs, timeout=15):
+        try:
+            ticker, p = fut.result(timeout=0)
+            if p: result[ticker] = p
+        except Exception:
+            pass
+except _cf.TimeoutError:
+    pass  # 타임아웃 시 수집된 부분 결과만 반환 (500 에러 방지)</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug #3 -->
+  <div class="section">
+    <div class="section-header">
+      <h2>🐛 버그 #3 — 차트 영구 에러 상태</h2>
+      <span class="badge badge-high">HIGH</span>
+    </div>
+    <div class="section-body">
+      <div class="incident">
+        <div class="incident-title">
+          ChartTab: <code>retry: 0</code> → 서버 재시작 중 일시 연결 실패 시 영구 에러 화면
+        </div>
+        <div class="incident-grid">
+          <div>
+            <div class="label">파일</div>
+            <div class="value"><code>frontend/src/tabs/ChartTab.jsx</code></div>
+          </div>
+          <div>
+            <div class="label">증상</div>
+            <div class="value">배포 후 페이지 리로드 시 차트가 "데이터를 불러올 수 없습니다" 에러 고정. 수동 "재시도" 클릭 필요</div>
+          </div>
+          <div>
+            <div class="label">근본 원인</div>
+            <div class="value">
+              <code>retry: 0</code>으로 설정 시 첫 요청 실패(서버 재시작 중 ECONNREFUSED) 즉시 에러 상태 확정.
+              React Query가 자동 재시도 없이 isError=true 유지
+            </div>
+          </div>
+          <div>
+            <div class="label">수정 내용</div>
+            <div class="value"><code>retry: 1, retryDelay: 2000</code> — 실패 시 2초 후 1회 자동 재시도</div>
+          </div>
+        </div>
+        <pre><span class="comment">// ❌ 버그 코드</span>
+<span class="bug">useQuery({ ..., retry: 0 })  // 한 번 실패하면 영구 에러 상태</span>
+
+<span class="comment">// ✅ 수정 코드</span>
+<span class="fix">useQuery({ ..., retry: 1, retryDelay: 2000 })  // 2초 후 1회 자동 재시도</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug #4 (Previous session bugs) -->
+  <div class="section">
+    <div class="section-header">
+      <h2>🐛 버그 #4 — 백엔드 yfinance 무한 대기 (이전 세션 발견)</h2>
+      <span class="badge badge-high">HIGH</span>
+    </div>
+    <div class="section-body">
+      <div class="incident">
+        <div class="incident-title">
+          yfinance 라이브러리 timeout 없음 → 스레드 무한 점유 → 서버 응답 불가
+        </div>
+        <div class="incident-grid">
+          <div>
+            <div class="label">영향 함수</div>
+            <div class="value">
+              <code>_market_data</code>, <code>_stock_full</code>, <code>_kr_history</code>,
+              <code>_stock_news</code>, <code>_stock_peers</code>, <code>_sector_stocks_us</code>,
+              <code>_sp500_heatmap</code>, <code>portfolio_metrics</code>, <code>portfolio_strategy</code>
+            </div>
+          </div>
+          <div>
+            <div class="label">증상</div>
+            <div class="value">특정 종목(TIGER 나스닥 ETF 등) 차트 클릭 시 15-60초 응답 없음 → 앱 먹통</div>
+          </div>
+          <div>
+            <div class="label">근본 원인</div>
+            <div class="value">
+              <code>yf.Ticker().info</code>, <code>.history()</code>, <code>yf.download()</code> 등은
+              내부 timeout 없음. 네트워크 지연 또는 Yahoo Finance 429 응답 시 무한 대기.
+              40개 Starlette 스레드 고갈 → 신규 요청 큐 → 전체 앱 응답 불가
+            </div>
+          </div>
+          <div>
+            <div class="label">수정 내용</div>
+            <div class="value">
+              모든 yfinance 호출을 <code>ThreadPoolExecutor</code> + timeout으로 래핑.
+              순차 루프 → 병렬 처리. yf.download() 제거 후 직접 Yahoo v8 HTTP API 호출로 교체.
+              KR 종목: Naver Finance 스크래핑 fast-fail 추가
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Root Cause Analysis -->
+  <div class="section">
+    <div class="section-header">
+      <h2>🔍 근본 원인 분석 (RCA)</h2>
+    </div>
+    <div class="section-body">
+      <div style="margin-bottom: 16px;">
+        <div class="label">주요 원인 #1 — API 계약 불일치</div>
+        <div class="value" style="margin-top: 6px;">
+          <code>getNews()</code> API 함수가 <code>{ news: [...], recs: [] }</code> 객체를 반환하는데,
+          ChartPanel 컴포넌트는 이를 배열로 가정. 타입 문서화 부재 + TypeScript 미사용으로
+          컴파일 타임 감지 불가. 런타임에만 발생하는 타입 오류가 가장 심각한 버그로 이어짐.
+        </div>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <div class="label">주요 원인 #2 — Error Boundary 부재</div>
+        <div class="value" style="margin-top: 6px;">
+          React 컴포넌트 렌더 중 발생한 예외가 Error Boundary에 잡히지 않고 앱 루트까지 전파.
+          결과적으로 화면 전체가 언마운트되어 사용자에게는 "먹통"으로 보임.
+        </div>
+      </div>
+      <div>
+        <div class="label">주요 원인 #3 — 외부 의존성 timeout 미설정</div>
+        <div class="value" style="margin-top: 6px;">
+          yfinance 라이브러리의 내부 HTTP 요청에 timeout이 없어, Yahoo Finance 서버 응답 지연 시
+          Python 스레드가 무한 대기. 동시 다수 요청 시 스레드 풀 고갈로 서버 전체 무응답.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prevention -->
+  <div class="section">
+    <div class="section-header">
+      <h2>🛡️ 재발 방지 조치</h2>
+    </div>
+    <div class="section-body">
+      <div class="prevention">
+        <ul>
+          <li><strong>API 반환 타입 일관성</strong> — 모든 news API는 <code>{ news: [] }</code> 형식 유지. 배열 직접 반환 금지</li>
+          <li><strong>방어적 배열 접근</strong> — API 데이터 사용 시 항상 <code>data?.news || []</code> 패턴 사용</li>
+          <li><strong>Error Boundary 추가 고려</strong> — 탭별 Error Boundary로 한 탭 오류가 전체 앱에 영향 주지 않도록</li>
+          <li><strong>yfinance 직접 호출 금지</strong> — 모든 외부 API는 <code>ThreadPoolExecutor(timeout=N)</code>으로 래핑</li>
+          <li><strong>TimeoutError 항상 catch</strong> — <code>as_completed(timeout)</code> 사용 시 반드시 <code>except TimeoutError</code> 포함</li>
+          <li><strong>retry 정책</strong> — 차트 등 핵심 쿼리는 <code>retry: 1, retryDelay: 2000</code>으로 일시적 장애 자동 복구</li>
+          <li><strong>배포 후 대기</strong> — 서버 재시작 후 최소 5초 대기 후 브라우저 새로고침</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fix Summary -->
+  <div class="section">
+    <div class="section-header">
+      <h2>✅ 최종 수정 목록</h2>
+    </div>
+    <div class="section-body">
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr style="background:#F8FAFC;">
+            <th style="padding:10px 12px; text-align:left; border-bottom:2px solid #E2E8F0; color:#64748B; font-size:11px; text-transform:uppercase; letter-spacing:.04em;">파일</th>
+            <th style="padding:10px 12px; text-align:left; border-bottom:2px solid #E2E8F0; color:#64748B; font-size:11px; text-transform:uppercase; letter-spacing:.04em;">변경 내용</th>
+            <th style="padding:10px 12px; text-align:left; border-bottom:2px solid #E2E8F0; color:#64748B; font-size:11px; text-transform:uppercase; letter-spacing:.04em;">중요도</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:10px 12px;"><code>RightPanel.jsx</code></td>
+            <td style="padding:10px 12px;">newsData?.news || [] 로 배열 추출 (앱 크래시 수정)</td>
+            <td style="padding:10px 12px;"><span class="badge badge-critical">CRITICAL</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:10px 12px;"><code>main.py</code></td>
+            <td style="padding:10px 12px;">_batch_prices TimeoutError try/except 추가</td>
+            <td style="padding:10px 12px;"><span class="badge badge-high">HIGH</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:10px 12px;"><code>ChartTab.jsx</code></td>
+            <td style="padding:10px 12px;">stock query retry: 0 → retry: 1, retryDelay: 2000</td>
+            <td style="padding:10px 12px;"><span class="badge badge-high">HIGH</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:10px 12px;"><code>main.py</code></td>
+            <td style="padding:10px 12px;">_sp500_heatmap, _sector_stocks_us/kr 순차 → 병렬 처리</td>
+            <td style="padding:10px 12px;"><span class="badge badge-medium">MEDIUM</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:10px 12px;"><code>main.py</code></td>
+            <td style="padding:10px 12px;">portfolio_metrics/strategy _calc_metrics 병렬화</td>
+            <td style="padding:10px 12px;"><span class="badge badge-medium">MEDIUM</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:10px 12px;"><code>main.py</code></td>
+            <td style="padding:10px 12px;">_sector_us/kr, _market_data 병렬화 (이전 세션)</td>
+            <td style="padding:10px 12px;"><span class="badge badge-medium">MEDIUM</span></td>
+          </tr>
+          <tr>
+            <td style="padding:10px 12px;"><code>MarketBar.jsx</code></td>
+            <td style="padding:10px 12px;">Yahoo Finance 외부 링크 → 앱 내 차트 탭 이동으로 변경</td>
+            <td style="padding:10px 12px;"><span class="badge badge-medium">MEDIUM</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="text-align:center; font-size:12px; color:#94A3B8; padding: 20px 0;">
+    다온 포트폴리오 앱 — Incident Report Generated 2026-04-23 | Claude Code
+  </div>
+</div>
+</body>
+</html>

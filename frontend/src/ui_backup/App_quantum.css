@@ -1,0 +1,297 @@
+/* ═══════════════════════════════════════════
+   DAON Quantum Design System — Luminous Precision
+   Border radius: 4px (ROUND_FOUR)
+   Font: Manrope
+   ═══════════════════════════════════════════ */
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: #F7F9FB;
+  position: relative;
+}
+
+/* 앱 모드: 중앙 480px 제한 */
+.app-mode-app {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* 웹/앱 전환 토글 버튼 (우측 상단 고정) */
+.view-mode-toggle {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 9999;
+  display: flex;
+  background: #EFF6FF;
+  border-radius: 4px;
+  padding: 2px;
+  gap: 1px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  border: 1px solid #DBEAFE;
+}
+.vmt-btn {
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748B;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  letter-spacing: .01em;
+}
+.vmt-btn.active {
+  background: #FFFFFF;
+  color: #0284C7;
+  box-shadow: 0 1px 3px rgba(0,0,0,.10);
+}
+
+/* 앱 모드일 때 BottomNav도 480px 범위 안에 */
+.app-mode-app .bottom-nav {
+  max-width: 480px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.app-main {
+  flex: 1;
+  padding: 0 14px calc(72px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 500px) {
+  .app-main { padding-left: 12px; padding-right: 12px; }
+}
+
+/* ── Section title ── */
+.section-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 20px 0 10px;
+  letter-spacing: -.02em;
+  tracking: tight;
+}
+
+/* ── Card ── */
+.card {
+  background: #FFFFFF;
+  border-radius: 4px;
+  padding: 16px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 0 0 1px rgba(0,0,0,.04);
+}
+
+/* ── Row item ── */
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #F1F5F9;
+  cursor: default;
+}
+.row-item:last-child { border-bottom: none; }
+
+/* ── Logo circle ── */
+.logo-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+.logo-circle img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 4px;
+  position: absolute;
+}
+.logo-circle .flag {
+  font-size: 18px;
+  position: absolute;
+}
+
+/* ── Ticker + name ── */
+.stock-ticker { font-size: 14px; font-weight: 800; color: #0F172A; letter-spacing: -.01em; }
+.stock-name   { font-size: 11px; color: #94A3B8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; font-weight: 500; }
+
+/* ── Price ── */
+.price-main   { font-size: 14px; font-weight: 800; color: #0F172A; text-align: right; letter-spacing: -.01em; }
+.price-change { font-size: 11px; font-weight: 700; text-align: right; margin-top: 2px; }
+
+/* ── Pill badge ── */
+.pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+.pill-up { background: rgba(34,197,94,.12); color: #16A34A; }
+.pill-dn { background: rgba(239,68,68,.12); color: #DC2626; }
+
+/* ── Summary metric card ── */
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 4px 8px;
+  border-bottom: 1px solid #F1F5F9;
+}
+.metric-row:last-child { border-bottom: none; }
+.metric-label { font-size: 12px; color: #94A3B8; font-weight: 600; }
+.metric-value { font-size: 14px; font-weight: 800; color: #0F172A; text-align: right; letter-spacing: -.01em; }
+.metric-sub   { font-size: 11px; font-weight: 700; text-align: right; margin-top: 2px; }
+
+/* ── Segmented control ── */
+.seg-ctrl {
+  display: flex;
+  background: #EFF6FF;
+  border-radius: 4px;
+  padding: 2px;
+  gap: 1px;
+  border: 1px solid #DBEAFE;
+}
+.seg-btn {
+  flex: 1;
+  padding: 5px 10px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748B;
+  cursor: pointer;
+  transition: all .12s;
+  white-space: nowrap;
+  font-family: inherit;
+  letter-spacing: .01em;
+}
+.seg-btn.active {
+  background: #FFFFFF;
+  color: #0284C7;
+  box-shadow: 0 1px 3px rgba(0,0,0,.10);
+}
+
+/* ── Input ── */
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #E2E8F0;
+  border-radius: 4px;
+  font-size: 16px; /* iOS 자동 줌 방지: 16px 이상 필수 */
+  color: #0F172A;
+  background: #FFFFFF;
+  outline: none;
+  font-family: inherit;
+  font-weight: 500;
+  transition: border-color .12s, box-shadow .12s;
+}
+.input:focus { border-color: #0EA5E9; box-shadow: 0 0 0 2px rgba(14,165,233,.12); }
+
+@media (min-width: 501px) {
+  .input { font-size: 14px; }
+}
+
+/* ── Primary button ── */
+.btn-primary {
+  background: #0284C7;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 11px 20px;
+  cursor: pointer;
+  width: 100%;
+  transition: background .12s, opacity .12s;
+  font-family: inherit;
+  letter-spacing: .01em;
+}
+.btn-primary:hover { background: #0369A1; }
+.btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── Secondary button ── */
+.btn-secondary {
+  background: transparent;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all .12s;
+  font-family: inherit;
+}
+.btn-secondary:hover { background: rgba(14,165,233,.06); color: #0284C7; border-color: #BAE6FD; }
+
+/* ── Icon button ── */
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: all .12s;
+}
+.btn-icon:hover { background: #F1F5F9; color: #0F172A; }
+
+/* ── Hero card ── */
+.hero-card {
+  background: linear-gradient(160deg, #EFF6FF 0%, #F0F9FF 100%);
+  border-radius: 4px;
+  padding: 20px;
+  margin: 12px 0 10px;
+  border: 1px solid rgba(14,165,233,.18);
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.hero-app-name {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94A3B8;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.hero-label { font-size: 11px; color: #64748B; font-weight: 600; margin-bottom: 4px; }
+.hero-value { font-size: 32px; font-weight: 900; color: #0F172A; letter-spacing: -.04em; line-height: 1; }
+.hero-pnl   { margin-top: 6px; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+
+/* ── Sparkline ── */
+.spark { display: block; }
+
+/* ── Empty state ── */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #94A3B8;
+  font-size: 14px;
+  font-weight: 500;
+}
+.empty-icon { font-size: 36px; margin-bottom: 12px; }
+
+/* ── Divider ── */
+.divider {
+  height: 1px;
+  background: #F1F5F9;
+  margin: 4px 0;
+}

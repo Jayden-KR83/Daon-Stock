@@ -1,0 +1,79 @@
+# ────────────────────────────────────────
+# Sensitive data — NEVER commit
+# ────────────────────────────────────────
+daon.db
+daon.db-journal
+daon.db-wal
+daon.db-shm
+users.json
+portfolio_data.json
+data/
+backup/
+_backup/
+*.key
+*.pem
+.env
+.env.*
+
+# ────────────────────────────────────────
+# Build artifacts (CI builds these)
+# ────────────────────────────────────────
+backend/static/assets/
+backend/static/sw.js
+backend/static/workbox-*.js
+backend/static/manifest.webmanifest
+frontend/dist/
+
+# ────────────────────────────────────────
+# Dependencies
+# ────────────────────────────────────────
+frontend/node_modules/
+scripts/node_modules/
+**/node_modules/
+.venv/
+venv/
+
+# ────────────────────────────────────────
+# Python cache
+# ────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+backend/.pytest_cache/
+backend/tests/.pytest_cache/
+
+# ────────────────────────────────────────
+# Logs
+# ────────────────────────────────────────
+*.log
+backend/*.log
+
+# ────────────────────────────────────────
+# Vite / Frontend cache
+# ────────────────────────────────────────
+frontend/.vite/
+frontend/.vite-cache/
+
+# ────────────────────────────────────────
+# OS / Editor
+# ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# ────────────────────────────────────────
+# Local Claude/memory (개인 시스템 전용)
+# ────────────────────────────────────────
+.claude/local/
+
+# ────────────────────────────────────────
+# Personal portfolio data (테스트용 엑셀 등)
+# ────────────────────────────────────────
+*.xlsx
+*.xls

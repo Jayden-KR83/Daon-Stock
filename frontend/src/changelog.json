@@ -1,0 +1,54 @@
+[
+  {
+    "version": "v2.3",
+    "date": "2026-05-21",
+    "title": "분석·UX 대규모 확장",
+    "items": [
+      { "type": "feature", "text": "종목 간 상관관계 매트릭스 — 진짜 분산 투자인지 시각화" },
+      { "type": "feature", "text": "실적 캘린더 — 보유·관심 종목 다음 실적일 자동" },
+      { "type": "feature", "text": "차트 비교 모드 — 2~4종목 정규화 동시 비교" },
+      { "type": "feature", "text": "관심종목 그룹화 폴더 (AI인프라/배당 등)" },
+      { "type": "feature", "text": "단축키 — / 검색 · ESC 모달 닫기 · 1-4 탭 전환 · ? 도움말" },
+      { "type": "feature", "text": "다크모드 OS 자동 동기화 (auto 테마)" },
+      { "type": "feature", "text": "최근 검색 + 즐겨찾기 (검색창에 자동 표시)" },
+      { "type": "feature", "text": "종목별 일별 P/L 스냅샷 — 사후 추적 가능" },
+      { "type": "infra", "text": "daon.db 자동 백업 (매일 KST 04:00, 30일 보관)" },
+      { "type": "infra", "text": "이 changelog 시스템 — 변경 사항을 인앱으로 안내" }
+    ]
+  },
+  {
+    "version": "v2.2",
+    "date": "2026-05-19",
+    "title": "A안 — 데이터 누적 + 자동 분석",
+    "items": [
+      { "type": "feature", "text": "Net Worth 일별 자동 스냅샷 + 추이 차트" },
+      { "type": "feature", "text": "Portfolio Health Score (0-100 + S/A/B/C/D 등급)" },
+      { "type": "feature", "text": "룰 기반 리밸런싱 경고 (AI 호출 없음, 즉시 감지)" },
+      { "type": "infra", "text": "Puppeteer 회귀 테스트 시스템" }
+    ]
+  },
+  {
+    "version": "v2.1",
+    "date": "2026-05-19",
+    "title": "1차 기능 패키지",
+    "items": [
+      { "type": "feature", "text": "종목별 메모/투자 노트 (손절가·목표가 포함)" },
+      { "type": "feature", "text": "거래내역 — FIFO 매칭으로 평균단가·실현손익 자동 계산" },
+      { "type": "feature", "text": "백테스트 시뮬레이션 (3M/6M/1Y/2Y/5Y)" },
+      { "type": "feature", "text": "Apple Stocks 풍 차트 헤더 (큰 가격 + 미니 sparkline)" },
+      { "type": "feature", "text": "21st.dev Sparkles + ShimmerButton 모션" }
+    ]
+  },
+  {
+    "version": "v2.0",
+    "date": "2026-05-19",
+    "title": "다중 사용자 + AI 권한 + 관리자 탭",
+    "items": [
+      { "type": "feature", "text": "신규 가입 → 관리자 승인 흐름 (pending → approved)" },
+      { "type": "feature", "text": "AI 분석 권한 사용자별 토글 (비용 제어)" },
+      { "type": "feature", "text": "관리자 탭 — 사용자 관리·사용 현황·활동 로그" },
+      { "type": "feature", "text": "동적 계좌 — 브라질·단일 등 자유 추가" },
+      { "type": "feature", "text": "한·미 ETF 비교 도구 (4종 동시)" }
+    ]
+  }
+]

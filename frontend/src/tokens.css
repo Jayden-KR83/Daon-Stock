@@ -1,0 +1,396 @@
+/* ════════════════════════════════════════════════════════════
+   DAON Design Tokens — Single Source of Truth
+   모든 CSS 파일은 이 변수만 참조합니다.
+   하드코딩된 색상·간격·반경·그림자를 절대 사용하지 마세요.
+   ════════════════════════════════════════════════════════════ */
+:root {
+
+  /* ──────────────────────────────────────────
+     Surface / Background
+     ────────────────────────────────────────── */
+  --clr-bg:       #F8FAFC;   /* 페이지 기본 배경 (Slate 50) */
+  --clr-surface:  #FFFFFF;   /* 카드·패널 표면 */
+
+  /* ──────────────────────────────────────────
+     Slate Scale — 텍스트 + 테두리
+     ────────────────────────────────────────── */
+  --clr-border:        #F1F5F9;   /* 행 구분선, 카드 테두리 (Slate 100) */
+  --clr-border-md:     #E2E8F0;   /* input, 중간 테두리 (Slate 200) */
+  --clr-border-strong: #CBD5E1;   /* 강한 테두리 (Slate 300) */
+  --clr-text-muted:    #94A3B8;   /* placeholder, 부가 정보 (Slate 400) */
+  --clr-text-sub:      #64748B;   /* 2차 텍스트 (Slate 500) */
+  --clr-text-mid:      #475569;   /* 로고 박스 텍스트 (Slate 600) */
+  --clr-text:          #334155;   /* 본문 텍스트 (Slate 700) */
+  --clr-text-dark:     #1E293B;   /* 뉴스 제목 (Slate 800) */
+  --clr-text-strong:   #0F172A;   /* 헤딩, 주요 숫자 (Slate 900) */
+
+  /* ──────────────────────────────────────────
+     Emerald — 양수 / 강조 (Primary Accent)
+     ────────────────────────────────────────── */
+  --clr-pos:          #22C55E;   /* 상승, 로고 D, 활성 아이콘 */
+  --clr-pos-dark:     #16A34A;   /* 버튼 bg, 활성 탭 텍스트 */
+  --clr-pos-darker:   #15803D;   /* 버튼 hover */
+  --clr-pos-bg:       #DCFCE7;   /* 상승 배지 배경 */
+  --clr-pos-bg-soft:  #F0FDF4;   /* 버튼 hover bg, 활성 배경 */
+  --clr-pos-border:   #BBF7D0;   /* 카드 hover 테두리 */
+  --clr-pos-border-md:#86EFAC;   /* input focus 테두리 */
+
+  /* ──────────────────────────────────────────
+     Red — 음수 / 하락
+     ────────────────────────────────────────── */
+  --clr-neg:          #EF4444;   /* 하락 텍스트 (Red 500) */
+  --clr-neg-dark:     #DC2626;   /* 하락 강조 (Red 600) */
+  --clr-neg-darker:   #991B1B;   /* 극단적 하락 (Red 900) */
+  --clr-neg-bg:       #FEE2E2;   /* 하락 배지 배경 */
+  --clr-neg-bg-soft:  #FFF1F2;   /* 하락 로고 박스 */
+  --clr-neg-border:   #FECACA;   /* 하락 hover 테두리 */
+
+  /* ──────────────────────────────────────────
+     Sky — 정보 / 스피너 / 앱 모드 액센트
+     ────────────────────────────────────────── */
+  --clr-info:      #0EA5E9;   /* 스피너, AI gradient 시작 */
+  --clr-info-dark: #0284C7;   /* BottomNav 활성, 링크 */
+  --clr-info-bg:   #EFF6FF;   /* hover bg */
+  --clr-info-border: #BAE6FD; /* hover 테두리 */
+
+  /* ──────────────────────────────────────────
+     Amber — 경고 / VIX 액센트
+     ────────────────────────────────────────── */
+  --clr-warn:        #F59E0B;
+  --clr-warn-dark:   #92400E;
+  --clr-warn-bg:     #FFF7ED;
+  --clr-warn-border: #FED7AA;
+
+  /* ──────────────────────────────────────────
+     Indigo/Violet — AI 위젯
+     ────────────────────────────────────────── */
+  --clr-ai:     #6366F1;
+  --clr-ai-alt: #8B5CF6;
+  --clr-ai-text:#A5B4FC;
+
+  /* ──────────────────────────────────────────
+     Dark — Market Status, Tooltip 배경
+     ────────────────────────────────────────── */
+  --clr-dark: #0F172A;
+
+  /* ──────────────────────────────────────────
+     Typography
+     ────────────────────────────────────────── */
+  --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* ──────────────────────────────────────────
+     Border Radius (4px 그리드)
+     ────────────────────────────────────────── */
+  --r-xs: 2px;
+  --r-sm: 3px;
+  --r-md: 4px;    /* 기본 반경 — 카드, 버튼, 배지 */
+  --r-lg: 8px;
+  --r-xl: 12px;   /* Bottom Sheet 상단 */
+  --r-full: 9999px;
+
+  /* ──────────────────────────────────────────
+     Shadow
+     ────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.04);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.12);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,.10);
+
+  /* ──────────────────────────────────────────
+     Material 3 (M3) Tokens — design.md 참조
+     식상한 "AI 카드" 패턴 탈피용
+     ────────────────────────────────────────── */
+  --m-surface:           var(--clr-surface);
+  --m-surface-variant:   var(--clr-bg);
+  --m-outline:           var(--clr-border-md);
+  --m-outline-variant:   var(--clr-border);
+
+  --m-primary:           #1F4FD3;
+  --m-on-primary:        #FFFFFF;
+  --m-primary-container: #E0E8FA;
+
+  --m-positive:          #059669;
+  --m-positive-container:#D1FAE5;
+  --m-negative:          #DC2626;
+  --m-negative-container:#FEE2E2;
+  --m-neutral:           #64748B;
+  --m-accent:            #7C3AED;
+  --m-accent-container:  #EDE9FE;
+
+  --m-text:              var(--clr-text-strong);
+  --m-text-secondary:    var(--clr-text-sub);
+  --m-text-tertiary:     var(--clr-text-muted);
+
+  --m-radius-xs:  4px;
+  --m-radius-sm:  8px;
+  --m-radius-md:  12px;
+  --m-radius-lg:  16px;
+  --m-radius-full: 999px;
+
+  /* ──────────────────────────────────────────
+     Transition
+     ────────────────────────────────────────── */
+  --t-fast: .10s;
+  --t-base: .12s;
+  --t-slow: .22s;
+  --t-flash: .65s;
+
+  /* ──────────────────────────────────────────
+     Layout
+     ────────────────────────────────────────── */
+  --nav-h:      60px;
+  --sidebar-w:  256px;
+  --panel-w:    300px;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Dark Theme — 다크 모드 (Slate 기반)
+   ════════════════════════════════════════════════════════════ */
+:root[data-theme='dark'] {
+  --clr-bg:       #0B1120;
+  --clr-surface:  #111C2D;
+
+  --clr-border:        #1E2D42;
+  --clr-border-md:     #29405F;
+  --clr-border-strong: #3A557B;
+  --clr-text-muted:    #6B7E97;
+  --clr-text-sub:      #94A3B8;
+  --clr-text-mid:      #B6C2D2;
+  --clr-text:          #CBD5E1;
+  --clr-text-dark:     #E2E8F0;
+  --clr-text-strong:   #F1F5F9;
+
+  /* 양수/음수 — 더 밝게 */
+  --clr-pos:          #22C55E;
+  --clr-pos-dark:     #34D399;
+  --clr-pos-darker:   #10B981;
+  --clr-pos-bg:       rgba(34,197,94,.18);
+  --clr-pos-bg-soft:  rgba(34,197,94,.10);
+  --clr-pos-border:   rgba(34,197,94,.35);
+  --clr-pos-border-md:rgba(34,197,94,.5);
+
+  --clr-neg:          #F87171;
+  --clr-neg-dark:     #FB7185;
+  --clr-neg-darker:   #DC2626;
+  --clr-neg-bg:       rgba(239,68,68,.18);
+  --clr-neg-bg-soft:  rgba(239,68,68,.10);
+  --clr-neg-border:   rgba(239,68,68,.32);
+
+  --clr-info:      #38BDF8;
+  --clr-info-dark: #7DD3FC;
+  --clr-info-bg:   rgba(56,189,248,.14);
+  --clr-info-border: rgba(56,189,248,.32);
+
+  --clr-warn:        #FBBF24;
+  --clr-warn-dark:   #FCD34D;
+  --clr-warn-bg:     rgba(251,191,36,.14);
+  --clr-warn-border: rgba(251,191,36,.32);
+
+  --clr-ai:     #818CF8;
+  --clr-ai-alt: #A78BFA;
+  --clr-ai-text:#C7D2FE;
+
+  --clr-dark: #0F172A;
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-sm: 0 1px 4px rgba(0,0,0,.45);
+  --shadow-md: 0 4px 18px rgba(0,0,0,.55);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.6);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Pro Theme — 정제된 미드나잇 + 티얼/시안 (GitHub Dark + 금융 터미널 정밀도)
+   ════════════════════════════════════════════════════════════ */
+:root[data-theme='pro'] {
+  /* 배경: 미드나잇 차콜 — 푸른 기 살짝, 따뜻함 거의 없음 */
+  --clr-bg:       #0D1117;
+  --clr-surface:  #161B22;
+
+  --clr-border:        #21262D;
+  --clr-border-md:     #30363D;
+  --clr-border-strong: #484F58;
+  --clr-text-muted:    #7D8590;
+  --clr-text-sub:      #9198A1;
+  --clr-text-mid:      #B1BAC4;
+  --clr-text:          #C9D1D9;
+  --clr-text-dark:     #E6EDF3;
+  --clr-text-strong:   #F0F6FC;   /* 깨끗한 화이트 — 가독성 우선 */
+
+  /* 양수: 채도를 낮춘 에메랄드 — 네온 아닌 전문가 그린 */
+  --clr-pos:          #3FB950;
+  --clr-pos-dark:     #56D364;
+  --clr-pos-darker:   #2EA043;
+  --clr-pos-bg:       rgba(63,185,80,.14);
+  --clr-pos-bg-soft:  rgba(63,185,80,.07);
+  --clr-pos-border:   rgba(63,185,80,.30);
+  --clr-pos-border-md:rgba(63,185,80,.45);
+
+  /* 음수: 톤다운된 코럴 레드 — 핑크 아님 */
+  --clr-neg:          #F85149;
+  --clr-neg-dark:     #FF7B72;
+  --clr-neg-darker:   #DA3633;
+  --clr-neg-bg:       rgba(248,81,73,.13);
+  --clr-neg-bg-soft:  rgba(248,81,73,.07);
+  --clr-neg-border:   rgba(248,81,73,.28);
+
+  /* 정보: 차분한 스카이 블루 (네온 아닌 깊이감) */
+  --clr-info:      #58A6FF;
+  --clr-info-dark: #79C0FF;
+  --clr-info-bg:   rgba(88,166,255,.10);
+  --clr-info-border: rgba(88,166,255,.28);
+
+  /* 경고: 골든 옐로우 — 빛바랜 황동 톤 */
+  --clr-warn:        #D29922;
+  --clr-warn-dark:   #E3B341;
+  --clr-warn-bg:     rgba(210,153,34,.11);
+  --clr-warn-border: rgba(210,153,34,.28);
+
+  /* AI: 라벤더 보라 — 절제된 채도 */
+  --clr-ai:     #A371F7;
+  --clr-ai-alt: #BC8CFF;
+  --clr-ai-text:#D2A8FF;
+
+  --clr-dark: #010409;
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.5);
+  --shadow-sm: 0 1px 5px rgba(0,0,0,.55);
+  --shadow-md: 0 8px 24px rgba(0,0,0,.65);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,.7);
+}
+
+/* ════════════════════════════════════════════════════════════
+   인라인 하드코딩 색상 보정 — 다크/프로 테마에서 가독성 유지
+   ════════════════════════════════════════════════════════════ */
+:root[data-theme='dark'] body,
+:root[data-theme='pro']  body {
+  background: var(--clr-bg);
+  color: var(--clr-text);
+}
+:root[data-theme='dark'] input,
+:root[data-theme='pro']  input,
+:root[data-theme='dark'] select,
+:root[data-theme='pro']  select,
+:root[data-theme='dark'] textarea,
+:root[data-theme='pro']  textarea {
+  background: var(--clr-surface);
+  color: var(--clr-text-strong);
+  border-color: var(--clr-border-md);
+}
+:root[data-theme='dark'] input::placeholder,
+:root[data-theme='pro']  input::placeholder {
+  color: var(--clr-text-muted);
+}
+
+/* 인라인 흰색·라이트 회색 배경을 surface로 강제 — 다크/프로에서만 적용 */
+:root[data-theme='dark'] [style*="background: #fff"],
+:root[data-theme='dark'] [style*="background:#fff"],
+:root[data-theme='dark'] [style*="background: #FFF"],
+:root[data-theme='dark'] [style*="background: rgb(255, 255, 255)"],
+:root[data-theme='pro']  [style*="background: #fff"],
+:root[data-theme='pro']  [style*="background:#fff"],
+:root[data-theme='pro']  [style*="background: #FFF"],
+:root[data-theme='pro']  [style*="background: rgb(255, 255, 255)"] {
+  background: var(--clr-surface) !important;
+}
+:root[data-theme='dark'] [style*="background: #F8FAFC"],
+:root[data-theme='dark'] [style*="background:#F8FAFC"],
+:root[data-theme='dark'] [style*="background: #FAFAFA"],
+:root[data-theme='dark'] [style*="background: #FAFAFC"],
+:root[data-theme='dark'] [style*="background: #F1F5F9"],
+:root[data-theme='pro']  [style*="background: #F8FAFC"],
+:root[data-theme='pro']  [style*="background:#F8FAFC"],
+:root[data-theme='pro']  [style*="background: #FAFAFA"],
+:root[data-theme='pro']  [style*="background: #FAFAFC"],
+:root[data-theme='pro']  [style*="background: #F1F5F9"] {
+  background: var(--clr-bg) !important;
+}
+/* 라이트 진한 텍스트 → 테마 텍스트 */
+:root[data-theme='dark'] [style*="color: #0F172A"],
+:root[data-theme='dark'] [style*="color:#0F172A"],
+:root[data-theme='pro']  [style*="color: #0F172A"],
+:root[data-theme='pro']  [style*="color:#0F172A"] {
+  color: var(--clr-text-strong) !important;
+}
+:root[data-theme='dark'] [style*="color: #1E293B"],
+:root[data-theme='pro']  [style*="color: #1E293B"] {
+  color: var(--clr-text-dark) !important;
+}
+:root[data-theme='dark'] [style*="color: #334155"],
+:root[data-theme='pro']  [style*="color: #334155"] {
+  color: var(--clr-text) !important;
+}
+:root[data-theme='dark'] [style*="color: #475569"],
+:root[data-theme='pro']  [style*="color: #475569"] {
+  color: var(--clr-text-mid) !important;
+}
+:root[data-theme='dark'] [style*="color: #64748B"],
+:root[data-theme='pro']  [style*="color: #64748B"] {
+  color: var(--clr-text-sub) !important;
+}
+/* 라이트 테두리 → 테마 테두리 */
+:root[data-theme='dark'] [style*="border: 1px solid #E2E8F0"],
+:root[data-theme='dark'] [style*="border: 1px solid #F1F5F9"],
+:root[data-theme='dark'] [style*="border: 1px solid #CBD5E1"],
+:root[data-theme='dark'] [style*="borderBottom: 1px solid #F1F5F9"],
+:root[data-theme='dark'] [style*="borderBottom: 1px solid #E2E8F0"],
+:root[data-theme='pro']  [style*="border: 1px solid #E2E8F0"],
+:root[data-theme='pro']  [style*="border: 1px solid #F1F5F9"],
+:root[data-theme='pro']  [style*="border: 1px solid #CBD5E1"],
+:root[data-theme='pro']  [style*="borderBottom: 1px solid #F1F5F9"],
+:root[data-theme='pro']  [style*="borderBottom: 1px solid #E2E8F0"] {
+  border-color: var(--clr-border) !important;
+}
+/* 진한 글자색이 있는 헤더 row 등의 hover/배경 */
+:root[data-theme='dark'] [style*="background: #F8FAFC"]::before,
+:root[data-theme='pro']  [style*="background: #F8FAFC"]::before { content: none; }
+
+
+/* ════════════════════════════════════════════════════════════
+   Global Utility Animations & Effects
+   ════════════════════════════════════════════════════════════ */
+
+/* ── 가격 플래시 (숫자 변경 시 순간 색상 강조) ── */
+@keyframes flashUp {
+  0%   { background: rgba(34, 197, 94, .22); border-radius: var(--r-sm); }
+  100% { background: transparent; }
+}
+@keyframes flashDn {
+  0%   { background: rgba(239, 68, 68, .20); border-radius: var(--r-sm); }
+  100% { background: transparent; }
+}
+.flash-up {
+  animation: flashUp var(--t-flash) ease-out;
+  border-radius: var(--r-sm);
+}
+.flash-dn {
+  animation: flashDn var(--t-flash) ease-out;
+  border-radius: var(--r-sm);
+}
+
+/* ── Skeleton Shimmer ── */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--clr-border)    25%,
+    var(--clr-border-md) 50%,
+    var(--clr-border)    75%
+  );
+  background-size: 1200px 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: var(--r-md);
+}
+.skeleton-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--r-md);
+}
+.skeleton-text-sm  { height: 11px; }
+.skeleton-text-xs  { height: 10px; }
+.skeleton-avatar   { width: 36px; height: 36px; flex-shrink: 0; }
+.skeleton-avatar-lg{ width: 42px; height: 42px; flex-shrink: 0; }

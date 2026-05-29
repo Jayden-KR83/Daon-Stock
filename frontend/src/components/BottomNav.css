@@ -1,0 +1,129 @@
+/* ── BottomNav — DAON Quantum (앱 모드 전용) ── */
+.bottom-nav {
+  position: fixed;
+  bottom: 0; left: 0; width: 100%;
+  background: var(--clr-surface);
+  border-top: 1px solid var(--clr-border-md);
+  display: flex;
+  z-index: 9999;
+  box-shadow: 0 -2px 12px rgba(0,0,0,.06);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.nav-btn {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 3px; padding: 8px 4px 10px;
+  border: none; background: transparent;
+  cursor: pointer; color: var(--clr-text-muted);
+  font-family: inherit;
+  transition: color var(--t-base), background var(--t-base);
+  border-top: 2px solid transparent;
+  min-height: 54px;
+}
+.nav-btn.active {
+  color: var(--clr-info-dark);
+  border-top-color: var(--clr-info-dark);
+  background: rgba(14,165,233,.04);
+}
+.nav-btn:not(.active):hover {
+  color: var(--clr-text-sub);
+  background: rgba(0,0,0,.02);
+}
+
+.nav-icon {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.nav-icon svg { width: 22px; height: 22px; }
+
+.nav-label {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: .01em; white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 매우 좁은 화면(<340px): 폰트 크기 추가 축소로 라벨 잘림 방지 */
+@media (max-width: 340px) {
+  .nav-label { font-size: 9px; letter-spacing: 0; }
+  .nav-btn   { padding: 8px 2px 10px; }
+}
+
+/* ── 더보기 시트 ── */
+.more-sheet-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,.35);
+  z-index: 9998;
+  display: flex; align-items: flex-end;
+}
+
+.more-sheet {
+  width: 100%;
+  background: var(--clr-surface);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  padding: 8px 20px 24px;
+  box-shadow: var(--shadow-md);
+  animation: slideUp var(--t-slow) ease-out;
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.more-sheet-handle {
+  width: 36px; height: 4px;
+  background: var(--clr-border-strong);
+  border-radius: var(--r-xs);
+  margin: 0 auto 14px;
+}
+
+.more-sheet-title {
+  font-size: 13px; font-weight: 800;
+  color: var(--clr-text-muted);
+  letter-spacing: .08em; text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.more-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.more-sheet-btn {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 6px;
+  padding: 14px 8px;
+  border: 1px solid var(--clr-border);
+  border-radius: var(--r-md);
+  background: var(--clr-bg);
+  font-family: inherit; color: var(--clr-text-sub);
+  cursor: pointer; transition: all var(--t-base);
+}
+.more-sheet-btn:hover {
+  background: var(--clr-info-bg);
+  border-color: var(--clr-info-border);
+  color: var(--clr-info-dark);
+}
+.more-sheet-btn.active {
+  background: #DBEAFE;
+  border-color: #93C5FD;
+  color: var(--clr-info-dark);
+}
+
+.more-sheet-icon {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+}
+.more-sheet-icon svg { width: 24px; height: 24px; stroke: currentColor; }
+
+.more-sheet-label {
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+
+.app-mode-app .bottom-nav {
+  max-width: 480px; left: 50%;
+  transform: translateX(-50%);
+}

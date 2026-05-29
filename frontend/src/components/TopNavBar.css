@@ -1,0 +1,87 @@
+/* ══════════════════════════════════════════
+   TopNavBar — DAON Quantum Precision Spec
+   ══════════════════════════════════════════ */
+.top-nav {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  height: var(--nav-h);
+  background: var(--clr-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--clr-border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  justify-content: flex-end;
+  box-shadow: var(--shadow-xs);
+}
+/* 라이트 모드: 약간의 투명도로 mesh-gradient 살리기 */
+:root[data-theme='light'] .top-nav {
+  background: rgba(248,250,252,.85);
+  border-bottom-color: rgba(241,245,249,.8);
+}
+
+.top-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* ── Search ── */
+.top-nav-search {
+  display: flex;
+  align-items: center;
+  background: var(--clr-border);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: 0 10px;
+  gap: 7px;
+  height: 34px;
+  transition: all var(--t-base);
+}
+.top-nav-search:focus-within {
+  background: var(--clr-surface);
+  border-color: var(--clr-pos-border-md);
+  box-shadow: 0 0 0 3px rgba(34,197,94,.12);
+}
+.top-nav-search-icon {
+  width: 13px; height: 13px;
+  color: var(--clr-text-muted); flex-shrink: 0;
+}
+.top-nav-search-input {
+  border: none; background: transparent;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  color: var(--clr-text-strong); outline: none; width: 160px;
+}
+.top-nav-search-input::placeholder { color: var(--clr-text-muted); }
+
+/* ── 앱 모드 전환 버튼 ── */
+.top-nav-app-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border: 1px solid var(--clr-border-md);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--clr-text-muted);
+  cursor: pointer;
+  transition: all var(--t-base);
+}
+.top-nav-app-btn:hover {
+  background: var(--clr-pos-bg-soft);
+  color: var(--clr-pos-dark);
+  border-color: var(--clr-pos-border-md);
+}
+
+/* ── 아바타 ── */
+.top-nav-avatar {
+  width: 34px; height: 34px;
+  border-radius: var(--r-full);
+  background: linear-gradient(135deg, var(--clr-pos) 0%, var(--clr-pos-dark) 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; color: #FFFFFF;
+  cursor: default; flex-shrink: 0;
+  border: 2px solid var(--clr-pos-bg);
+  font-family: var(--font-sans);
+}

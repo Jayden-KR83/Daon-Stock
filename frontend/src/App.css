@@ -1,0 +1,706 @@
+/* ══════════════════════════════════════════════
+   DAON — App Shell & Global Component Tokens
+   ══════════════════════════════════════════════ */
+
+/* ── App Shell ── */
+.app-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--clr-bg);
+}
+.app-mode-app { max-width: 480px; margin: 0 auto; }
+.app-mode-app .bottom-nav {
+  max-width: 480px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.app-main {
+  flex: 1;
+  padding: 0 14px calc(72px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── 앱 상단 컨트롤 (테마/웹 토글) ── */
+.app-top-controls {
+  position: fixed; top: 6px; right: 10px; z-index: 9999;
+  display: flex; align-items: center; gap: 6px;
+}
+.app-web-hint,
+.app-theme-hint {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--clr-pos-bg-soft);
+  border: 1px solid var(--clr-pos-border);
+  border-radius: var(--r-md);
+  padding: 3px 9px;
+  font-size: 11px; font-weight: 700; color: var(--clr-pos-dark);
+  cursor: pointer; font-family: inherit;
+  transition: all var(--t-base);
+  white-space: nowrap;
+}
+.app-web-hint:hover,
+.app-theme-hint:hover { background: var(--clr-pos-bg); }
+.app-theme-hint {
+  background: var(--clr-info-bg);
+  border-color: var(--clr-info-border);
+  color: var(--clr-info-dark);
+}
+.app-theme-hint:hover {
+  background: var(--clr-info-bg);
+  filter: brightness(1.05);
+}
+
+/* ── 웹 모드 레이아웃 ── */
+.web-root {
+  display: flex; flex-direction: row;
+  min-height: 100dvh;
+  /* Mesh Gradient: 매우 낮은 opacity로 성능 영향 없음 */
+  background:
+    radial-gradient(ellipse 55% 45% at 8% 12%, rgba(34, 197, 94, .055) 0%, transparent 100%),
+    radial-gradient(ellipse 40% 35% at 88% 78%, rgba(99, 102, 241, .045) 0%, transparent 100%),
+    radial-gradient(ellipse 32% 28% at 58% 4%,  rgba(14, 165, 233, .035) 0%, transparent 100%),
+    var(--clr-bg);
+}
+.web-right {
+  flex: 1; display: flex; flex-direction: column;
+  min-width: 0; overflow: hidden;
+}
+.web-body-grid {
+  flex: 1; display: flex; flex-direction: row;
+  overflow: hidden; min-height: 0;
+}
+.web-main-col {
+  flex: 1;
+  padding: 24px 28px 48px;
+  overflow-y: auto;
+  min-width: 0;
+}
+.web-main-col::-webkit-scrollbar { width: 4px; }
+.web-main-col::-webkit-scrollbar-thumb {
+  background: var(--clr-border-md); border-radius: var(--r-xs);
+}
+.web-right .top-nav { top: 0; }
+
+/* ══════════════════════════════════════════════
+   Global Component Tokens
+   ══════════════════════════════════════════════ */
+.section-title {
+  font-size: 15px; font-weight: 800;
+  color: var(--clr-text-strong);
+  margin: 24px 0 12px;
+  letter-spacing: -.03em;
+  font-family: var(--font-sans);
+}
+
+.card {
+  background: var(--clr-surface);
+  border-radius: var(--r-md);
+  padding: 16px; margin-bottom: 10px;
+  border: 1px solid var(--clr-border);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--t-base), border-color var(--t-base), transform var(--t-base);
+}
+.card:hover {
+  border-color: var(--clr-border-md);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.row-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--clr-bg);
+  cursor: default;
+}
+.row-item:last-child { border-bottom: none; }
+
+.logo-circle {
+  width: 40px; height: 40px;
+  border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; color: #fff;
+  flex-shrink: 0; overflow: hidden; position: relative;
+}
+.logo-circle img {
+  width: 36px; height: 36px;
+  object-fit: contain;
+  border-radius: var(--r-md); position: absolute;
+}
+.logo-circle .flag { font-size: 18px; position: absolute; }
+
+.stock-ticker {
+  font-size: 14px; font-weight: 800;
+  color: var(--clr-text-strong);
+  letter-spacing: -.02em; font-family: var(--font-sans);
+}
+.stock-name {
+  font-size: 11px; color: var(--clr-text-muted);
+  margin-top: 2px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  max-width: 130px; font-weight: 500;
+}
+
+.price-main {
+  font-size: 14px; font-weight: 800;
+  color: var(--clr-text-strong);
+  text-align: right; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.price-change {
+  font-size: 11px; font-weight: 700;
+  text-align: right; margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 3px 8px; border-radius: var(--r-md);
+  font-size: 11px; font-weight: 700;
+}
+.pill-up { background: var(--clr-pos-bg);  color: var(--clr-pos-dark); }
+.pill-dn { background: var(--clr-neg-bg);  color: var(--clr-neg-dark); }
+
+.metric-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 10px 4px 8px;
+  border-bottom: 1px solid var(--clr-bg);
+}
+.metric-row:last-child { border-bottom: none; }
+.metric-label  { font-size: 12px; color: var(--clr-text-muted); font-weight: 600; }
+.metric-value  {
+  font-size: 14px; font-weight: 800;
+  color: var(--clr-text-strong); text-align: right;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+}
+.metric-sub { font-size: 11px; font-weight: 700; text-align: right; margin-top: 2px; }
+
+.seg-ctrl {
+  display: flex;
+  background: var(--clr-border);
+  border-radius: var(--r-md); padding: 2px; gap: 1px;
+}
+.seg-btn {
+  flex: 1; padding: 5px 10px;
+  border-radius: var(--r-sm); border: none;
+  background: transparent;
+  font-size: 12px; font-weight: 700;
+  color: var(--clr-text-sub);
+  cursor: pointer; transition: all var(--t-fast);
+  white-space: nowrap; font-family: inherit; letter-spacing: -.01em;
+}
+.seg-btn.active {
+  background: var(--clr-surface);
+  color: var(--clr-pos-dark);
+  box-shadow: var(--shadow-sm);
+}
+
+.input {
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--clr-border-md);
+  border-radius: var(--r-md);
+  font-size: 16px; color: var(--clr-text-strong);
+  background: var(--clr-surface);
+  outline: none; font-family: inherit; font-weight: 500;
+  transition: border-color var(--t-base), box-shadow var(--t-base);
+}
+.input:focus {
+  border-color: var(--clr-pos-border-md);
+  box-shadow: 0 0 0 3px rgba(34,197,94,.12);
+}
+@media (min-width: 501px) { .input { font-size: 14px; } }
+
+.btn-primary {
+  background: var(--clr-pos-dark); color: #fff;
+  border: none; border-radius: var(--r-md);
+  font-size: 14px; font-weight: 800;
+  padding: 11px 20px; cursor: pointer; width: 100%;
+  transition: background var(--t-base);
+  font-family: var(--font-sans); letter-spacing: -.01em;
+}
+.btn-primary:hover   { background: var(--clr-pos-darker); }
+.btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn-secondary {
+  background: transparent; color: var(--clr-text-sub);
+  border: 1px solid var(--clr-border-md);
+  border-radius: var(--r-md);
+  font-size: 12px; font-weight: 700;
+  padding: 6px 12px; cursor: pointer;
+  transition: all var(--t-base); font-family: inherit;
+}
+.btn-secondary:hover {
+  background: var(--clr-pos-bg-soft);
+  color: var(--clr-pos-dark);
+  border-color: var(--clr-pos-border-md);
+}
+
+.btn-icon {
+  background: transparent; border: none;
+  color: var(--clr-text-muted);
+  padding: 4px 8px; cursor: pointer;
+  border-radius: var(--r-md); font-size: 14px;
+  transition: all var(--t-base);
+}
+.btn-icon:hover { background: var(--clr-border); color: var(--clr-text-strong); }
+
+.hero-card {
+  background: var(--clr-surface); border-radius: var(--r-md);
+  padding: 24px; margin: 0 0 16px;
+  border: 1px solid var(--clr-border);
+  box-shadow: var(--shadow-xs);
+}
+.hero-app-name {
+  font-size: 10px; font-weight: 700;
+  color: var(--clr-text-muted);
+  letter-spacing: .16em; text-transform: uppercase;
+  margin-bottom: 10px; font-family: var(--font-sans);
+}
+.hero-label  { font-size: 11px; color: var(--clr-text-sub); font-weight: 600; margin-bottom: 4px; }
+.hero-value  {
+  font-size: clamp(22px, 8vw, 36px); font-weight: 900;
+  color: var(--clr-text-strong);
+  letter-spacing: -.05em; line-height: 1.05;
+  font-variant-numeric: tabular-nums; font-family: var(--font-sans);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 481px) {
+  .hero-value { font-size: clamp(26px, 4vw, 36px); }
+}
+.hero-pnl {
+  margin-top: 8px; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+}
+
+.spark { display: block; }
+
+.empty-state {
+  text-align: center; padding: 60px 20px;
+  color: var(--clr-text-muted);
+  font-size: 14px; font-weight: 500;
+}
+.empty-icon { font-size: 36px; margin-bottom: 12px; }
+
+.divider { height: 1px; background: var(--clr-border); margin: 4px 0; }
+
+/* ══════════════════════════════════════════════
+   앱 모드 — UI 잘림 방지 보호 규칙
+   ══════════════════════════════════════════════ */
+
+/* 앱 메인 영역: 가로 오버플로 방지 */
+.app-main {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.app-main > * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* hero-card: 좌우 padding을 줄여서 대화면이 아닌 모바일에서 여유 확보 */
+@media (max-width: 480px) {
+  .hero-card { padding: 18px 16px; }
+  .hero-app-name { font-size: 9px; }
+}
+
+/* 보유 행: 가로 정렬 시 오른쪽 콘텐츠가 잘리지 않게 */
+.holding-row {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.holding-row .holding-info {
+  min-width: 0;
+  overflow: hidden;
+}
+.holding-row .holding-info > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.holding-row .holding-value { flex-shrink: 0; }
+
+/* 카드 내부 인라인 ‘background:#fff’ 스타일 강제 적용 — 박스 모델 보호 */
+.card, .hero-card, .chart-card {
+  max-width: 100%;
+  box-sizing: border-box;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 좁은 화면에서 카드 padding 축소 */
+@media (max-width: 380px) {
+  .card { padding: 12px; }
+  .hero-card { padding: 16px 14px; }
+  .hero-value { font-size: clamp(20px, 7.5vw, 30px); }
+}
+
+/* 테이블 — 가로 스크롤 + 셀 잘림 방지 */
+table {
+  max-width: 100%;
+  table-layout: auto;
+}
+.app-mode-app table { font-size: 11px; }
+
+/* 인풋·셀렉트·버튼: 박스 모델 일관성 */
+input.input, .btn-primary, .btn-secondary {
+  box-sizing: border-box;
+}
+
+/* 다크/프로 테마: AI 위젯 텍스트 그라데이션 — 항상 가시성 유지 */
+:root[data-theme='dark'] .tt-ai-title,
+:root[data-theme='pro']  .tt-ai-title {
+  color: #FFFFFF;
+}
+
+/* 다크/프로 테마: AI 위젯 인라인 그라데이션 카드 (전문가 총평/리밸런싱) — 가독성 보정 */
+:root[data-theme='dark'] [style*="linear-gradient(135deg,#EFF6FF,#F0F9FF)"],
+:root[data-theme='pro']  [style*="linear-gradient(135deg,#EFF6FF,#F0F9FF)"] {
+  background: linear-gradient(135deg, var(--clr-info-bg), var(--clr-surface)) !important;
+  border-color: var(--clr-info-border) !important;
+}
+
+/* 다크/프로 테마: hero-card 내부의 흰색 텍스트가 하드코딩된 경우에도 잘 보이게 */
+:root[data-theme='dark'] .hero-card,
+:root[data-theme='pro']  .hero-card {
+  background: linear-gradient(135deg, var(--clr-surface) 0%, rgba(99,102,241,.06) 100%);
+}
+
+/* 다크/프로 테마: skeleton shimmer — 어두운 톤 */
+:root[data-theme='dark'] .skeleton,
+:root[data-theme='pro']  .skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--clr-border)    25%,
+    var(--clr-border-md) 50%,
+    var(--clr-border)    75%
+  );
+  background-size: 1200px 100%;
+}
+
+/* 더보기 시트 활성 상태 색상 보정 */
+:root[data-theme='dark'] .more-sheet-btn.active,
+:root[data-theme='pro']  .more-sheet-btn.active {
+  background: var(--clr-info-bg);
+  border-color: var(--clr-info-border);
+}
+
+/* 입력 자동완성 background - dark/pro 보정 */
+:root[data-theme='dark'] input:-webkit-autofill,
+:root[data-theme='pro']  input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 30px var(--clr-surface) inset !important;
+  -webkit-text-fill-color: var(--clr-text-strong) !important;
+}
+
+/* ══════════════════════════════════════════════
+   추가 잘림 방지 — 모든 모드 공통
+   ══════════════════════════════════════════════ */
+
+/* 가로 오버플로 방지: 앱 모드 컨테이너에만 적용 (html/body 휠 스크롤 보존) */
+.app-mode-app { max-width: 100%; overflow-x: hidden; }
+.web-root { max-width: 100vw; }
+
+/* 모든 카드/패널: padding-box & 가로 100% 보장 */
+.card, .hero-card, .chart-card,
+.tt-card, .tt-drill-panel, .holding-edit-card {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* 작은 화면에서 tt-card padding 축소 */
+@media (max-width: 480px) {
+  .tt-card { padding: 14px 14px; }
+  .tt-card-title { font-size: 12px; }
+}
+
+/* AI 위젯: 좁은 화면에서 패딩 축소 */
+@media (max-width: 480px) {
+  .tt-ai-widget { padding: 18px 16px; }
+  .tt-ai-title { font-size: 16px; }
+}
+
+/* 거래량 리스트: 컬럼 폭 축소 (좁은 화면) */
+@media (max-width: 380px) {
+  .tt-list-header,
+  .tt-asset-row {
+    grid-template-columns: 1fr 56px 0px 48px 48px;
+    font-size: 10px;
+  }
+  .tt-col-trend { display: none; }
+}
+
+/* 수익률·손익 영역: 음/양수 폰트 크기 폭 동일 유지 */
+.price-main, .price-change,
+.metric-value, .metric-sub {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 표 셀: 모든 td/th에 기본 잘림 보호 */
+table td, table th {
+  word-break: keep-all;
+  vertical-align: top;
+}
+
+/* 라이트 모드 한정: hero-card에 미묘한 그라데이션 (시각적 풍부함) */
+:root[data-theme='light'] .hero-card {
+  background: linear-gradient(135deg, var(--clr-surface) 0%, #F0FDF4 130%);
+}
+
+/* ── 한국어 어절 단위 줄바꿈 (영문·숫자는 폭 우선) ── */
+.ko-keep {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  line-break: strict;
+}
+
+/* ─────────────────────────────────────────────
+   Material 3 공통 컴포넌트 (design.md 참조)
+   ───────────────────────────────────────────── */
+
+/* M3 Card — 무그라데이션 + 1px border + 단색 surface */
+.m3-card {
+  background: var(--m-surface);
+  border: 1px solid var(--m-outline-variant);
+  border-radius: var(--m-radius-md);
+  padding: 14px;
+  box-shadow: none;
+  transition: border-color .12s ease;
+}
+.m3-card.is-elevated {
+  border-color: var(--m-outline);
+}
+.m3-card.is-emphasized {
+  border-left: 3px solid var(--m-primary);
+}
+
+/* M3 Section Header — 좌측 색띠 + title + action */
+.m3-section {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+}
+.m3-section-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 700; color: var(--m-text);
+  letter-spacing: -.01em;
+}
+.m3-section-title::before {
+  content: ""; display: inline-block;
+  width: 3px; height: 16px;
+  background: var(--m-primary); border-radius: 1px;
+}
+
+/* M3 Insight Banner — 정보 위계 안내 */
+.m3-banner {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 14px;
+  background: var(--m-surface-variant);
+  border-left: 3px solid var(--m-primary);
+  border-radius: var(--m-radius-sm);
+}
+.m3-banner.is-positive  { border-left-color: var(--m-positive); }
+.m3-banner.is-negative  { border-left-color: var(--m-negative); }
+.m3-banner.is-warning   { border-left-color: var(--clr-warn, #D97706); }
+.m3-banner-title {
+  font-size: 13px; font-weight: 700; color: var(--m-text);
+}
+.m3-banner-body {
+  font-size: 12px; color: var(--m-text-secondary); line-height: 1.6;
+}
+
+/* M3 Label & Caption — caps style */
+.m3-label {
+  font-size: 11px; font-weight: 700;
+  color: var(--m-text-tertiary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.m3-caption {
+  font-size: 11px; color: var(--m-text-secondary);
+  line-height: 1.5;
+}
+
+/* M3 Metric (inline KPI) — 라벨 + 값 가로 정렬 */
+.m3-metric {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.m3-metric-label {
+  font-size: 11px; color: var(--m-text-tertiary); font-weight: 600;
+}
+.m3-metric-value {
+  font-size: 14px; color: var(--m-text); font-weight: 800;
+  letter-spacing: -.01em;
+}
+.m3-metric-value.is-positive { color: var(--m-positive); }
+.m3-metric-value.is-negative { color: var(--m-negative); }
+
+/* M3 Divider (vertical bar — 정보 그룹 구분) */
+.m3-divider-v {
+  display: inline-block;
+  width: 1px; height: 14px;
+  background: var(--m-outline-variant);
+  margin: 0 8px;
+  vertical-align: middle;
+}
+
+/* ─────────────────────────────────────────────
+   A안 — 무채색 + 단일 액센트 (Mono Card System) — v2 (전문 투자 앱 톤)
+   원칙: 직사각형, 좌측 줄로 머리글 통일, 음영 없음, 색은 핵심 숫자만
+   ───────────────────────────────────────────── */
+
+/* Mono Card — 직사각형 (rounded 거의 없음), 절제된 outline */
+.mono-card {
+  background: var(--m-surface);
+  border: 1px solid var(--m-outline-variant);
+  border-radius: 4px;
+  padding: 14px 16px;
+  box-shadow: none;
+  transition: border-color .12s ease;
+}
+.mono-card:hover {
+  border-color: var(--m-outline);
+}
+
+/* Mono Section Header — 좌측 통일 머리글 (2px primary 색띠) */
+.mono-section-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+}
+.mono-section-title {
+  font-size: 13px; font-weight: 800;
+  color: var(--m-text);
+  letter-spacing: -.01em;
+  position: relative;
+  padding-left: 10px;
+  text-transform: none;
+  line-height: 1.25;
+}
+.mono-section-title::before {
+  content: ''; position: absolute; left: 0;
+  top: 3px; bottom: 3px;
+  width: 2px; background: var(--m-text);
+  border-radius: 0;
+}
+.mono-section-title.is-accent::before { background: var(--m-primary); }
+.mono-section-title.is-positive::before { background: var(--m-positive); }
+.mono-section-title.is-negative::before { background: var(--m-negative); }
+.mono-section-sub {
+  font-size: 11px; font-weight: 500;
+  color: var(--m-text-tertiary);
+  letter-spacing: 0;
+  margin-top: 2px;
+  padding-left: 10px;
+}
+
+/* Severity Dot — 사용자 요청으로 좌측 원형 제거. 호환 위해 작은 라벨로만 작동. */
+.sev-dot {
+  display: none;
+}
+.mono-row-dot { display: none; }
+
+/* Severity Text Label — 모서리 직사각형, 색은 글자만 */
+.sev-label {
+  font-size: 9.5px; font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background: transparent;
+  flex-shrink: 0;
+}
+.sev-label.is-critical { color: var(--m-negative); }
+.sev-label.is-high     { color: #B45309; }
+.sev-label.is-med      { color: var(--m-text-secondary); }
+.sev-label.is-low      { color: var(--m-text-tertiary); }
+
+/* Mono Row — 카드 내부 행 (좌측 점 제거, 평면적) */
+.mono-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--m-outline-variant);
+}
+.mono-row:last-child { border-bottom: none; }
+.mono-row-content { flex: 1; min-width: 0; }
+.mono-row-title {
+  font-size: 12.5px; font-weight: 700; color: var(--m-text);
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+}
+.mono-row-body {
+  font-size: 11.5px; color: var(--m-text-secondary);
+  line-height: 1.6; margin-top: 3px;
+}
+
+/* Number Emphasis — 핵심 숫자 색 강조 (유일하게 색 사용) */
+.num-pos { color: var(--m-positive); font-weight: 800; font-variant-numeric: tabular-nums; }
+.num-neg { color: var(--m-negative); font-weight: 800; font-variant-numeric: tabular-nums; }
+.num-neutral { color: var(--m-text); font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* Hairline — 1px 구분선 */
+.hairline {
+  height: 1px;
+  background: var(--m-outline-variant);
+  border: none;
+  margin: 12px 0;
+}
+
+/* Mono Pill — 직사각형 chip (라운드 X) */
+.mono-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--m-outline-variant);
+  border-radius: 2px;
+  font-size: 10px; font-weight: 700;
+  color: var(--m-text-secondary);
+  letter-spacing: .04em;
+  background: transparent;
+}
+
+/* Inline Number Chip — 인라인 강조 (음영 X, 글자색만 + outline) */
+.num-chip {
+  display: inline-flex; align-items: baseline;
+  padding: 0 4px; border-radius: 2px;
+  font-weight: 800; font-variant-numeric: tabular-nums;
+  background: transparent !important;
+  border: none !important;
+}
+.num-chip.is-pos { color: var(--m-positive); }
+.num-chip.is-neg { color: var(--m-negative); }
+.num-chip.is-neutral { color: var(--m-text); }
+
+/* Mini Stacked Bar — 비중 시각화 */
+.mini-stack {
+  display: flex; height: 6px; width: 100%;
+  border-radius: 2px; overflow: hidden;
+  background: var(--m-outline-variant);
+}
+.mini-stack > span {
+  height: 100%; display: block;
+  transition: width .4s ease;
+}
+.mini-stack-legend {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  font-size: 10.5px; color: var(--m-text-secondary);
+  font-variant-numeric: tabular-nums; margin-top: 6px;
+}
+.mini-stack-legend span > i {
+  display: inline-block; width: 8px; height: 8px;
+  margin-right: 4px; vertical-align: middle;
+  border-radius: 1px;
+}
+
+/* ── 컬러 이모지를 무채색으로 통일 ── */
+.emoji-mute {
+  filter: grayscale(1) brightness(0.92) contrast(0.95);
+  -webkit-filter: grayscale(1) brightness(0.92) contrast(0.95);
+  display: inline-block;
+}
+/* 다크/프로 모드에서는 더 밝게 (가독성) */
+:root[data-theme='dark'] .emoji-mute,
+:root[data-theme='pro']  .emoji-mute {
+  filter: grayscale(1) brightness(1.45) contrast(0.95);
+  -webkit-filter: grayscale(1) brightness(1.45) contrast(0.95);
+}
