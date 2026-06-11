@@ -184,7 +184,7 @@ function WatchlistSearch({ existing, onAdded }) {
       {showDrop && results.length > 0 && (
         <div ref={dropRef} style={{
           position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-          background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)', borderRadius: 10,
+          background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)', borderRadius: 4,
           boxShadow: '0 8px 24px rgba(15,23,42,.12)', zIndex: 50, maxHeight: 320, overflowY: 'auto',
         }}>
           {results.slice(0, 10).map(r => {
@@ -242,7 +242,7 @@ function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
   })
 
   return (
-    <div style={{ borderRadius: 12, background: 'var(--clr-surface)', marginBottom: 8,
+    <div style={{ borderRadius: 4, background: 'var(--clr-surface)', marginBottom: 8,
       boxShadow: '0 1px 3px rgba(0,0,0,.05)', overflow: 'hidden' }}>
       {/* Main row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>

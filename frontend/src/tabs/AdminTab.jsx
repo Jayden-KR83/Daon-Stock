@@ -133,14 +133,25 @@ function AdminUnlockPanel() {
 /* ── 관리자 대시보드 (잠금 해제 후) ── */
 function AdminDashboard() {
   const qc = useQueryClient()
+  const adminStatus = useStore(s => s.adminStatus)
+  const setAdminStatus = useStore(s => s.setAdminStatus)
   const [section, setSection] = useState('users') // 'users' | 'stats' | 'audit'
   const [filter,  setFilter]  = useState('all')   // 'all' | 'pending' | 'approved' | 'suspended'
 
-  const { data: usersData } = useQuery({
+  const { data: usersData, isError, error } = useQuery({
     queryKey: ['admin-users'],
     queryFn: listUsers,
     refetchInterval: 30_000,
+    retry: false,
   })
+  // 서버 재시작·세션 만료(1h)로 관리자 잠금이 풀리면 /admin/users 가 401 → 목록이 빈 채로 보임.
+  // 이때 조용히 비우지 말고 잠금 화면으로 자동 복귀시켜 재인증을 유도 (승인 기능 '사라짐' 오인 방지).
+  useEffect(() => {
+    if (isError && error?.response?.status === 401) {
+      setAdminStatus({ ...adminStatus, unlocked: false })
+    }
+  }, [isError, error])
+
   const users = usersData?.users || []
   const pendingCount = users.filter(u => u.status === 'pending').length
 
@@ -184,6 +195,25 @@ function AdminDashboard() {
       <AnimatePresence mode="wait">
         {section === 'users' && (
           <motion.div key="users" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {/* 승인 대기 배너 — 클릭 시 대기 목록만 필터 (발견성) */}
+            {pendingCount > 0 && (
+              <button onClick={() => setFilter('pending')}
+                style={{ width: '100%', textAlign: 'left', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
+                  padding: '11px 14px', borderRadius: 4, fontFamily: 'inherit',
+                  background: 'var(--clr-warn-bg)', border: '1px solid var(--clr-warn-border, #FED7AA)' }}>
+                <span style={{ flex: 'none', minWidth: 22, height: 22, borderRadius: 11,
+                  background: 'var(--clr-warn, #F59E0B)', color: '#fff', fontSize: 11, fontWeight: 900,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {pendingCount}
+                </span>
+                <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700,
+                  color: 'var(--clr-warn-dark, #9A3412)' }}>
+                  승인 대기 중인 가입 신청 {pendingCount}건 — 눌러서 확인하고 승인/거부하세요
+                </span>
+                <span style={{ flex: 'none', fontSize: 14, color: 'var(--clr-warn-dark, #9A3412)' }}>→</span>
+              </button>
+            )}
             {/* 상태 필터 */}
             <div className="seg-ctrl" style={{ marginBottom: 10 }}>
               {[
@@ -258,7 +288,7 @@ function UserCard({ user, onChange }) {
 
   return (
     <div style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)',
-      borderRadius: 12, padding: 12 }}>
+      borderRadius: 4, padding: 12 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -526,11 +556,11 @@ const lblStyle = { fontSize: 11, fontWeight: 700, color: 'var(--clr-text-sub)',
   display: 'block', marginBottom: 5, letterSpacing: '.04em', marginTop: 10 }
 const errStyle = { background: 'var(--clr-neg-bg-soft)', borderRadius: 8,
   padding: '8px 10px', fontSize: 11, color: 'var(--clr-neg-dark)', marginTop: 8 }
-const btnStyle = { width: '100%', padding: '11px', borderRadius: 10,
+const btnStyle = { width: '100%', padding: '11px', borderRadius: 4,
   background: 'var(--clr-info)', color: '#fff', border: 'none',
   fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', marginTop: 14 }
 const cardStyle = { background: 'var(--clr-surface)',
-  border: '1px solid var(--clr-border-md)', borderRadius: 12,
+  border: '1px solid var(--clr-border-md)', borderRadius: 4,
   padding: '12px 14px', marginBottom: 10 }
 const cardTitleStyle = { fontSize: 11, fontWeight: 800, color: 'var(--clr-text-sub)',
   letterSpacing: '.05em', textTransform: 'uppercase' }

@@ -19,13 +19,13 @@ const Icon = {
 
 const FEATURES = [
   {
-    key: 'holdings', title: '보유 탭',
+    key: 'holdings', title: '포트폴리오 탭',
     desc: '내 포트폴리오 종목과 수익률을 한눈에 확인합니다.',
     details: [
-      '총 평가액과 손익을 원화/달러로 전환 표시',
-      '계좌별 필터: 전체 / 미국 / 퇴직 / 개별 / ISA',
+      '총 평가액과 손익을 원화/달러로 전환 표시 · 프라이버시 가림 토글',
+      '계좌별 필터 — 동적 계좌(설정 탭에서 추가/이름변경)',
       '정렬: 평가액순 · 시세순 / 높은순 · 낮은순',
-      '종목명 클릭 → 차트 탭으로 이동 (우측 패널 컨텍스트 자동 갱신)',
+      '종목명 클릭 → 종목 탭으로 이동 (우측 패널 컨텍스트 자동 갱신)',
       '스파크라인(30일 미니차트) — 미국·한국 종목 모두 지원',
     ],
   },
@@ -34,37 +34,39 @@ const FEATURES = [
     desc: '관심 종목 시세를 추적하고 그룹별로 정리합니다.',
     details: [
       '상단 검색창에서 즉시 종목 검색 및 추가',
-      '종목 클릭 → 차트 탭으로 이동 (관련 뉴스·지표 함께 표시)',
+      '종목 클릭 → 종목 탭으로 이동 (관련 뉴스·지표 함께 표시)',
       '🏷 버튼: 그룹 변경 (예: "AI인프라", "배당주", "관찰") — 그룹 2개 이상 시 토글 자동 표시',
       '휴지통 버튼: 목록에서 삭제',
     ],
   },
   {
-    key: 'allocation', title: '비중 탭',
-    desc: '자산 추이·종합점수·경고·상관관계·백테스트·AI 전략을 한 곳에서 확인합니다.',
+    key: 'allocation', title: '분석 탭',
+    desc: '자산 추이·종합점수·경고·상관관계·배당·백테스트·AI 전략을 한 곳에서 확인합니다.',
     details: [
       '📈 자산 추이 (Net Worth): 일별 자동 누적 + 1M/3M/6M/1Y/ALL 토글',
       '🏆 Portfolio Health Score: 0-100점 + S/A/B/C/D 등급 + 4지표 설명 + 약점 강조',
       '🛎 자동 리밸런싱 경고: 단일 종목 30%+ / 단일 섹터 50%+ / -20% 손실 / ETF+개별 중복 / 종목 ≤2개 — 임계값 사용자 조정 가능',
       '🔗 종목 간 상관관계 매트릭스: 1년 일별 수익률 → Pearson 상관 히트맵 (낮을수록 분산 효과 ↑)',
+      '💰 배당금 이력 & 캘린더: 24개월 수령 이력 + 연간 예상 배당 + 다가오는 ex-date (한국 종목 포함)',
       '📉 백테스트: 현재 보유 비중으로 과거 3M~5Y 시뮬레이션 (MDD·변동성·샤프)',
       '계좌별/섹터별/종목별 파이 차트 + AI 전략 리포트 (Claude Haiku)',
     ],
   },
   {
-    key: 'chart', title: '차트 탭',
-    desc: '종목 차트와 거래내역·실적·심층 분석을 제공합니다.',
+    key: 'chart', title: '종목 탭',
+    desc: '종목 차트와 거래내역·실적·심층 분석·가격 알림을 제공합니다.',
     details: [
       'Apple Stocks 풍 헤더: 큰 가격 + 미니 sparkline + 일간 변동 (NumberTicker 애니메이션)',
-      '캔들스틱: 1M / 3M / 6M / 1Y / 2Y / 5Y · MA20/60/120 · RSI(14)',
+      '캔들스틱: 1M / 3M / 6M / 1Y / 2Y / 5Y · MA20/60/120 · RSI(14) · 드래그 줌',
+      '🔔 가격 알림: 목표가·손절가 등록 → 도달 시 알림 벨 + 푸시 알림 (5분 간격 서버 체크)',
       '📒 거래내역 (BUY/SELL): FIFO 매칭으로 평균단가·실현손익 자동 계산',
-      '📝 종목별 메모/투자노트 (보유 탭 카드의 메모 아이콘으로 진입) — 손절가·목표가 저장',
-      'Valuation & Financials · 동종업계 비교 (항상 펼쳐 표시)',
+      '📝 종목별 메모/투자노트 — 손절가·목표가 저장',
+      'Valuation & Financials · 동종업계 비교 — 미국 + 한국 종목 모두 지원 (한국은 Naver 기반 PER·PBR·ROE·시총)',
       'AI 투자 분석: 매수/보유/매도 + 강세·리스크 + 종합 의견 (Claude Sonnet 4.6 + Web Search)',
     ],
   },
   {
-    key: 'trends', title: '트렌드 탭',
+    key: 'trends', title: '시장 탭',
     desc: '글로벌 시장 흐름·실적 캘린더·차트 비교·ETF 비교를 통합 제공합니다.',
     details: [
       '미국·한국 거래량 Top 10 (트렌드 컬럼에 5일 sparkline)',
@@ -75,19 +77,19 @@ const FEATURES = [
     ],
   },
   {
-    key: 'add', title: '추가 탭',
+    key: 'add', title: '등록 탭',
     desc: '포트폴리오에 새 종목을 직접 추가합니다.',
     details: [
-      '계좌 선택 — 동적 계좌 (사용자가 관리 탭에서 추가/이름변경 가능)',
+      '계좌 선택 — 동적 계좌 (사용자가 설정 탭에서 추가/이름변경 가능)',
       '티커, 종목명, 수량, 평균단가, 섹터 입력',
       '한국 종목: 6자리 코드 (005930)',
       '미국 종목: 알파벳 티커 (NVDA)',
-      '※ 매수/매도 정확한 기록은 차트 탭의 "거래내역" 섹션 활용 권장',
+      '※ 매수/매도 정확한 기록은 종목 탭의 "거래내역" 섹션 활용 권장',
     ],
   },
   {
-    key: 'manage', title: '관리 탭',
-    desc: '프로필·계좌·데이터·API 키를 관리합니다.',
+    key: 'manage', title: '설정 탭',
+    desc: '프로필·계좌·데이터·API 키·테마를 관리합니다.',
     details: [
       '◆ 계좌 관리: 동적 계좌 CRUD — 9종 통화 (KRW/USD/EUR/JPY/BRL/GBP/CNY/HKD/INR)',
       '사용자 정보: 닉네임 수정',
@@ -138,7 +140,11 @@ const TIPS = [
   { key: 'backup', title: '데이터 일괄 업로드 전 자동 백업',
     desc: '엑셀 업로드 등 일괄 저장 직전의 포트폴리오가 자동 백업되며, 관리 탭에서 한 번의 클릭으로 원복 가능합니다.' },
   { key: 'shortcut', title: '키보드 단축키 (PC)',
-    desc: '1·2·3·4·5 → 보유/관심/비중/차트/트렌드 탭 즉시 이동 · / → 검색창 포커스 · ESC → 모달/시트 닫기 · ? → 단축키 도움말. (입력 칸 포커스 중에는 비활성화)' },
+    desc: '1·2·3·4·5 → 포트폴리오/관심/분석/종목/시장 탭 즉시 이동 · / → 검색창 포커스 · ESC → 모달/시트 닫기 · ? → 단축키 도움말. (입력 칸 포커스 중에는 비활성화)' },
+  { key: 'alert', title: '가격 알림 + 푸시 (앱 닫아도 도착)',
+    desc: '종목 탭에서 목표가·손절가를 등록하면 서버가 5분 간격으로 체크해 도달 시 알림을 보냅니다. 우측 상단 🔔 알림 벨 패널에서 "푸시 알림 켜기"를 누르고 브라우저 권한을 허용하면, 앱을 닫아도 OS 알림으로 도착합니다.' },
+  { key: 'install', title: '앱 설치 (PWA)',
+    desc: '주소창의 "설치" 버튼(또는 모바일 공유 → 홈 화면에 추가)으로 다온을 앱처럼 설치할 수 있습니다. 홈 화면 아이콘 실행 · 오프라인 캐시 · iOS에서는 설치해야 푸시 알림이 동작합니다.' },
   { key: 'theme-auto', title: '다크모드 OS 자동 동기화',
     desc: '관리 탭 테마를 "자동"으로 설정하면 OS의 다크모드/라이트모드 설정에 따라 앱이 자동 전환됩니다 (Windows 일출/일몰 또는 macOS 시스템 설정 따름).' },
   { key: 'snapshot-auto', title: '자동 자산 추이 누적',
@@ -155,8 +161,8 @@ export default function GuideTab() {
   return (
     <div style={{ paddingTop: 8, paddingBottom: 40 }}>
       {/* 헤더 */}
-      <div style={{ background: 'linear-gradient(135deg, #0EA5E9 0%, #6366F1 100%)',
-        borderRadius: 16, padding: '24px 20px', marginBottom: 20, color: '#fff' }}>
+      <div style={{ background: 'var(--m-primary)',
+        borderRadius: 4, padding: '24px 20px', marginBottom: 20, color: '#fff' }}>
         <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: '-.02em', marginBottom: 6,
           display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ display: 'inline-flex' }}>{Icon.book}</span>
@@ -169,17 +175,17 @@ export default function GuideTab() {
       </div>
 
       {/* 빠른 시작 */}
-      <div style={{ background: 'var(--clr-surface)', borderRadius: 16, padding: 16, marginBottom: 16,
-        boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
+      <div style={{ background: 'var(--clr-surface)', borderRadius: 4, padding: 16, marginBottom: 16,
+        border: '1px solid var(--m-outline-variant)' }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--clr-text-strong)', marginBottom: 12,
           display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'var(--clr-info)', display: 'inline-flex' }}>{Icon.rocket}</span>
           빠른 시작 (3단계)
         </div>
         {[
-          { step: '1', title: '종목 추가', desc: '추가 탭 또는 관리 탭의 엑셀 업로드로 보유 종목을 등록하세요', color: 'var(--clr-info)' },
-          { step: '2', title: '포트폴리오 확인', desc: '보유 탭에서 총 평가액·손익·종목별 수익률을 확인하세요', color: '#10B981' },
-          { step: '3', title: 'AI 분석 활용', desc: '비중 탭 AI 전략 리포트, 차트 탭 AI 투자 분석 (Anthropic API Key 필요)', color: '#8B5CF6' },
+          { step: '1', title: '종목 등록', desc: '등록 탭 또는 설정 탭의 엑셀 업로드로 보유 종목을 등록하세요', color: 'var(--clr-info)' },
+          { step: '2', title: '포트폴리오 확인', desc: '포트폴리오 탭에서 총 평가액·손익·종목별 수익률을 확인하세요', color: '#10B981' },
+          { step: '3', title: 'AI 분석 활용', desc: '분석 탭 AI 전략 리포트, 종목 탭 AI 투자 분석 (Anthropic API Key 필요)', color: '#8B5CF6' },
         ].map(item => (
           <div key={item.step} style={{ display: 'flex', gap: 12, marginBottom: 10, alignItems: 'flex-start' }}>
             <div style={{ width: 28, height: 28, borderRadius: '50%', background: item.color,
@@ -194,8 +200,8 @@ export default function GuideTab() {
       </div>
 
       {/* 상단 마켓 바 설명 */}
-      <div style={{ background: 'var(--clr-surface)', borderRadius: 16, padding: 16, marginBottom: 16,
-        boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
+      <div style={{ background: 'var(--clr-surface)', borderRadius: 4, padding: 16, marginBottom: 16,
+        border: '1px solid var(--m-outline-variant)' }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--clr-text-strong)', marginBottom: 10,
           display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'var(--clr-text-sub)', display: 'inline-flex' }}>{Icon.market}</span>
@@ -217,8 +223,8 @@ export default function GuideTab() {
       </div>
 
       {/* 탭별 기능 (아코디언) */}
-      <div style={{ background: 'var(--clr-surface)', borderRadius: 16, padding: '8px 0',
-        boxShadow: '0 1px 3px rgba(0,0,0,.05)', marginBottom: 16 }}>
+      <div style={{ background: 'var(--clr-surface)', borderRadius: 4, padding: '8px 0',
+        border: '1px solid var(--m-outline-variant)', marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--clr-text-strong)', padding: '8px 16px 12px' }}>
           탭별 기능 상세
         </div>
@@ -253,8 +259,8 @@ export default function GuideTab() {
       </div>
 
       {/* 숨은 팁 */}
-      <div style={{ background: 'var(--clr-surface)', borderRadius: 16, padding: 16, marginBottom: 16,
-        boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
+      <div style={{ background: 'var(--clr-surface)', borderRadius: 4, padding: 16, marginBottom: 16,
+        border: '1px solid var(--m-outline-variant)' }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--clr-text-strong)', marginBottom: 10,
           display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: '#F59E0B', display: 'inline-flex' }}>{Icon.star}</span>
@@ -270,7 +276,7 @@ export default function GuideTab() {
       </div>
 
       {/* API Key 안내 */}
-      <div style={{ background: 'var(--clr-warn-bg)', borderRadius: 16, padding: 16, marginBottom: 16,
+      <div style={{ background: 'var(--clr-warn-bg)', borderRadius: 4, padding: 16, marginBottom: 16,
         border: '1px solid #FED7AA' }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--clr-warn-dark)', marginBottom: 8,
           display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -295,8 +301,8 @@ export default function GuideTab() {
       </div>
 
       {/* 데이터 출처 */}
-      <div style={{ background: 'var(--clr-surface)', borderRadius: 16, padding: 16,
-        boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
+      <div style={{ background: 'var(--clr-surface)', borderRadius: 4, padding: 16,
+        border: '1px solid var(--m-outline-variant)' }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--clr-text-strong)', marginBottom: 8,
           display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'var(--clr-text-sub)', display: 'inline-flex' }}>{Icon.data}</span>
@@ -306,11 +312,14 @@ export default function GuideTab() {
           ['미국 시세·차트·실적·EPS', 'Yahoo Finance (v8 chart API + yfinance)'],
           ['한국 시세', 'Naver 금융 (스크래핑)'],
           ['한국 차트·스파크라인', 'Yahoo v8 chart API (.KS / .KQ)'],
+          ['한국 Valuation·동종비교', 'Naver 금융 (PER·PBR·ROE·시총·동일업종)'],
           ['한국 뉴스', 'Naver 금융 (iframe 스크래핑)'],
           ['미국 뉴스', 'Yahoo Finance search API'],
           ['애널리스트 목표가', 'Thomson Reuters / Refinitiv (yfinance)'],
           ['섹터 히트맵', '섹터 ETF 종목 기반 계산'],
-          ['AI 분석', 'Anthropic Claude Haiku 4.5 (24h 캐시)'],
+          ['AI 전략·포트폴리오 진단', 'Anthropic Claude Haiku 4.5 (24h 캐시)'],
+          ['AI 종목 심층분석', 'Anthropic Claude Sonnet 4.6 + Web Search'],
+          ['푸시 알림', 'Web Push (VAPID) · 서버 cron 5분 체크'],
         ].map(([k, v]) => (
           <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0',
             borderBottom: '1px solid #F8FAFC', fontSize: 12 }}>

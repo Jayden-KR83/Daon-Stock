@@ -122,7 +122,7 @@ export default function EtfCompare() {
             exit={{ opacity: 0, scale: 0.9 }}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '5px 9px', borderRadius: 18,
+              padding: '5px 9px', borderRadius: 4,
               background: 'var(--clr-info-bg)',
               border: '1px solid var(--clr-info-border)',
               fontSize: 11, fontWeight: 700, color: 'var(--clr-info-dark)',
@@ -161,7 +161,7 @@ export default function EtfCompare() {
           {showDrop && filteredResults.length > 0 && (
             <div ref={dropRef} style={{
               position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-              background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)', borderRadius: 10,
+              background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)', borderRadius: 4,
               boxShadow: '0 8px 24px rgba(15,23,42,.12)', zIndex: 50, maxHeight: 280, overflowY: 'auto',
             }}>
               {filteredResults.map(r => {
@@ -197,7 +197,7 @@ export default function EtfCompare() {
         onClick={runCompare}
         disabled={compareLoading || selected.length < 2}
         style={{
-          width: '100%', padding: '10px 16px', borderRadius: 10,
+          width: '100%', padding: '10px 16px', borderRadius: 4,
           background: 'linear-gradient(135deg, var(--clr-info) 0%, var(--clr-ai) 100%)',
           color: '#fff', border: 'none', fontSize: 13, fontWeight: 800,
           cursor: (compareLoading || selected.length < 2) ? 'not-allowed' : 'pointer',
@@ -309,7 +309,7 @@ function CompareTable({ etfs }) {
   ]
 
   return (
-    <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid var(--clr-border-md)' }}>
+    <div style={{ overflowX: 'auto', borderRadius: 4, border: '1px solid var(--clr-border-md)' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12,
         fontVariantNumeric: 'tabular-nums' }}>
         <thead>
@@ -390,7 +390,7 @@ function AiInsightCard({ data, etfs }) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      style={{ marginTop: 14, padding: 14, borderRadius: 12,
+      style={{ marginTop: 14, padding: 14, borderRadius: 4,
         background: 'linear-gradient(135deg, rgba(99,102,241,.08), rgba(14,165,233,.06))',
         border: '1px solid rgba(99,102,241,.25)' }}
     >
@@ -451,7 +451,7 @@ function AiInsightCard({ data, etfs }) {
 
       {data.risk_note && (
         <div style={{ padding: '8px 10px', background: 'var(--clr-neg-bg-soft)',
-          borderLeft: '3px solid var(--clr-neg)', borderRadius: 6,
+          border: '1px solid var(--m-outline-variant)', borderRadius: 4,
           fontSize: 11.5, color: 'var(--clr-neg-dark)', lineHeight: 1.65 }}>
           <span className="emoji-mute" style={{ marginRight: 4 }}>⚠</span>
           <span className="ko-keep">{data.risk_note}</span>

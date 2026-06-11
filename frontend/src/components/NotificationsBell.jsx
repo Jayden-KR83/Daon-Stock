@@ -6,6 +6,8 @@ import {
   listNotifications, markNotificationRead, markAllNotificationsRead,
   listAlerts, deleteAlert,
 } from '../api'
+import { pushSupported, getPushState, enablePush, disablePush } from '../pushClient'
+import { sendTestPush } from '../api'
 import { useStore } from '../store'
 
 /* 시트 / 오버레이를 body 직속으로 portal — 부모 transform/overflow/z-index에 영향받지 않음 */
@@ -21,6 +23,8 @@ function BodyPortal({ children }) {
 export default function NotificationsBell() {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('notif')  // 'notif' | 'rules'
+  const [push, setPush] = useState('off')  // 'unsupported'|'denied'|'on'|'off'
+  const [pushBusy, setPushBusy] = useState(false)
   const qc = useQueryClient()
   const setChartTicker = useStore(s => s.setChartTicker)
 
@@ -46,6 +50,33 @@ export default function NotificationsBell() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
+
+  // 시트 열릴 때 현재 푸시 구독 상태 조회
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    getPushState().then(s => { if (alive) setPush(s) })
+    return () => { alive = false }
+  }, [open])
+
+  async function onTogglePush() {
+    if (pushBusy) return
+    setPushBusy(true)
+    try {
+      setPush(push === 'on' ? await disablePush() : await enablePush())
+    } catch (e) {
+      setPush(e?.message === 'denied' ? 'denied' : await getPushState())
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  async function onTestPush() {
+    if (pushBusy) return
+    setPushBusy(true)
+    try { await sendTestPush() } catch {}
+    finally { setPushBusy(false) }
+  }
 
   async function onItemClick(n) {
     if (!n.read_at) {
@@ -143,6 +174,47 @@ export default function NotificationsBell() {
                   fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
                   color: 'var(--m-text-secondary)',
                 }}>닫기</button>
+              </div>
+
+              {/* Web Push 토글 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 16px',
+                borderBottom: '1px solid var(--m-outline-variant)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--m-text)' }}>
+                    푸시 알림
+                  </div>
+                  <div className="ko-keep" style={{ fontSize: 10, marginTop: 2,
+                    color: 'var(--m-text-tertiary)', lineHeight: 1.5 }}>
+                    {push === 'unsupported'
+                      ? '이 브라우저는 미지원 · iOS는 홈 화면에 추가 후 사용 가능'
+                      : push === 'denied'
+                      ? '브라우저 설정에서 알림 권한이 차단됨 — 권한 허용 후 다시 시도'
+                      : push === 'on'
+                      ? '앱을 닫아도 목표가·손절가 도달 시 알림이 도착합니다'
+                      : '켜면 앱을 닫아도 알림을 받습니다'}
+                  </div>
+                </div>
+                {push === 'on' && (
+                  <button onClick={onTestPush} disabled={pushBusy} style={{
+                    flexShrink: 0, padding: '5px 10px', borderRadius: 2,
+                    background: 'transparent', border: '1px solid var(--m-outline-variant)',
+                    color: 'var(--m-text-secondary)', fontSize: 11, fontWeight: 700,
+                    cursor: pushBusy ? 'default' : 'pointer',
+                    opacity: pushBusy ? 0.5 : 1, fontFamily: 'inherit',
+                  }}>테스트</button>
+                )}
+                {(push === 'on' || push === 'off') && (
+                  <button onClick={onTogglePush} disabled={pushBusy} style={{
+                    flexShrink: 0, padding: '5px 12px', borderRadius: 2,
+                    background: push === 'on' ? 'transparent' : 'var(--m-text)',
+                    border: `1px solid ${push === 'on' ? 'var(--m-outline-variant)' : 'var(--m-text)'}`,
+                    color: push === 'on' ? 'var(--m-text-secondary)' : 'var(--m-surface)',
+                    fontSize: 11, fontWeight: 800,
+                    cursor: pushBusy ? 'default' : 'pointer',
+                    opacity: pushBusy ? 0.5 : 1, fontFamily: 'inherit',
+                  }}>{pushBusy ? '...' : push === 'on' ? '끄기' : '켜기'}</button>
+                )}
               </div>
 
               {/* Tabs */}

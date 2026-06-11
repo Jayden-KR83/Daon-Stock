@@ -13,7 +13,7 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const [tab, setTab] = useState('overview')   // 'overview' | 'upcoming' | 'history'
+  const [tab, setTab] = useState('timeline')   // 'timeline' | 'overview' | 'upcoming' | 'history'
 
   useEffect(() => {
     if (allHoldings.length === 0) return
@@ -115,6 +115,7 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
           {/* 탭 토글 */}
           <div className="seg-ctrl" style={{ marginBottom: 10 }}>
             {[
+              ['timeline', '타임라인'],
               ['overview', `종목별 (${tickerList.length})`],
               ['upcoming', `예정 (${data.upcoming?.length || 0})`],
               ['history',  `이력 (${data.events?.length || 0})`],
@@ -127,6 +128,11 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
               </button>
             ))}
           </div>
+
+          {/* 타임라인 — 최근 18개월 수령 + 향후 6개월 예정 히스토그램 */}
+          {tab === 'timeline' && (
+            <DividendHistogram events={data.events} upcoming={data.upcoming} fmtKrw={fmtKrw} />
+          )}
 
           {/* 종목별 */}
           {tab === 'overview' && (
@@ -283,6 +289,108 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+/* 월별 버킷 — 최근 18개월(수령) + 향후 6개월(예정) = 24개월 윈도우.
+   events.date / upcoming.ex_date 는 'YYYY-MM-DD' → 'YYYY-MM' 키로 집계. */
+function buildDividendMonths(events, upcoming) {
+  const now = new Date()
+  const base = new Date(now.getFullYear(), now.getMonth(), 1)
+  const months = []
+  const idx = {}
+  for (let i = -17; i <= 6; i++) {
+    const d = new Date(base.getFullYear(), base.getMonth() + i, 1)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    idx[key] = months.length
+    months.push({ key, year: d.getFullYear(), month: d.getMonth() + 1,
+      received: 0, expected: 0, isFuture: i > 0 })
+  }
+  for (const e of events || []) {
+    const k = String(e.date || '').slice(0, 7)
+    if (idx[k] != null) months[idx[k]].received += (e.total_krw || 0)
+  }
+  for (const u of upcoming || []) {
+    const k = String(u.ex_date || '').slice(0, 7)
+    if (idx[k] != null) months[idx[k]].expected += (u.est_total_krw || 0)
+  }
+  return months
+}
+
+function DividendHistogram({ events, upcoming, fmtKrw }) {
+  const months = React.useMemo(() => buildDividendMonths(events, upcoming), [events, upcoming])
+  const max = Math.max(1, ...months.map(m => Math.max(m.received, m.expected)))
+  const sumReceived = months.reduce((s, m) => s + m.received, 0)
+  const sumExpected = months.reduce((s, m) => s + m.expected, 0)
+
+  if (sumReceived === 0 && sumExpected === 0) {
+    return (
+      <div className="ko-keep" style={{ padding: '14px 12px',
+        border: '1px dashed var(--m-outline-variant)', borderRadius: 2,
+        fontSize: 12, color: 'var(--m-text-secondary)', textAlign: 'center' }}>
+        최근 24개월 구간에 집계된 배당 내역이 없습니다
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* 범례 + 합계 */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 10, flexWrap: 'wrap',
+        fontSize: 11, color: 'var(--m-text-secondary)' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <i style={{ width: 9, height: 9, background: '#1F4FD3', borderRadius: 1 }} />
+          수령 18개월 <strong style={{ color: 'var(--m-text)', marginLeft: 2 }}>{fmtKrw(sumReceived)}</strong>
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <i style={{ width: 9, height: 9, background: 'rgba(31,79,211,0.32)',
+            borderRadius: 1 }} />
+          예정 6개월 <strong style={{ color: 'var(--m-text)', marginLeft: 2 }}>{fmtKrw(sumExpected)}</strong>
+        </span>
+      </div>
+
+      {/* 막대 — 24개월 */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 112,
+        borderBottom: '1px solid var(--m-outline-variant)' }}>
+        {months.map(m => {
+          const rH = (m.received / max) * 100
+          const eH = (m.expected / max) * 100
+          const title = `${m.year}.${String(m.month).padStart(2, '0')}`
+            + (m.received ? ` · 수령 ${fmtKrw(m.received)}` : '')
+            + (m.expected ? ` · 예정 ${fmtKrw(m.expected)}` : '')
+          return (
+            <div key={m.key} title={title}
+              style={{ flex: 1, minWidth: 0, height: '100%',
+                display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+              {eH > 0 && (
+                <div style={{ height: `${eH}%`, background: 'rgba(31,79,211,0.32)',
+                  borderRadius: '2px 2px 0 0' }} />
+              )}
+              {rH > 0 && (
+                <div style={{ height: `${rH}%`, background: '#1F4FD3',
+                  borderRadius: eH > 0 ? 0 : '2px 2px 0 0' }} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* x축 라벨 — 1월(연도)·7월만 표기해 과밀 방지 */}
+      <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
+        {months.map((m, i) => (
+          <div key={m.key} style={{ flex: 1, minWidth: 0, textAlign: 'center',
+            fontSize: 8, fontWeight: 700, color: 'var(--m-text-tertiary)',
+            whiteSpace: 'nowrap', overflow: 'visible' }}>
+            {m.month === 1 ? `'${String(m.year).slice(2)}` : m.month === 7 ? '7' : ''}
+          </div>
+        ))}
+      </div>
+
+      <div className="ko-keep" style={{ fontSize: 10,
+        color: 'var(--m-text-tertiary)', marginTop: 8, lineHeight: 1.55 }}>
+        진한 막대 = 실제 수령, 옅은 막대 = 예정(분기 배당 가정). 이력은 최대 50건 기준이라 종목이 많으면 일부 누락될 수 있습니다.
+      </div>
     </div>
   )
 }

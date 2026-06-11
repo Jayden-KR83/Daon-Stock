@@ -8,6 +8,7 @@ import { runBacktest } from '../api'
  * AllocationTab에 임베드.
  */
 export default function BacktestSection({ allHoldings = [] }) {
+  const [open, setOpen] = useState(false)   // 기본 접힘 — 사용 빈도 낮음·지표 중복 (2026-06-06)
   const [months, setMonths] = useState(12)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -41,15 +42,21 @@ export default function BacktestSection({ allHoldings = [] }) {
 
   return (
     <div className="mono-card" style={{ marginBottom: 12 }}>
-      <div className="mono-section-header" style={{ marginBottom: 6 }}>
+      <div className="mono-section-header"
+        style={{ marginBottom: open ? 6 : 0, cursor: 'pointer' }}
+        onClick={() => setOpen(o => !o)}>
         <div>
           <div className="mono-section-title">백테스트 시뮬레이션</div>
           <div className="mono-section-sub ko-keep">
             현재 보유 비중으로 과거 N개월 보유했다면 어떤 수익이었을지
           </div>
         </div>
+        <span className="mono-pill" style={{ flexShrink: 0, cursor: 'pointer' }}>
+          {open ? '접기 ▲' : '펼치기 ▼'}
+        </span>
       </div>
 
+      {open && (<>
       {/* 기간 선택 */}
       <div className="seg-ctrl" style={{ marginBottom: 10 }}>
         {[
@@ -69,14 +76,7 @@ export default function BacktestSection({ allHoldings = [] }) {
       </div>
 
       <button onClick={run} disabled={loading || allHoldings.length === 0}
-        style={{
-          width: '100%', padding: '10px', borderRadius: 8,
-          background: 'linear-gradient(135deg, var(--clr-info) 0%, var(--clr-ai) 100%)',
-          color: '#fff', border: 'none', fontSize: 12, fontWeight: 800,
-          cursor: (loading || allHoldings.length === 0) ? 'not-allowed' : 'pointer',
-          opacity: (loading || allHoldings.length === 0) ? 0.5 : 1,
-          fontFamily: 'inherit', letterSpacing: '-.01em',
-        }}>
+        className="btn-primary" style={{ fontSize: 12, padding: '10px' }}>
         {loading ? '시뮬레이션 실행 중… (10~30초)' : `${months}개월 시뮬레이션 실행`}
       </button>
 
@@ -109,7 +109,7 @@ export default function BacktestSection({ allHoldings = [] }) {
             </div>
 
             {/* Area 차트 */}
-            <div style={{ background: 'var(--clr-bg)', borderRadius: 10, padding: 8 }}>
+            <div style={{ background: 'var(--clr-bg)', borderRadius: 4, padding: 8 }}>
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={chartData}
                   margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
@@ -160,6 +160,7 @@ export default function BacktestSection({ allHoldings = [] }) {
           </motion.div>
         )}
       </AnimatePresence>
+      </>)}
     </div>
   )
 }

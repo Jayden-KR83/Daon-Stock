@@ -52,7 +52,7 @@ export default function ChangelogModal({ forceOpen = false, onClose }) {
           transition={{ duration: 0.26, ease: [0.22, 0.61, 0.36, 1] }}
           onClick={e => e.stopPropagation()}
           style={{
-            background: 'var(--clr-surface)', borderRadius: 18,
+            background: 'var(--clr-surface)', borderRadius: 4,
             padding: 22, width: '100%', maxWidth: 520,
             maxHeight: '85vh', overflowY: 'auto',
             boxShadow: '0 24px 56px rgba(15,23,42,.28)',
@@ -139,7 +139,7 @@ export default function ChangelogModal({ forceOpen = false, onClose }) {
           <button onClick={close} style={{
             width: '100%', marginTop: 16, padding: '11px',
             background: 'var(--clr-info)', color: '#fff',
-            border: 'none', borderRadius: 10,
+            border: 'none', borderRadius: 4,
             fontSize: 13, fontWeight: 800, cursor: 'pointer',
             fontFamily: 'inherit',
           }}>

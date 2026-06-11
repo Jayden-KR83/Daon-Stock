@@ -104,6 +104,34 @@ function fmtPrice(name, price) {
   return price.toFixed(2)
 }
 
+/* ── 공유 종목 행 — 섹터 드릴 / 거래량 Top10 공통 레이아웃 ──
+   [순위] [로고] [티커/이름] [스파크라인] [현재가/등락률(+보조)] — 좁은 폭에서도 안 잘림 */
+function StockRow({ rank, ticker, name, price, changePct, spark, isUs, subRight, onClick }) {
+  const pos = (changePct || 0) >= 0
+  return (
+    <div className="tt-srow" onClick={onClick}>
+      {rank != null && <span className={`tt-rank ${rank <= 3 ? 'top' : ''}`}>{rank}</span>}
+      <LogoCircle ticker={ticker} size={34} />
+      <div className="tt-srow-info">
+        <div className="tt-srow-ticker">{ticker}</div>
+        <div className="tt-srow-name">{name}</div>
+      </div>
+      <div className="tt-srow-spark">
+        <Sparkline values={spark || []} positive={pos} width={50} height={22} />
+      </div>
+      <div className="tt-srow-right">
+        <div className="tt-srow-price">
+          {isUs ? `$${(price || 0).toFixed(2)}` : `₩${Math.round(price || 0).toLocaleString()}`}
+        </div>
+        <div className={`tt-srow-pct ${pos ? 'pos' : 'neg'}`}>
+          {pos ? '+' : ''}{(changePct || 0).toFixed(2)}%
+        </div>
+        {subRight && <div className="tt-srow-sub">{subRight}</div>}
+      </div>
+    </div>
+  )
+}
+
 /* ════════════════════════════════════════════
    MAIN COMPONENT
    ════════════════════════════════════════════ */
@@ -295,26 +323,12 @@ export default function TrendsTab() {
             ) : (
               <div className="tt-drill-list">
                 {sectorStocks.map((s, i) => (
-                  <div key={s.ticker} className="tt-drill-row"
-                    onClick={() => setChartTicker(s.ticker)}>
-                    <span className={`tt-rank ${i<3?'top':''}`}>{i+1}</span>
-                    <LogoCircle ticker={s.ticker} size={34} />
-                    <div className="tt-drill-info">
-                      <div className="tt-drill-ticker">{s.ticker}</div>
-                      <div className="tt-drill-name">{s.name}</div>
-                    </div>
-                    {isUs && s.market_cap > 0 && (
-                      <div className="tt-mktcap">{fmtMktCap(s.market_cap)}</div>
-                    )}
-                    <div className="tt-drill-price">
-                      <div className="tt-dp-val">
-                        {isUs ? `$${s.price.toFixed(2)}` : `₩${Math.round(s.price).toLocaleString()}`}
-                      </div>
-                      <div className={`tt-dp-pct ${s.change_pct>=0?'pos':'neg'}`}>
-                        {s.change_pct>=0?'+':''}{s.change_pct.toFixed(2)}%
-                      </div>
-                    </div>
-                  </div>
+                  <StockRow key={s.ticker} rank={i + 1}
+                    ticker={s.ticker} name={s.name}
+                    price={s.price} changePct={s.change_pct} spark={s.spark}
+                    isUs={isUs}
+                    subRight={isUs && s.market_cap > 0 ? fmtMktCap(s.market_cap) : null}
+                    onClick={() => setChartTicker(s.ticker)} />
                 ))}
               </div>
             )}
@@ -335,57 +349,24 @@ export default function TrendsTab() {
           </div>
         </div>
 
-        {/* 컬럼 헤더 */}
-        <div className="tt-list-header">
-          <span>종목</span>
-          <span>현재가</span>
-          <span className="tt-col-trend">트렌드</span>
-          <span>등락률</span>
-          <span>거래량</span>
-        </div>
-
         {/* US 목록 */}
-        {activeList === 'us' && usActive.slice(0, 10).map(s => (
-          <div key={s.ticker} className="tt-asset-row"
-            onClick={() => setChartTicker(s.ticker)}>
-            <div className="tt-asset-left">
-              <LogoCircle ticker={s.ticker} size={36} />
-              <div>
-                <div className="tt-asset-ticker">{s.ticker}</div>
-                <div className="tt-asset-name">{s.name}</div>
-              </div>
-            </div>
-            <div className="tt-asset-price">${(s.price||0).toFixed(2)}</div>
-            <div className="tt-col-trend">
-              <Sparkline values={s.spark || []} positive={s.change_pct>=0} width={52} height={22} />
-            </div>
-            <div className={`tt-asset-pct ${s.change_pct>=0?'pos':'neg'}`}>
-              {s.change_pct>=0?'+':''}{(s.change_pct||0).toFixed(2)}%
-            </div>
-            <div className="tt-asset-vol">{fmtVol(s.volume)}</div>
-          </div>
+        {activeList === 'us' && usActive.slice(0, 10).map((s, i) => (
+          <StockRow key={s.ticker} rank={i + 1}
+            ticker={s.ticker} name={s.name}
+            price={s.price} changePct={s.change_pct} spark={s.spark}
+            isUs={true}
+            subRight={s.volume ? `거래량 ${fmtVol(s.volume)}` : null}
+            onClick={() => setChartTicker(s.ticker)} />
         ))}
 
         {/* KR 목록 */}
-        {activeList === 'kr' && krItems.slice(0, 10).map(s => (
-          <div key={s.ticker} className="tt-asset-row"
-            onClick={() => setChartTicker(s.ticker)}>
-            <div className="tt-asset-left">
-              <LogoCircle ticker={s.ticker} size={36} />
-              <div>
-                <div className="tt-asset-ticker">{s.name}</div>
-                <div className="tt-asset-name">{s.ticker} · {s.market}</div>
-              </div>
-            </div>
-            <div className="tt-asset-price">₩{(s.price||0).toLocaleString()}</div>
-            <div className="tt-col-trend">
-              <Sparkline values={s.spark || []} positive={s.change_pct>=0} width={52} height={22} />
-            </div>
-            <div className={`tt-asset-pct ${s.change_pct>=0?'pos':'neg'}`}>
-              {s.change_pct>=0?'+':''}{(s.change_pct||0).toFixed(2)}%
-            </div>
-            <div className="tt-asset-vol">{fmtVol(s.volume)}</div>
-          </div>
+        {activeList === 'kr' && krItems.slice(0, 10).map((s, i) => (
+          <StockRow key={s.ticker} rank={i + 1}
+            ticker={s.ticker} name={s.name}
+            price={s.price} changePct={s.change_pct} spark={s.spark}
+            isUs={false}
+            subRight={s.volume ? `거래량 ${fmtVol(s.volume)}` : null}
+            onClick={() => setChartTicker(s.ticker)} />
         ))}
       </div>
 

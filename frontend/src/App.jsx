@@ -1,7 +1,8 @@
-import React, { useEffect, Suspense, lazy } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import React, { useEffect, useRef, Suspense, lazy } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { useStore } from './store'
+import { useSwipeNav } from './useSwipeNav'
 import { getUsdKrw, getApiKeyStatus, authMe, getAdminStatus, getAccounts, getPortfolio, getPricesBatch, captureNetWorthSnapshot } from './api'
 import MarketBar from './components/MarketBar'
 import BottomNav from './components/BottomNav'
@@ -10,6 +11,7 @@ import SideNavBar from './components/SideNavBar'
 import RightPanel from './components/RightPanel'
 import InstallPrompt from './components/InstallPrompt'
 import NotificationsBell from './components/NotificationsBell'
+import ErrorBoundary from './components/ErrorBoundary'
 import HoldingsTab from './tabs/HoldingsTab'        // 첫 진입 즉시 필요 — eager
 import LoginPage from './tabs/LoginPage'            // 인증 게이트 — eager
 import KeyboardShortcuts from './components/KeyboardShortcuts'
@@ -44,14 +46,27 @@ function TabLoading() {
 
 export default function App() {
   const activeTab          = useStore(s => s.activeTab)
+  const setActiveTab       = useStore(s => s.setActiveTab)
   const setUsdKrw          = useStore(s => s.setUsdKrw)
   const setHasAnthropicKey = useStore(s => s.setHasAnthropicKey)
   const appMode            = useStore(s => s.appMode)
   const setAppMode         = useStore(s => s.setAppMode)
   const authToken          = useStore(s => s.authToken)
+  const currentUser        = useStore(s => s.currentUser)
   const setAuth            = useStore(s => s.setAuth)
   const setAdminStatus     = useStore(s => s.setAdminStatus)
   const theme              = useStore(s => s.theme)
+  const queryClient        = useQueryClient()
+
+  // 🔒 사용자 전환(로그인/로그아웃/데모) 시 이전 세션의 React Query 캐시 전면 제거.
+  // 누락 시 로그아웃 후 데모로 진입해도 직전 사용자의 보유/평가액이 그대로 노출됨(데이터 유출).
+  const prevTokenRef = React.useRef(authToken)
+  useEffect(() => {
+    if (prevTokenRef.current !== authToken) {
+      queryClient.clear()
+      prevTokenRef.current = authToken
+    }
+  }, [authToken])
 
   // 모바일 뷰포트 감지 — 768px 미만이면 웹 모드 설정과 무관하게 앱 레이아웃으로 강제 전환
   const [isMobile, setIsMobile] = React.useState(
@@ -180,7 +195,16 @@ export default function App() {
   // 모바일에서는 사용자 설정과 무관하게 항상 앱 레이아웃 사용 (사이드바·우측패널 압축 방지)
   const isApp = appMode === 'app' || isMobile
 
+  // 앱/모바일 좌우 스와이프 탭 전환 — BottomNav 순서 미러링 (admin은 여정·관리자 포함)
+  const appMainRef = useRef(null)
+  const isAdminUser = !!currentUser?.is_admin
+  const swipeOrder = isAdminUser ? [0,1,2,3,4,5,6,7,8,9] : [0,1,2,3,4,5,6,7]
+  useSwipeNav(appMainRef, {
+    order: swipeOrder, active: activeTab, onChange: setActiveTab, enabled: isApp,
+  })
+
   /* 탭 전환 시 페이드+슬라이드 모션. mode="wait"로 이전 탭 exit 후 새 탭 enter.
+     ErrorBoundary로 한 탭 crash 시 흰화면 대신 명확한 안내 표시.
      Suspense로 lazy 청크 로딩 가림 (첫 진입만 짧은 LOADING) */
   const tabBody = (
     <AnimatePresence mode="wait" initial={false}>
@@ -192,9 +216,11 @@ export default function App() {
         transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
         style={{ minHeight: '100%' }}
       >
-        <Suspense fallback={<TabLoading />}>
-          <TabComponent />
-        </Suspense>
+        <ErrorBoundary name={`Tab#${activeTab}`} key={`eb-${activeTab}`}>
+          <Suspense fallback={<TabLoading />}>
+            <TabComponent />
+          </Suspense>
+        </ErrorBoundary>
       </motion.div>
     </AnimatePresence>
   )
@@ -243,7 +269,7 @@ export default function App() {
         )}
       </div>
       <MarketBar />
-      <main className="app-main">
+      <main className="app-main" ref={appMainRef}>
         {tabBody}
       </main>
       <BottomNav />

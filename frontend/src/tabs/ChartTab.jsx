@@ -496,7 +496,7 @@ export default function ChartTab() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTicker, portfolioReady])
 
-  const { data: stockData, isLoading, isError, refetch } = useQuery({
+  const { data: stockData, isLoading, isError, error: stockError, refetch } = useQuery({
     queryKey: ['stock', activeTicker],
     queryFn: () => getStock(activeTicker),
     enabled: !!activeTicker,
@@ -511,14 +511,15 @@ export default function ChartTab() {
   })
   // Valuation / 동종업계 — 종목 진입 즉시 자동 fetch (항상 펼침으로 변경됨)
   const fundReady = !!activeTicker && !/^\^/.test(activeTicker)
-    && !activeTicker.endsWith('=X') && !activeTicker.endsWith('-USD') && /^[A-Z]/.test(activeTicker)
-  const { data: fundamentals } = useQuery({
+    && !activeTicker.endsWith('=X') && !activeTicker.endsWith('-USD')
+    && (/^[A-Z]/.test(activeTicker) || /^A?\d{6}$/.test(activeTicker))   // US + KR 모두
+  const { data: fundamentals, isLoading: fundLoading } = useQuery({
     queryKey: ['fundamentals', activeTicker],
     queryFn: () => getFundamentals(activeTicker),
     enabled: fundReady,
     staleTime: 3_600_000, retry: 0,
   })
-  const { data: peers = [] } = useQuery({
+  const { data: peers = [], isLoading: peersLoading } = useQuery({
     queryKey: ['peers', activeTicker],
     queryFn: () => getPeers(activeTicker),
     enabled: fundReady,
@@ -650,7 +651,7 @@ export default function ChartTab() {
               <button key={h.ticker} onClick={() => selectTicker(h.ticker)}
                 title={`${h.ticker}${h.name ? ` · ${h.name}` : ''}`}
                 style={{
-                  flexShrink: 0, padding: '4px 10px', borderRadius: 20, border: '1px solid',
+                  flexShrink: 0, padding: '4px 10px', borderRadius: 4, border: '1px solid',
                   borderColor: activeTicker === h.ticker ? 'var(--clr-info)' : 'var(--clr-border-md)',
                   background: activeTicker === h.ticker ? 'var(--clr-info-bg)' : 'var(--clr-surface)',
                   color: activeTicker === h.ticker ? 'var(--clr-info-dark)' : 'var(--clr-text-sub)',
@@ -664,23 +665,7 @@ export default function ChartTab() {
 
       {isLoading && <div className="spinner" style={{ marginTop: 40 }} />}
       {isError && !isLoading && (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--clr-text-muted)' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--clr-text-mid)', marginBottom: 6 }}>
-            데이터를 불러올 수 없습니다
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--clr-text-muted)', marginBottom: 16 }}>
-            서버 응답 지연 또는 지원되지 않는 종목일 수 있습니다
-          </div>
-          <button onClick={() => refetch()}
-            style={{
-              padding: '8px 20px', borderRadius: 6, border: '1px solid var(--clr-border-md)',
-              background: 'var(--clr-bg)', color: 'var(--clr-text-mid)', fontSize: 13, fontWeight: 700,
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}>
-            재시도
-          </button>
-        </div>
+        <StockErrorPanel ticker={activeTicker} error={stockError} onRetry={() => refetch()} />
       )}
       {!activeTicker && !isLoading && (
         <div className="empty-state">
@@ -691,6 +676,20 @@ export default function ChartTab() {
 
       {stockData && !isError && (
         <div onClick={e => e.stopPropagation()}>
+          {/* stale 데이터 사용 중 안내 — 데이터 신뢰성 명시 */}
+          {stockData._data_status === 'stale' && stockData._data_message && (
+            <div className="ko-keep" style={{
+              padding: '8px 12px', marginBottom: 10,
+              background: 'var(--m-surface-variant)',
+              border: '1px solid var(--m-outline-variant)', borderRadius: 4,
+              fontSize: 11.5, color: 'var(--m-text-secondary)',
+              lineHeight: 1.6,
+            }}>
+              <strong style={{ color: '#B45309', fontWeight: 800,
+                marginRight: 6 }}>실시간 X</strong>
+              {stockData._data_message}
+            </div>
+          )}
           {/* Apple Stocks 풍 hero — 큰 가격 + 변동 + 미니 sparkline + 일중 차트 */}
           <AppleStocksHero
             stockData={stockData}
@@ -885,20 +884,25 @@ export default function ChartTab() {
               </div>
             )}
 
-            {/* 캐시된 분석이 있으면 → 마지막 분석 시각 + 업데이트 버튼.
-                없으면 → 일반 "심층 분석" 버튼. */}
+            {/* 캐시된 분석 있으면 → 좌측 색띠 + 시각 + 업데이트 버튼 (음영 없음).
+                없으면 → 일반 "심층 분석" 버튼. 사용자가 버튼 누르기 전에
+                마지막 분석 결과를 우선 볼 수 있음. */}
             {aiResult && !aiLoading ? (
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '10px 12px', background: 'var(--clr-info-bg)',
-                border: '1px solid var(--clr-info-border)', borderRadius: 8,
+                padding: '8px 12px',
+                background: 'var(--m-surface-variant)',
+                border: '1px solid var(--m-outline-variant)', borderRadius: 4,
                 gap: 10, flexWrap: 'wrap',
               }}>
-                <div style={{ fontSize: 11, color: 'var(--clr-info-dark)', lineHeight: 1.5,
-                  minWidth: 0, flex: 1 }}>
-                  <span style={{ fontWeight: 700 }}>📋 저장된 분석</span>
+                <div style={{ fontSize: 11.5, color: 'var(--m-text-secondary)',
+                  lineHeight: 1.5, minWidth: 0, flex: 1 }}>
+                  <span style={{ fontWeight: 800, color: 'var(--m-text)' }}>
+                    저장된 분석
+                  </span>
                   {aiComputedAt > 0 && (
-                    <span style={{ marginLeft: 6, opacity: 0.85 }}>
+                    <span style={{ marginLeft: 6,
+                      color: 'var(--m-text-tertiary)' }}>
                       · {formatRelativeTime(aiComputedAt)}
                     </span>
                   )}
@@ -907,28 +911,26 @@ export default function ChartTab() {
                   onClick={() => handleAiAnalyze(true)}
                   disabled={aiLoading || !aiEnabled}
                   style={{
-                    padding: '6px 14px', borderRadius: 7,
-                    border: '1px solid var(--clr-info)',
-                    background: 'var(--clr-surface)',
-                    color: 'var(--clr-info-dark)',
-                    fontSize: 12, fontWeight: 700,
+                    padding: '6px 12px', borderRadius: 2,
+                    border: '1px solid var(--m-outline-variant)',
+                    background: 'transparent',
+                    color: 'var(--m-text-secondary)',
+                    fontSize: 11, fontWeight: 700,
                     cursor: (aiLoading || !aiEnabled) ? 'not-allowed' : 'pointer',
                     opacity: (aiLoading || !aiEnabled) ? 0.55 : 1,
                     fontFamily: 'inherit', whiteSpace: 'nowrap',
                   }}>
-                  ↻ 최신 정보로 업데이트
+                  최신 정보로 업데이트
                 </button>
               </div>
             ) : (
-              <button className="btn-primary" onClick={() => handleAiAnalyze(false)}
+              <button onClick={() => handleAiAnalyze(false)}
                 disabled={aiLoading || !aiEnabled}
-                style={{ width: '100%',
-                  opacity: (aiLoading || !aiEnabled) ? 0.55 : 1,
-                  cursor: (aiLoading || !aiEnabled) ? 'not-allowed' : 'pointer' }}>
+                className="btn-primary" style={{ fontSize: 13 }}>
                 {aiLoading
-                  ? '🌐 실시간 조사 중... (30~90초)'
+                  ? '실시간 조사 중… (30~90초)'
                   : !aiEnabled
-                    ? '🔒 AI 분석 권한 필요'
+                    ? 'AI 분석 권한 필요'
                     : `${displayName(activeTicker, stockData?.short_name)} 심층 분석`}
               </button>
             )}
@@ -954,25 +956,31 @@ export default function ChartTab() {
             />
           )}
 
-          {/* Valuation & Financial Highlights — 개별 주식만, 항상 펼침 */}
-          {isUs && !isIndex && !isForex && !isBond && (
+          {/* Valuation & Financial Highlights — 개별 주식(US+KR), 항상 펼침 */}
+          {(isUs || isKr) && !isIndex && !isForex && !isBond && (
             <div className="chart-card" style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)', marginBottom: 8 }}>
                 Valuation & Financials
               </div>
               {fundamentals && Object.keys(fundamentals).length > 0
-                ? <FundamentalsView data={fundamentals} />
-                : <div className="spinner" />}
+                ? <FundamentalsView data={fundamentals} isKr={isKr} />
+                : fundLoading
+                  ? <div className="spinner" />
+                  : <div style={{ fontSize: 12, color: 'var(--clr-text-muted)', padding: '6px 0' }}>데이터 없음</div>}
             </div>
           )}
 
-          {/* 동종업계 비교 — 개별 주식만, 항상 펼침 */}
-          {isUs && !isIndex && !isForex && !isBond && (
+          {/* 동종업계 비교 — 개별 주식(US+KR), 항상 펼침 */}
+          {(isUs || isKr) && !isIndex && !isForex && !isBond && (
             <div className="chart-card" style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)', marginBottom: 8 }}>
                 동종업계 비교
               </div>
-              {peers.length > 0 ? <PeersTable peers={peers} /> : <div className="spinner" />}
+              {peers.length > 0
+                ? <PeersTable peers={peers} />
+                : peersLoading
+                  ? <div className="spinner" />
+                  : <div style={{ fontSize: 12, color: 'var(--clr-text-muted)', padding: '6px 0' }}>동일업종 비교 데이터 없음</div>}
             </div>
           )}
 
@@ -999,6 +1007,14 @@ export default function ChartTab() {
   )
 }
 
+/* 문장이 끝날 때(. ? !)마다 줄바꿈 삽입 — 가독성 개선.
+   숫자 소수점($613.8M, 47.5%)·약어(U.S.)는 깨지 않도록 마침표 앞이 숫자면 건너뜀.
+   whiteSpace:'pre-wrap' 컨테이너에서 \n 이 실제 줄바꿈으로 렌더링됨. */
+function breakSentences(text) {
+  if (typeof text !== 'string') return text
+  return text.replace(/([^\d\s])([.?!])\s+/g, '$1$2\n').trim()
+}
+
 /* ── AI 분석 결과 (확장 스키마: 회사 동향·실적·호재·애널리스트·출처) ── */
 function AiStockResult({ data, isUs, cur }) {
   const recColor = data.recommendation === '매수' ? '#16A34A'
@@ -1007,6 +1023,9 @@ function AiStockResult({ data, isUs, cur }) {
   const fmtTarget = (v) => isUs
     ? `$${v.toFixed(2)}`
     : `₩${Math.round(v).toLocaleString()}`
+  // 모든 산문 섹션 공통 본문 스타일 — 통일감
+  const proseStyle = { fontSize: 12.5, color: 'var(--clr-text)', lineHeight: 1.7,
+    margin: 0, whiteSpace: 'pre-wrap' }
   return (
     <motion.div
       style={{ marginTop: 12 }}
@@ -1037,8 +1056,9 @@ function AiStockResult({ data, isUs, cur }) {
           </span>
         )}
         <span style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginLeft: 'auto',
-          background: 'var(--clr-bg)', padding: '2px 8px', borderRadius: 6 }}>
-          🌐 웹 검색 기반 · Claude Sonnet 4.6
+          background: 'var(--clr-bg)', padding: '2px 8px', borderRadius: 6,
+          letterSpacing: '.02em' }}>
+          웹 검색 기반 · Claude Sonnet 4.6
         </span>
       </motion.div>
 
@@ -1047,116 +1067,94 @@ function AiStockResult({ data, isUs, cur }) {
         <motion.p
           variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
           transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-          style={{ fontSize: 13, color: 'var(--clr-text)', lineHeight: 1.7, marginBottom: 12 }}
+          style={{ fontSize: 13, color: 'var(--clr-text)', lineHeight: 1.7, marginBottom: 12,
+            whiteSpace: 'pre-wrap' }}
         >
-          {data.summary}
+          {breakSentences(data.summary)}
         </motion.p>
       )}
 
-      {/* 회사 최근 동향 / 신사업 / 미래 */}
+      {/* 회사 동향 · 신사업 · 미래 전략 */}
       {data.company_overview && (
-        <Section icon="🏢" title="회사 동향 · 신사업 · 미래 전략" color="var(--clr-info-dark)">
-          <p style={{ fontSize: 12.5, color: 'var(--clr-text)', lineHeight: 1.75, margin: 0,
-            whiteSpace: 'pre-wrap' }}>{data.company_overview}</p>
+        <Section title="회사 동향 · 신사업 · 미래 전략">
+          <p style={proseStyle}>{breakSentences(data.company_overview)}</p>
         </Section>
       )}
 
-      {/* 분기 실적 / CEO·IR */}
+      {/* 분기 실적 · CEO 발언 · 가이던스 */}
       {data.earnings_ir && (
-        <Section icon="📊" title="분기 실적 · CEO 발언 · 가이던스" color="var(--clr-pos-darker)">
-          <p style={{ fontSize: 12.5, color: 'var(--clr-text)', lineHeight: 1.75, margin: 0,
-            whiteSpace: 'pre-wrap' }}>{data.earnings_ir}</p>
+        <Section title="분기 실적 · CEO 발언 · 가이던스">
+          <p style={proseStyle}>{breakSentences(data.earnings_ir)}</p>
         </Section>
       )}
 
-      {/* 단기·중기 호재 (정량) */}
+      {/* 투자 촉매 (단기·중기) */}
       {((data.catalysts_short?.length || 0) + (data.catalysts_medium?.length || 0)) > 0 && (
-        <Section icon="🚀" title="단기·중기 호재 (정량 기반)" color="var(--clr-warn-dark)">
+        <Section title="투자 촉매 (정량 기반)">
           {data.catalysts_short?.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--clr-pos-dark)',
-                marginBottom: 4, letterSpacing: '.04em' }}>● 단기 (1-3M)</div>
-              {data.catalysts_short.map((c, i) => (
-                <div key={i} style={{ fontSize: 12, color: 'var(--clr-text)',
-                  padding: '3px 0 3px 14px', lineHeight: 1.55 }}>· {c}</div>
-              ))}
+            <div style={{ marginBottom: data.catalysts_medium?.length ? 11 : 0 }}>
+              <GroupLabel>단기 · 1–3개월</GroupLabel>
+              {data.catalysts_short.map((c, i) => <Bullet key={i}>{c}</Bullet>)}
             </div>
           )}
           {data.catalysts_medium?.length > 0 && (
             <div>
-              <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--clr-info-dark)',
-                marginBottom: 4, letterSpacing: '.04em' }}>● 중기 (3-12M)</div>
-              {data.catalysts_medium.map((c, i) => (
-                <div key={i} style={{ fontSize: 12, color: 'var(--clr-text)',
-                  padding: '3px 0 3px 14px', lineHeight: 1.55 }}>· {c}</div>
-              ))}
+              <GroupLabel>중기 · 3–12개월</GroupLabel>
+              {data.catalysts_medium.map((c, i) => <Bullet key={i}>{c}</Bullet>)}
             </div>
           )}
         </Section>
       )}
 
-      {/* 수주 잔고 / 백로그 */}
+      {/* 수주 잔고 · 백로그 */}
       {data.backlog && data.backlog !== '확인 필요' && data.backlog.trim().length > 0 && (
-        <Section icon="📦" title="수주 잔고 · 백로그" color="var(--clr-text-mid)">
-          <p style={{ fontSize: 12.5, color: 'var(--clr-text)', lineHeight: 1.7, margin: 0,
-            whiteSpace: 'pre-wrap' }}>{data.backlog}</p>
+        <Section title="수주 잔고 · 백로그">
+          <p style={proseStyle}>{breakSentences(data.backlog)}</p>
         </Section>
       )}
 
-      {/* 애널리스트 뷰 */}
+      {/* 애널리스트 컨센서스 */}
       {data.analyst_views && (
-        <Section icon="📈" title="애널리스트 컨센서스" color="var(--clr-ai)">
-          <p style={{ fontSize: 12.5, color: 'var(--clr-text)', lineHeight: 1.7, margin: 0,
-            whiteSpace: 'pre-wrap' }}>{data.analyst_views}</p>
+        <Section title="애널리스트 컨센서스">
+          <p style={proseStyle}>{breakSentences(data.analyst_views)}</p>
         </Section>
       )}
 
-      {/* 강세 / 리스크 */}
+      {/* 강세 포인트 */}
       {data.bull?.length > 0 && (
-        <motion.div
-          variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
-          transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-          style={{ marginBottom: 10 }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--clr-pos-dark)',
-            marginBottom: 6 }}>▲ 강세 포인트</div>
+        <Section title="강세 포인트" barColor="var(--clr-pos-dark)">
           {data.bull.map((b, i) => (
-            <div key={i} style={{ fontSize: 12, color: 'var(--clr-text)',
-              padding: '2px 0 2px 12px', lineHeight: 1.55 }}>· {b}</div>
+            <Bullet key={i} markerColor="var(--clr-pos-dark)">{b}</Bullet>
           ))}
-        </motion.div>
-      )}
-      {data.bear?.length > 0 && (
-        <motion.div
-          variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
-          transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-          style={{ marginBottom: 10 }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--clr-neg-dark)',
-            marginBottom: 6 }}>▼ 리스크</div>
-          {data.bear.map((b, i) => (
-            <div key={i} style={{ fontSize: 12, color: 'var(--clr-text)',
-              padding: '2px 0 2px 12px', lineHeight: 1.55 }}>· {b}</div>
-          ))}
-        </motion.div>
+        </Section>
       )}
 
-      {/* 최종 의견 */}
+      {/* 리스크 */}
+      {data.bear?.length > 0 && (
+        <Section title="리스크" barColor="var(--clr-neg-dark)">
+          {data.bear.map((b, i) => (
+            <Bullet key={i} markerColor="var(--clr-neg-dark)">{b}</Bullet>
+          ))}
+        </Section>
+      )}
+
+      {/* 최종 의견 — Insight Banner (좌측 색띠 = 추천 색) */}
       {data.verdict && (
         <motion.div
           variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
           transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-          style={{ padding: '10px 12px', background: 'var(--clr-info-bg)',
-            borderLeft: '3px solid var(--clr-info)', borderRadius: 6, fontSize: 12,
-            color: 'var(--clr-info-dark)', lineHeight: 1.65, marginBottom: 10 }}
+          style={{ padding: '11px 14px', background: 'var(--m-surface-variant)',
+            border: '1px solid var(--m-outline-variant)', borderRadius: 4, marginBottom: 8 }}
         >
-          💡 {data.verdict}
+          <div style={{ fontSize: 10, fontWeight: 800, color: recColor,
+            letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: 5 }}>투자 의견</div>
+          <p style={{ ...proseStyle, lineHeight: 1.65 }}>{breakSentences(data.verdict)}</p>
         </motion.div>
       )}
 
       {/* 출처 — 웹 검색 결과 (클릭하면 새 탭 열림) */}
       {sources.length > 0 && (
-        <Section icon="🔗" title={`출처 · 보고서 (${sources.length})`} color="var(--clr-text-sub)" defaultOpen={false}>
+        <Section title={`출처 · 보고서 (${sources.length})`} defaultOpen={false}>
           {sources.map((s, i) => (
             <a key={i} href={s.url} target="_blank" rel="noreferrer"
               style={{
@@ -1167,7 +1165,7 @@ function AiStockResult({ data, isUs, cur }) {
               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--clr-bg)' }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
             >
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-info-dark)',
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-text)',
                 lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis',
                 display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                 {s.title || s.url}
@@ -1186,31 +1184,50 @@ function AiStockResult({ data, isUs, cur }) {
 }
 
 /* AI 분석 결과 — 접고 펼치는 섹션 카드. 부모 stagger 변형을 따른다. */
-function Section({ icon, title, color, children, defaultOpen = true }) {
+/* 리서치 섹션 — 좌측 3px 색띠 + 타이틀 + 접기. 이모지 없음(디자인 시스템 준수).
+   색띠 색은 의미만 전달(정보=중립, 강세=pos, 리스크=neg). */
+function Section({ title, barColor = 'var(--clr-text-sub)', children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
     <motion.div
       variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
       transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
       style={{
-      background: 'var(--clr-bg)', borderRadius: 8, padding: '10px 12px',
-      marginBottom: 10, border: '1px solid var(--clr-border)',
+      background: 'var(--clr-surface)', borderRadius: 4, padding: '11px 14px',
+      marginBottom: 8, border: '1px solid var(--m-outline-variant)',
     }}>
       <button onClick={() => setOpen(o => !o)}
         style={{
-          width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
           background: 'none', border: 'none', cursor: 'pointer', padding: 0,
           fontFamily: 'inherit', textAlign: 'left',
         }}>
-        <span className="emoji-mute" style={{ fontSize: 13 }}>{icon}</span>
-        <span style={{ fontSize: 12, fontWeight: 800, color, letterSpacing: '-.01em' }}>
-          {title}
-        </span>
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--clr-text-muted)',
+        <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--clr-text)',
+          letterSpacing: '.02em' }}>{title}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--clr-text-muted)',
           transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▼</span>
       </button>
-      {open && <div style={{ marginTop: 8 }}>{children}</div>}
+      {open && <div style={{ marginTop: 9 }}>{children}</div>}
     </motion.div>
+  )
+}
+
+/* 통일 불릿 — 행잉 인덴트(내어쓰기): 줄바꿈 시 본문이 마커가 아닌 텍스트 기준 정렬 */
+function Bullet({ children, markerColor = 'var(--clr-text-tertiary)' }) {
+  return (
+    <div style={{ display: 'flex', gap: 7, padding: '3px 0', fontSize: 12.5,
+      lineHeight: 1.62, color: 'var(--clr-text)' }}>
+      <span style={{ flexShrink: 0, color: markerColor, fontWeight: 700 }}>–</span>
+      <span style={{ flex: 1 }}>{children}</span>
+    </div>
+  )
+}
+
+/* 그룹 소제목 (단기/중기) — caps label, 모든 그룹 동일 */
+function GroupLabel({ children }) {
+  return (
+    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--clr-text-secondary)',
+      letterSpacing: '.07em', textTransform: 'uppercase', margin: '0 0 5px' }}>{children}</div>
   )
 }
 
@@ -1318,10 +1335,15 @@ function MetricRow({ label, value }) {
   )
 }
 
-function FundamentalsView({ data }) {
+function FundamentalsView({ data, isKr = false }) {
   function fmtB(v) {
     if (!v) return '—'
     const a = Math.abs(v)
+    if (isKr) {   // 원화 — 조/억 단위
+      if (a >= 1e12) return `₩${(v/1e12).toFixed(2)}조`
+      if (a >= 1e8)  return `₩${(v/1e8).toFixed(0)}억`
+      return `₩${v.toLocaleString()}`
+    }
     if (a >= 1e12) return `$${(v/1e12).toFixed(2)}T`
     if (a >= 1e9)  return `$${(v/1e9).toFixed(2)}B`
     if (a >= 1e6)  return `$${(v/1e6).toFixed(2)}M`
@@ -1329,6 +1351,9 @@ function FundamentalsView({ data }) {
   }
   const n = (v, s='') => v != null ? `${v}${s}` : '—'
   const p = v => v != null ? `${v.toFixed(2)}%` : '—'
+  const eps = data.diluted_eps != null
+    ? (isKr ? `₩${Math.round(data.diluted_eps).toLocaleString()}` : data.diluted_eps.toFixed(2))
+    : '—'
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <div>
@@ -1355,7 +1380,7 @@ function FundamentalsView({ data }) {
           ['ROE (ttm)',     p(data.roe)],
           ['Revenue (ttm)', fmtB(data.revenue)],
           ['Net Income',    fmtB(data.net_income)],
-          ['EPS (ttm)',     n(data.diluted_eps?.toFixed(2))],
+          ['EPS (ttm)',     eps],
           ['Total Cash',    fmtB(data.total_cash)],
           ['D/E (mrq)',     n(data.debt_to_equity?.toFixed(2))],
           ['Free CF (ttm)', fmtB(data.free_cash_flow)],
@@ -1374,14 +1399,15 @@ function PeersTable({ peers }) {
     return `${(v/1e6).toFixed(0)}M`
   }
   const cols = ['티커','종목명','시가총액','P/E','EPS','Forward P/E','섹터']
+  const NUM_COLS = new Set(['시가총액','P/E','EPS','Forward P/E'])
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ borderBottom: '2px solid var(--clr-border-md)' }}>
             {cols.map(h => (
-              <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontSize: 11,
-                fontWeight: 700, color: 'var(--clr-text-sub)', whiteSpace: 'nowrap',
+              <th key={h} style={{ padding: '6px 8px', textAlign: NUM_COLS.has(h) ? 'right' : 'left',
+                fontSize: 11, fontWeight: 700, color: 'var(--clr-text-sub)', whiteSpace: 'nowrap',
                 cursor: PEER_COL_TIPS[h] ? 'help' : 'default',
                 borderBottom: PEER_COL_TIPS[h] ? '1px dotted #CBD5E1' : 'none' }}
                 title={PEER_COL_TIPS[h] || ''}>{h}</th>
@@ -1392,14 +1418,14 @@ function PeersTable({ peers }) {
           {peers.map((p, i) => (
             <tr key={p.ticker} style={{ borderBottom: '1px solid var(--clr-border)',
               background: i === 0 ? '#F0F9FF' : 'transparent' }}>
-              <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--clr-info-dark)' }}>{p.ticker}</td>
+              <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--clr-info-dark)', whiteSpace: 'nowrap' }}>{p.ticker}</td>
               <td style={{ padding: '7px 8px', maxWidth: 120, overflow: 'hidden',
                 textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</td>
-              <td style={{ padding: '7px 8px', fontWeight: 600 }}>{fmtMC(p.market_cap)}</td>
-              <td style={{ padding: '7px 8px' }}>{p.pe_ratio?.toFixed(2) ?? '—'}</td>
-              <td style={{ padding: '7px 8px' }}>{p.eps?.toFixed(2) ?? '—'}</td>
-              <td style={{ padding: '7px 8px' }}>{p.forward_pe?.toFixed(2) ?? '—'}</td>
-              <td style={{ padding: '7px 8px', color: 'var(--clr-text-muted)', fontSize: 11 }}>{p.sector || '—'}</td>
+              <td style={{ padding: '7px 8px', fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtMC(p.market_cap)}</td>
+              <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p.pe_ratio?.toFixed(2) ?? '—'}</td>
+              <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p.eps?.toFixed(2) ?? '—'}</td>
+              <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p.forward_pe?.toFixed(2) ?? '—'}</td>
+              <td style={{ padding: '7px 8px', color: 'var(--clr-text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{p.sector || '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -1834,7 +1860,7 @@ function AppleStocksHero({
     <div style={{
       position: 'relative', overflow: 'hidden',
       background: 'var(--m-surface)',
-      borderRadius: 10, padding: '18px 18px 16px',
+      borderRadius: 4, padding: '18px 18px 16px',
       marginBottom: 14,
       border: '1px solid var(--m-outline-variant)',
       // 변동률 표시는 우측 큰 색 chip으로만 — 배경 그라데이션 제거
@@ -1903,7 +1929,7 @@ function AppleStocksHero({
         </div>
         <div style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
-          padding: '6px 12px', borderRadius: 10,
+          padding: '6px 12px', borderRadius: 4,
           background: accent, color: '#fff',
           fontSize: 13, fontWeight: 800,
           fontVariantNumeric: 'tabular-nums',
@@ -1914,6 +1940,111 @@ function AppleStocksHero({
           )}
           <span style={{ opacity: 0.9 }}>· {up ? '+' : ''}{(chgPct ?? 0).toFixed(2)}%</span>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* 종목 조회 실패 시 사유별 명확한 안내 — 사용자가 "왜 안 뜨는지" 즉시 알 수 있도록.
+   backend는 detail에 { error_code, message, hint, sources_tried } 구조화 반환. */
+function StockErrorPanel({ ticker, error, onRetry }) {
+  // axios error → response.data.detail (FastAPI HTTPException detail 구조)
+  const detail = error?.response?.data?.detail
+  const httpStatus = error?.response?.status
+  const isNetworkError = !error?.response   // request 자체 실패 (CORS/타임아웃/오프라인)
+
+  let title, body, hint, tone
+
+  if (isNetworkError) {
+    tone = 'network'
+    title = '서버에 연결할 수 없습니다'
+    body  = '인터넷 연결을 확인하시거나 잠시 후 다시 시도해주세요.'
+    hint  = 'PWA 오프라인 모드일 수 있습니다. 페이지를 새로고침해보세요.'
+  } else if (typeof detail === 'object' && detail?.error_code === 'unsupported_kr_fund') {
+    tone = 'info'
+    title = '한국 펀드 · 일부 ETF는 시세 데이터가 제공되지 않습니다'
+    body  = detail.message
+    hint  = detail.hint
+  } else if (typeof detail === 'object' && detail?.error_code === 'kr_price_unavailable') {
+    tone = 'warn'
+    title = '현재가 조회 실패 — 거래정지/공시 휴장 가능성'
+    body  = detail.message
+    hint  = '잠시 후 재시도하면 정상 표시될 수 있습니다.'
+  } else if (typeof detail === 'object' && detail?.error_code === 'delisted_or_invalid') {
+    tone = 'warn'
+    title = '잘못된 티커 또는 상장폐지 종목입니다'
+    body  = detail.message
+    hint  = detail.hint
+  } else if (httpStatus === 404) {
+    tone = 'warn'
+    title = `종목을 찾을 수 없습니다 — ${ticker}`
+    body  = '티커를 확인해주세요. 한국 종목은 6자리 숫자(예: 005930), 미국은 알파벳(예: AAPL)입니다.'
+  } else if (httpStatus >= 500) {
+    tone = 'error'
+    title = '서버 일시 오류'
+    body  = `상태 코드 ${httpStatus}. 잠시 후 다시 시도해주세요.`
+  } else {
+    tone = 'error'
+    title = '데이터를 불러올 수 없습니다'
+    body  = typeof detail === 'string' ? detail
+          : (detail?.message || '예기치 못한 오류가 발생했습니다.')
+  }
+
+  const accent = tone === 'info' ? 'var(--m-text)'
+              : tone === 'warn' ? '#B45309'
+              : tone === 'network' ? 'var(--m-text-secondary)'
+              : 'var(--m-negative)'
+
+  return (
+    <div style={{
+      margin: '20px 0 12px', padding: '16px 18px',
+      border: '1px solid var(--m-outline-variant)',
+      borderRadius: 4, background: 'var(--m-surface)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline',
+        justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
+        <div className="ko-keep" style={{ fontSize: 13, fontWeight: 800,
+          color: accent, letterSpacing: '-.01em' }}>
+          {title}
+        </div>
+        <span className="mono-pill" style={{ flexShrink: 0,
+          color: 'var(--m-text-tertiary)' }}>
+          {ticker} · {httpStatus || 'NETWORK'}
+        </span>
+      </div>
+      {body && (
+        <div className="ko-keep" style={{ fontSize: 12,
+          color: 'var(--m-text-secondary)', lineHeight: 1.65, marginTop: 6 }}>
+          {body}
+        </div>
+      )}
+      {hint && (
+        <div className="ko-keep" style={{ fontSize: 11,
+          color: 'var(--m-text-tertiary)', lineHeight: 1.6, marginTop: 8 }}>
+          <strong style={{ fontWeight: 700,
+            color: 'var(--m-text-secondary)' }}>대안: </strong>
+          {hint}
+        </div>
+      )}
+      {Array.isArray(detail?.sources_tried) && detail.sources_tried.length > 0 && (
+        <div style={{ marginTop: 10, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {detail.sources_tried.map(s => (
+            <span key={s} className="mono-pill" style={{
+              color: 'var(--m-text-tertiary)', fontSize: 9 }}>{s}</span>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 14, display: 'flex', gap: 8 }}>
+        <button onClick={onRetry}
+          style={{
+            padding: '8px 16px', borderRadius: 2,
+            border: '1px solid var(--m-outline-variant)',
+            background: 'transparent', color: 'var(--m-text-secondary)',
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}>
+          다시 시도
+        </button>
       </div>
     </div>
   )

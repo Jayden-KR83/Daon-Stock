@@ -7,6 +7,8 @@ daon.db-wal
 daon.db-shm
 users.json
 portfolio_data.json
+ai_cache_payload.json
+ai_cache_targets.json
 data/
 backup/
 _backup/
@@ -20,6 +22,7 @@ _backup/
 # ────────────────────────────────────────
 backend/static/assets/
 backend/static/sw.js
+backend/static/push-sw.js
 backend/static/workbox-*.js
 backend/static/manifest.webmanifest
 frontend/dist/

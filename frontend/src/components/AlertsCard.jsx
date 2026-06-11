@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { getPortfolioAlerts } from '../api'
+import { displayName, isKrTicker } from '../utils/displayName'
 
 /**
  * 룰 기반 리밸런싱 경고 — A안 무채색, rule별 그룹핑, sev-dot 제거.
@@ -48,6 +49,14 @@ export default function AlertsCard({ allHoldings = [], prices = {}, usdKrw = 138
 
   const summary = data?.summary || { critical: 0, high: 0, med: 0, total: 0 }
   const grouped = groupByRule(data?.alerts || [])
+  // ticker → name 맵 — 경고에 한국 종목 코드(005930) 대신 종목명 표시용
+  const nameByTicker = React.useMemo(() => {
+    const m = {}
+    for (const h of allHoldings) {
+      if (h.ticker) m[String(h.ticker).toUpperCase()] = h.name
+    }
+    return m
+  }, [allHoldings])
 
   return (
     <div className="mono-card" style={{ marginBottom: 12 }}>
@@ -132,7 +141,7 @@ export default function AlertsCard({ allHoldings = [], prices = {}, usdKrw = 138
       {data && data.alerts.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {grouped.map(g => (
-            <RuleGroup key={g.rule} group={g} />
+            <RuleGroup key={g.rule} group={g} nameByTicker={nameByTicker} />
           ))}
         </div>
       )}
@@ -150,7 +159,7 @@ function SummaryItem({ label, n, klass, color }) {
 }
 
 /* 룰별 그룹: 같은 종류 메시지를 한 헤더로 묶고 inline list로 압축 */
-function RuleGroup({ group }) {
+function RuleGroup({ group, nameByTicker = {} }) {
   const max = group.alerts.reduce((m, a) =>
     Math.max(m, Math.abs(a.value || 0)), 0)
   const topSev = group.alerts[0]?.severity || 'med'
@@ -177,7 +186,7 @@ function RuleGroup({ group }) {
         {group.alerts.map((a, i) => (
           <React.Fragment key={i}>
             {i > 0 && <span style={{ color: 'var(--m-text-tertiary)', margin: '0 6px' }}>·</span>}
-            <CompactItem alert={a} ruleKind={group.rule} />
+            <CompactItem alert={a} ruleKind={group.rule} nameByTicker={nameByTicker} />
           </React.Fragment>
         ))}
       </div>
@@ -191,10 +200,15 @@ function RuleGroup({ group }) {
   )
 }
 
-function CompactItem({ alert, ruleKind }) {
-  const name = alert.ticker || alert.sector
-              || alert.title?.split(/[—-]/)[0]?.trim()
-              || alert.title
+function CompactItem({ alert, ruleKind, nameByTicker = {} }) {
+  const tkr = alert.ticker
+  // 한국 종목은 코드(005930) 대신 종목명 — 경고 메시지 가독성. 미국은 티커 그대로.
+  const name = tkr
+    ? displayName(tkr, alert.name || nameByTicker[String(tkr).toUpperCase()])
+    : (alert.sector
+       || alert.title?.split(/[—-]/)[0]?.trim()
+       || alert.title)
+  const showCode = tkr && isKrTicker(tkr) && name !== tkr
   const v = alert.value
   // value 표시 형식 (룰별)
   let valueText = null
@@ -212,6 +226,10 @@ function CompactItem({ alert, ruleKind }) {
   return (
     <span style={{ whiteSpace: 'nowrap' }}>
       <span style={{ fontWeight: 700, color: 'var(--m-text)' }}>{name}</span>
+      {showCode && (
+        <span style={{ fontSize: 9.5, fontWeight: 600,
+          color: 'var(--m-text-tertiary)', marginLeft: 3 }}>{tkr}</span>
+      )}
       {valueText && (
         <span className={chipClass} style={{ marginLeft: 4 }}>
           {valueText}

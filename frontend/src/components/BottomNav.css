@@ -1,20 +1,45 @@
 /* ── BottomNav — DAON Quantum (앱 모드 전용) ── */
-.bottom-nav {
+/* 전체 탭을 한 줄 가로 스크롤 — 더보기 시트 폐지(2026-06) + 양 끝 페이드 힌트 */
+.bottom-nav-wrap {
   position: fixed;
   bottom: 0; left: 0; width: 100%;
-  background: var(--clr-surface);
-  border-top: 1px solid var(--clr-border-md);
-  display: flex;
   z-index: 9999;
   box-shadow: 0 -2px 12px rgba(0,0,0,.06);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  pointer-events: none;            /* 페이드는 통과 — 실제 클릭은 nav가 받음 */
 }
+.bottom-nav {
+  position: relative;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--clr-surface);
+  border-top: 1px solid var(--clr-border-md);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;            /* Firefox: 스크롤바 숨김 */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  pointer-events: auto;
+}
+.bottom-nav::-webkit-scrollbar { display: none; }  /* Chrome/Safari */
+
+/* 양 끝 페이드 — 스크롤 여지가 있을 때만(can-left/can-right) 나타남 */
+.nav-fade {
+  position: absolute; top: 0; bottom: 0; width: 28px;
+  pointer-events: none; opacity: 0; transition: opacity .18s ease;
+  z-index: 1;
+}
+.nav-fade-left  { left: 0;  background: linear-gradient(to right, var(--clr-surface), transparent); }
+.nav-fade-right { right: 0; background: linear-gradient(to left,  var(--clr-surface), transparent); }
+.bottom-nav-wrap.can-left  .nav-fade-left  { opacity: 1; }
+.bottom-nav-wrap.can-right .nav-fade-right { opacity: 1; }
 
 .nav-btn {
-  flex: 1;
+  flex: 0 0 auto;
+  min-width: 64px;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  gap: 3px; padding: 8px 4px 10px;
+  gap: 3px; padding: 8px 6px 10px;
   border: none; background: transparent;
   cursor: pointer; color: var(--clr-text-muted);
   font-family: inherit;
@@ -51,79 +76,7 @@
   .nav-btn   { padding: 8px 2px 10px; }
 }
 
-/* ── 더보기 시트 ── */
-.more-sheet-overlay {
-  position: fixed; inset: 0;
-  background: rgba(15,23,42,.35);
-  z-index: 9998;
-  display: flex; align-items: flex-end;
-}
-
-.more-sheet {
-  width: 100%;
-  background: var(--clr-surface);
-  border-radius: var(--r-xl) var(--r-xl) 0 0;
-  padding: 8px 20px 24px;
-  box-shadow: var(--shadow-md);
-  animation: slideUp var(--t-slow) ease-out;
-}
-@keyframes slideUp {
-  from { transform: translateY(100%); }
-  to   { transform: translateY(0); }
-}
-
-.more-sheet-handle {
-  width: 36px; height: 4px;
-  background: var(--clr-border-strong);
-  border-radius: var(--r-xs);
-  margin: 0 auto 14px;
-}
-
-.more-sheet-title {
-  font-size: 13px; font-weight: 800;
-  color: var(--clr-text-muted);
-  letter-spacing: .08em; text-transform: uppercase;
-  margin-bottom: 12px;
-}
-
-.more-sheet-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
-}
-
-.more-sheet-btn {
-  display: flex; flex-direction: column;
-  align-items: center; gap: 6px;
-  padding: 14px 8px;
-  border: 1px solid var(--clr-border);
-  border-radius: var(--r-md);
-  background: var(--clr-bg);
-  font-family: inherit; color: var(--clr-text-sub);
-  cursor: pointer; transition: all var(--t-base);
-}
-.more-sheet-btn:hover {
-  background: var(--clr-info-bg);
-  border-color: var(--clr-info-border);
-  color: var(--clr-info-dark);
-}
-.more-sheet-btn.active {
-  background: #DBEAFE;
-  border-color: #93C5FD;
-  color: var(--clr-info-dark);
-}
-
-.more-sheet-icon {
-  width: 24px; height: 24px;
-  display: flex; align-items: center; justify-content: center;
-}
-.more-sheet-icon svg { width: 24px; height: 24px; stroke: currentColor; }
-
-.more-sheet-label {
-  font-size: 11px; font-weight: 700; white-space: nowrap;
-}
-
-.app-mode-app .bottom-nav {
+.app-mode-app .bottom-nav-wrap {
   max-width: 480px; left: 50%;
   transform: translateX(-50%);
 }

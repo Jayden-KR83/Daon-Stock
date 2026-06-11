@@ -2,6 +2,15 @@ import React, { useState, useEffect, useRef } from 'react'
 import { motion, animate } from 'motion/react'
 import { getPortfolioHealth } from '../api'
 
+/* 최약점 지표별 — S 등급(85+)으로 끌어올리기 위한 구체 액션 제안.
+   sub_scores 키와 동일한 라벨을 키로 사용. */
+const S_GRADE_TIPS = {
+  '분산도': '보유 종목을 10종 이상으로 늘리고 한 종목 비중이 20%를 넘지 않게 분산하면 분산도 점수가 크게 오릅니다.',
+  '섹터 집중도': '한 섹터 비중을 40% 이하로 낮추세요 — 쏠린 섹터 일부를 정리하고 다른 섹터(헬스케어·필수소비재 등)를 더하면 개선됩니다.',
+  '변동성 관리': '낙폭(MDD)이 큰 고변동 종목 비중을 줄이고 배당주·채권형 ETF 같은 방어 자산을 섞으면 안정성 점수가 올라갑니다.',
+  '위험조정 수익': '샤프지수가 낮은 종목을 점검하세요 — 변동성 대비 수익이 부진한 종목을 효율 높은 종목으로 교체하면 개선됩니다.',
+}
+
 /**
  * Portfolio Health Score — 0-100 종합 점수 + 등급 + 4개 하위 지표 + 약점 코멘트.
  * 비중 탭의 NetWorthChart 다음에 임베드.
@@ -121,7 +130,7 @@ export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw 
 
           {/* 통계 + 코멘트 */}
           <div style={{ marginTop: 10, padding: '10px 12px',
-            background: 'var(--clr-bg)', borderRadius: 10,
+            background: 'var(--clr-bg)', borderRadius: 4,
             border: '1px solid var(--clr-border-md)' }}>
             <div style={{ fontSize: 11, color: 'var(--clr-text-muted)',
               fontVariantNumeric: 'tabular-nums', lineHeight: 1.6 }}>
@@ -134,6 +143,24 @@ export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw 
               💡 {data.comment}
             </div>
           </div>
+
+          {/* S 등급으로 가는 길 — 최약점 기반 구체 제안 (이미 S면 숨김) */}
+          {data.grade !== 'S' && data.weakest && S_GRADE_TIPS[data.weakest] && (
+            <div className="ko-keep" style={{ marginTop: 8,
+              background: 'var(--m-surface-variant)',
+              border: '1px solid var(--m-outline-variant)',
+              borderRadius: 4, padding: '10px 12px' }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800,
+                color: 'var(--m-positive)', letterSpacing: '.03em',
+                marginBottom: 3 }}>
+                S 등급으로 가는 길 · 최약점 「{data.weakest}」
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--m-text)',
+                fontWeight: 600, lineHeight: 1.6 }}>
+                {S_GRADE_TIPS[data.weakest]}
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
     </div>
@@ -222,7 +249,7 @@ function ScoreGauge({ value, grade, color }) {
           {displayVal}
         </div>
         <div style={{ display: 'inline-block', marginTop: 4,
-          padding: '2px 14px', borderRadius: 20,
+          padding: '2px 14px', borderRadius: 4,
           background: color, color: '#fff',
           fontSize: 12, fontWeight: 900, letterSpacing: '.04em' }}>
           {grade} 등급
@@ -243,21 +270,26 @@ function SubScoreBar({ label, value, isWeakest }) {
       background: 'var(--m-surface)',
       border: '1px solid var(--m-outline-variant)',
       borderRadius: 8,
-      position: 'relative',
     }}>
-      {isWeakest && (
-        <span style={{ position: 'absolute', top: 6, right: 8,
-          fontSize: 8.5, fontWeight: 700, letterSpacing: '.06em',
-          color: 'var(--m-text-tertiary)', textTransform: 'uppercase' }}>
-          약점
-        </span>
-      )}
+      {/* 라벨 + (약점 배지) 좌측 묶음 · 값은 우측 — 배지가 값과 겹치지 않도록 flow 안에 배치 */}
       <div style={{ display: 'flex', justifyContent: 'space-between',
-        alignItems: 'baseline', marginBottom: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 700,
-          color: 'var(--m-text-secondary)' }}>{label}</span>
+        alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
+          minWidth: 0 }}>
+          <span style={{ fontSize: 11, fontWeight: 700,
+            color: 'var(--m-text-secondary)', whiteSpace: 'nowrap',
+            overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+          {isWeakest && (
+            <span style={{ flexShrink: 0, fontSize: 8.5, fontWeight: 800,
+              letterSpacing: '.06em', textTransform: 'uppercase',
+              color: 'var(--m-negative)', border: '1px solid var(--m-negative)',
+              borderRadius: 3, padding: '0 4px', lineHeight: 1.6 }}>
+              약점
+            </span>
+          )}
+        </span>
         <span style={{ fontSize: 16, fontWeight: 900, color: valueColor,
-          fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+          fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{value}</span>
       </div>
       <div style={{ height: 3, background: 'var(--m-outline-variant)',
         borderRadius: 2, overflow: 'hidden' }}>

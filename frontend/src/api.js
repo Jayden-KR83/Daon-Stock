@@ -75,6 +75,7 @@ export const adminSetPassword = (current_password, new_password) =>
 
 export const authRegister = (body) => api.post('/auth/register', body).then(r => r.data)
 export const authLogin    = (body) => api.post('/auth/login', body).then(r => r.data)
+export const authDemo     = ()     => api.post('/auth/demo').then(r => r.data)   // 로그인 없이 둘러보기
 export const authLogout   = ()     => api.post('/auth/logout').then(r => r.data)
 export const authMe       = ()     => api.get('/auth/me').then(r => r.data)
 export const updateProfile = (nickname) => api.put('/auth/profile', { nickname }).then(r => r.data)
@@ -156,6 +157,12 @@ export const getCompareSeries = (body) =>
 export const getPortfolioDividends = (body) =>
   api.post('/portfolio/dividends', body, { timeout: 40_000 }).then(r => r.data)
 
+// AI 분석 결과 외부 import (admin) — Claude Code/채팅 등에서 만든 JSON inject
+export const importAiCache = (items, overwrite = true) =>
+  api.post('/admin/ai_cache/import', { items, overwrite }, { timeout: 30_000 }).then(r => r.data)
+export const listAiCache = () =>
+  api.get('/admin/ai_cache/list').then(r => r.data)
+
 // 가격 알림 (목표가·손절가)
 export const listAlerts = () =>
   api.get('/alerts').then(r => r.data)
@@ -169,5 +176,11 @@ export const markNotificationRead = (id) =>
   api.post(`/notifications/${id}/read`).then(r => r.data)
 export const markAllNotificationsRead = () =>
   api.post('/notifications/read_all').then(r => r.data)
+
+// Web Push (V2) — 브라우저 종료 시에도 도달하는 푸시
+export const getVapidPublicKey = () => api.get('/push/public_key').then(r => r.data)
+export const subscribePush     = (sub) => api.post('/push/subscribe', sub).then(r => r.data)
+export const unsubscribePush   = (endpoint) => api.post('/push/unsubscribe', { endpoint }).then(r => r.data)
+export const sendTestPush      = () => api.post('/push/test').then(r => r.data)
 
 export default api

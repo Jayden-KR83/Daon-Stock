@@ -104,7 +104,23 @@ WantedBy=multi-user.target
 ### 사용자 안내
 - [ ] PWA 캐시 우회: `Ctrl+Shift+R` 또는 시크릿 창
 
-## 6. 도메인 (계획)
-- 옵션 3: 유료 도메인 + Cloudflare (보안 + 브랜드)
-- 단계: ① 도메인 구매 (Namecheap) → ② Cloudflare DNS → ③ Oracle nginx + Let's Encrypt
-- Cloudflare Access (무료티어)로 SSO/2FA 적용 가능
+## 5.5 문서·릴리스 반영 사이클 (지속 개선 운영)
+
+기능 개선을 **가이드 / 여정 / GitHub에 목적별 다른 주기**로 반영한다.
+(근거: 가이드는 사용자 대면이라 지연=버그 / 여정은 연대기라 묶을수록 좋음 / git은 안전망이라 자주 커밋)
+
+### 기능 단위 — 매 기능 1 사이클
+- [ ] **가이드 탭** 갱신 — 사용자 대면 기능이면 즉시 (탭 이름·신규 기능·데이터 출처)
+- [ ] **DEVELOPMENT_LOG.md** 한 줄 추가 (날짜 + 변경 요약) — 여정 탭 요약의 원천
+- [ ] 빌드 → scp 배포 → 검증 (위 5번)
+- [ ] **git commit** — 배포 단위 = 커밋 단위 (서버와 GitHub 상태 항상 일치)
+
+### 월간 릴리스 — 월 1회 (자동 리마인더: `/schedule` 등록됨)
+- [ ] **여정 탭(PresentationTab)** 버전 묶음 갱신 — 그달 DEVELOPMENT_LOG → 마일스톤 1건(vX.X) + 로드맵 verdict 갱신
+- [ ] **git push + 태그**(`vX.X`)
+
+## 6. 도메인 (완료 — 2026.06)
+- **daonwealth.com** · Cloudflare DNS(프록시/WAF) → nginx 리버스 프록시(443→8501) → uvicorn
+- TLS: **Cloudflare Origin Certificate + Full(strict)** — Let's Encrypt 대신(갱신 불필요, 15년)
+- 8501은 `127.0.0.1` 바인딩(외부 직노출 차단). 재현 절차·설정 파일: [deploy/README.md](../deploy/README.md)
+- 연계: Web Push VAPID 키 자동생성 · cron(5분 가격알림 / 월요일 09:00 UTC 주간 리밸런싱)

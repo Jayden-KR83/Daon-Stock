@@ -9,6 +9,7 @@ import { useStore } from '../store'
  */
 export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) {
   const privacyMode = useStore(s => s.privacyMode)
+  const setChartTicker = useStore(s => s.setChartTicker)
 
   const { totalKrw, totalPnl, totalPnlPct, sectorCount, accountCount, topStack } = React.useMemo(() => {
     let total = 0, cost = 0
@@ -65,8 +66,9 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
     return `${allHoldings.length}종 · ${sectorCount}개 섹터 · ${accountCount}개 계좌 분산`
   }, [allHoldings.length, sectorCount, isPositive, totalPnlPct, topStack, accountCount])
 
-  // 무채색 grey scale (다크/라이트 호환)
-  const greyScale = ['#0F172A','#334155','#64748B','#94A3B8','#CBD5E1','#E2E8F0']
+  // 다온 표준 카테고리 차트 팔레트 (design.md R2). '기타'만 무채색.
+  const CHART_COLORS = ['#1F4FD3','#059669','#D97706','#7C3AED','#0891B2','#DB2777']
+  const segColor = (s, i) => (s.ticker === 'REST' ? '#94A3B8' : CHART_COLORS[i % CHART_COLORS.length])
 
   return (
     <div style={{
@@ -113,22 +115,42 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
             </span>
           </div>
           <div className="mini-stack" title="비중 분포">
-            {topStack.map((s, i) => (
-              <span key={s.ticker}
-                title={`${s.name} ${s.pct.toFixed(1)}%`}
-                style={{ width: `${s.pct}%`, background: greyScale[i] || '#E2E8F0' }} />
-            ))}
+            {topStack.map((s, i) => {
+              const isStock = s.ticker !== 'REST'
+              return (
+                <span key={s.ticker}
+                  title={`${s.name} ${s.pct.toFixed(1)}% (${fmtKrw(s.value)})${isStock ? ' · 탭하면 차트' : ''}`}
+                  onClick={isStock ? () => setChartTicker(s.ticker) : undefined}
+                  style={{ width: `${s.pct}%`, background: segColor(s, i),
+                    cursor: isStock ? 'pointer' : 'default' }} />
+              )
+            })}
+          </div>
+          {/* 범례 — 어떤 색이 어떤 종목인지 (막대만으론 식별 불가). 종목은 탭 시 차트 이동 */}
+          <div className="mini-stack-legend">
+            {topStack.map((s, i) => {
+              const isStock = s.ticker !== 'REST'
+              return (
+                <span key={s.ticker}
+                  onClick={isStock ? () => setChartTicker(s.ticker) : undefined}
+                  style={{ cursor: isStock ? 'pointer' : 'default',
+                    color: 'var(--m-text)' }}>
+                  <i style={{ background: segColor(s, i) }} />
+                  {s.name.length > 12 ? s.name.slice(0, 12) + '…' : s.name}
+                  <span style={{ color: 'var(--m-text-tertiary)', marginLeft: 4 }}>
+                    {s.pct.toFixed(0)}%
+                  </span>
+                </span>
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* 하단 — 정량 인사이트 한 줄 (배경 없음, 좌측 색띠로만 위계) */}
-      <div style={{
-        borderLeft: `2px solid ${isPositive ? 'var(--m-positive)' : 'var(--m-text-secondary)'}`,
-        paddingLeft: 10, paddingTop: 2, paddingBottom: 2,
-      }}>
-        <span className="ko-keep" style={{ fontSize: 12.5, fontWeight: 700,
-          color: 'var(--m-text)' }}>{headline}</span>
+      {/* 하단 — 정량 인사이트 한 줄 (좌측 색띠 금지 R1 — 글자색으로만 위계) */}
+      <div style={{ paddingTop: 4, borderTop: '1px solid var(--m-outline-variant)' }}>
+        <span className="ko-keep" style={{ fontSize: 12.5, fontWeight: 800,
+          color: isPositive ? 'var(--m-positive)' : 'var(--m-text)' }}>{headline}</span>
       </div>
     </div>
   )

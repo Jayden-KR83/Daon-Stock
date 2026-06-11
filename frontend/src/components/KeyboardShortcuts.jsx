@@ -81,7 +81,7 @@ export default function KeyboardShortcuts() {
           initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
           onClick={e => e.stopPropagation()}
           style={{
-            background: 'var(--clr-surface)', borderRadius: 16,
+            background: 'var(--clr-surface)', borderRadius: 4,
             padding: 24, width: '100%', maxWidth: 400,
             border: '1px solid var(--clr-border-md)',
             boxShadow: '0 20px 50px rgba(15,23,42,.25)',

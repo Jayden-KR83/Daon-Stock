@@ -23,7 +23,11 @@ from pydantic import BaseModel
 
 # ─── App ──────────────────────────────────────────────────────────────
 app = FastAPI(title="다온 포트폴리오 API", version="2.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
+# CORS: 운영 도메인으로 제한 (이전 "*" → 상용 공개 후 출처 제한).
+# 프론트는 daonwealth.com 동일 출처에서 서빙되므로 앱 동작엔 영향 없음.
+# 로컬 개발은 Vite 프록시(동일 출처)라 CORS 미적용.
+app.add_middleware(CORSMiddleware,
+                   allow_origins=["https://daonwealth.com", "https://www.daonwealth.com"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -202,6 +206,21 @@ def _init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_notif_user_read ON notifications(user_id, read_at);
         CREATE INDEX IF NOT EXISTS idx_notif_user_ts ON notifications(user_id, created_at DESC);
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            endpoint   TEXT PRIMARY KEY,       -- 브라우저 push endpoint (고유)
+            user_id    TEXT NOT NULL,
+            p256dh     TEXT NOT NULL,           -- 구독 공개키
+            auth       TEXT NOT NULL,           -- 구독 auth secret
+            created_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+        CREATE TABLE IF NOT EXISTS ai_cache (
+            cache_key    TEXT PRIMARY KEY,         -- 'stock_v2:{TICKER}:{name}'
+            value_json   TEXT NOT NULL,
+            computed_at  REAL NOT NULL,
+            source       TEXT NOT NULL DEFAULT 'api'   -- 'api' | 'manual_import' | 'claude_code'
+        );
+        CREATE INDEX IF NOT EXISTS idx_aicache_ts ON ai_cache(computed_at DESC);
         """)
 
 _init_db()
@@ -392,6 +411,15 @@ def pwa_register_sw():
         raise HTTPException(404)
     return FileResponse(p, media_type="application/javascript")
 
+@app.get("/push-sw.js", include_in_schema=False)
+def pwa_push_sw():
+    # sw.js가 importScripts('push-sw.js')로 로드하는 Web Push 핸들러
+    p = os.path.join(STATIC_DIR, "push-sw.js")
+    if not os.path.exists(p):
+        raise HTTPException(404, "push-sw.js not found")
+    return FileResponse(p, media_type="application/javascript",
+                        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
 # workbox-{hash}.js — sw.js가 같은 디렉토리에서 import 하므로 별도 마운트 필요
 # vite-plugin-pwa가 backend/static 루트에 workbox-XXX.js를 출력하므로
 # 빌드 시 /assets 디렉토리로 복사하여 sw.js의 import 경로도 같이 수정
@@ -543,21 +571,80 @@ def ttl_cache(ttl: int):
         return wrapper
     return dec
 
-# ─── AI 분석 24h 캐시 ──────────────────────────────────────────────────
-_ai_cache: Dict[str, Any]   = {}
+# ─── AI 분석 24h 캐시 (in-memory + SQLite persist) ─────────────────────
+# 서버 재시작 시에도 캐시 보존 + 외부 도구(Claude Code/채팅)로 만든 분석을
+# import endpoint로 inject 가능. in-memory는 빠른 read, DB는 영속성.
+_ai_cache: Dict[str, Any]      = {}
 _ai_cache_ts: Dict[str, float] = {}
 _AI_TTL = 86400  # 24시간
 
 def _get_ai_cache(key: str):
+    now = time()
+    # 1) in-memory hit
     with _lock:
-        if key in _ai_cache and time() - _ai_cache_ts[key] < _AI_TTL:
+        if key in _ai_cache and now - _ai_cache_ts[key] < _AI_TTL:
             return _ai_cache[key]
+    # 2) DB fallback — 서버 재시작 후 첫 조회
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT value_json, computed_at FROM ai_cache WHERE cache_key=?",
+                (key,)
+            ).fetchone()
+        if row and now - float(row['computed_at']) < _AI_TTL:
+            value = json.loads(row['value_json'])
+            with _lock:
+                _ai_cache[key]    = value
+                _ai_cache_ts[key] = float(row['computed_at'])
+            return value
+    except Exception:
+        pass
     return None
 
-def _set_ai_cache(key: str, value):
+def _get_stock_cache_by_ticker(ticker: str):
+    """종목 분석(stock_v2) 조회 — 이름 변형으로 캐시 키가 갈려도, 그리고 24h TTL과 무관하게
+    stock_v2:{TICKER}:* 중 '가장 최근' 분석을 반환한다.
+    (자동 만료하지 않음 — 사용자가 분석 날짜를 보고 직접 갱신 여부를 판단.)
+    반환: (value, computed_at) | (None, 0.0)"""
+    prefix = f"stock_v2:{ticker.upper()}:"
+    best_val, best_ts = None, -1.0
+    # 1) 메모리 (최신 ts) — TTL 무시
+    with _lock:
+        for k, ts in list(_ai_cache_ts.items()):
+            if k.startswith(prefix) and ts > best_ts:
+                best_val, best_ts = _ai_cache.get(k), ts
+    # 2) DB가 더 최신일 수 있으니 확인 (서버 재시작 후 등)
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT value_json, computed_at FROM ai_cache "
+                "WHERE cache_key LIKE ? ORDER BY computed_at DESC LIMIT 1",
+                (prefix + '%',)
+            ).fetchone()
+        if row and float(row['computed_at']) > best_ts:
+            best_val = json.loads(row['value_json'])
+            best_ts  = float(row['computed_at'])
+    except Exception:
+        pass
+    if best_val is None:
+        return None, 0.0
+    return best_val, best_ts
+
+def _set_ai_cache(key: str, value, source: str = 'api'):
+    now = time()
     with _lock:
         _ai_cache[key]    = value
-        _ai_cache_ts[key] = time()
+        _ai_cache_ts[key] = now
+    # DB persist (best-effort)
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO ai_cache (cache_key, value_json, computed_at, source) "
+                "VALUES (?,?,?,?)",
+                (key, json.dumps(value, ensure_ascii=False), now, source)
+            )
+    except Exception:
+        pass
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 def is_kr(ticker: str) -> bool:
@@ -806,7 +893,8 @@ def _verify_password(password: str, stored: str) -> bool:
 def _get_user_from_token(token: str) -> Optional[dict]:
     with _db() as conn:
         row = conn.execute(
-            "SELECT s.user_id, s.expires, u.email, u.name, u.nickname, u.is_admin FROM sessions s "
+            "SELECT s.user_id, s.expires, u.email, u.name, u.nickname, u.is_admin, "
+            "u.status, u.ai_enabled FROM sessions s "
             "JOIN users u ON u.user_id=s.user_id WHERE s.token=?", (token,)
         ).fetchone()
     if not row or row['expires'] < time():
@@ -974,6 +1062,95 @@ def auth_register(req: RegisterReq):
         "status": "pending",
         "message": "가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",
         "email": email,
+    }
+
+# ─── 데모 모드 (로그인 없이 둘러보기 — 외부 UI/UX 검증용) ────────────────
+DEMO_UID = 'demo'
+_DEMO_HOLDINGS = {
+    'US': [
+        {'ticker': 'AAPL',  'name': 'Apple',     'quantity': 30, 'avg_price': 210, 'sector': 'Technology'},
+        {'ticker': 'MSFT',  'name': 'Microsoft', 'quantity': 15, 'avg_price': 410, 'sector': 'Technology'},
+        {'ticker': 'NVDA',  'name': 'NVIDIA',    'quantity': 40, 'avg_price': 120, 'sector': 'Technology'},
+        {'ticker': 'GOOGL', 'name': 'Alphabet',  'quantity': 20, 'avg_price': 165, 'sector': 'Communication'},
+        {'ticker': 'TSLA',  'name': 'Tesla',     'quantity': 12, 'avg_price': 240, 'sector': 'Consumer'},
+        {'ticker': 'AMZN',  'name': 'Amazon',    'quantity': 18, 'avg_price': 185, 'sector': 'Consumer'},
+    ],
+    'KR_RETIRE': [
+        {'ticker': '005930', 'name': '삼성전자',         'quantity': 100, 'avg_price': 72000,  'sector': '반도체'},
+        {'ticker': '000660', 'name': 'SK하이닉스',       'quantity': 20,  'avg_price': 180000, 'sector': '반도체'},
+        {'ticker': '373220', 'name': 'LG에너지솔루션',   'quantity': 8,   'avg_price': 410000, 'sector': '2차전지'},
+    ],
+    'KR_PERSONAL': [
+        {'ticker': '035420', 'name': 'NAVER', 'quantity': 15, 'avg_price': 195000, 'sector': '인터넷'},
+        {'ticker': '035720', 'name': '카카오', 'quantity': 30, 'avg_price': 48000,  'sector': '인터넷'},
+    ],
+    'KR_ISA': [
+        {'ticker': '005380', 'name': '현대차', 'quantity': 10, 'avg_price': 240000, 'sector': '자동차'},
+        {'ticker': '000270', 'name': '기아',   'quantity': 25, 'avg_price': 105000, 'sector': '자동차'},
+    ],
+}
+_DEMO_WATCHLIST = [
+    {'ticker': 'META', 'name': 'Meta Platforms'},
+    {'ticker': 'AVGO', 'name': 'Broadcom'},
+    {'ticker': 'RXRX', 'name': 'Recursion Pharma'},
+]
+
+def _is_demo(cu: dict) -> bool:
+    return bool(cu) and cu.get('user_id') == DEMO_UID
+
+# 데모 공개 체험의 라이브 AI 생성(캐시 미스 시에만 소모) 24h 롤링 상한 — 비용 폭주 방지.
+_demo_ai_calls: list = []
+_DEMO_AI_DAILY_CAP = 40
+
+def _demo_ai_budget_ok() -> bool:
+    """데모용 라이브 AI 호출 예산 확인 + 차감. 한도 초과면 False (캐시만 제공)."""
+    global _demo_ai_calls
+    cutoff = time() - 86400
+    _demo_ai_calls = [t for t in _demo_ai_calls if t > cutoff]
+    if len(_demo_ai_calls) >= _DEMO_AI_DAILY_CAP:
+        return False
+    _demo_ai_calls.append(time())
+    return True
+
+def _seed_demo_user():
+    """데모 유저 생성 + 샘플 포트폴리오로 리셋. 승인됨·AI 체험 on·비관리자 (안전한 샌드박스).
+    AI는 캐시 우선 + 24h 롤링 한도로 비용 상한 (force_refresh 무시)."""
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO users(user_id,email,name,nickname,pw_hash,created_at,"
+            "status,ai_enabled,is_admin,approved_at) VALUES(?,?,?,?,?,?, 'approved', 1, 0, ?)",
+            (DEMO_UID, 'demo@daon.app', '데모 사용자', '데모',
+             _hash_password(secrets.token_hex(16)), datetime.now().isoformat(), time())
+        )
+        # 기존 데모 행(과거 ai_enabled=0으로 생성됨)도 체험 가능하도록 강제 갱신
+        conn.execute("UPDATE users SET ai_enabled=1, status='approved', is_admin=0 WHERE user_id=?",
+                     (DEMO_UID,))
+    _seed_default_accounts(DEMO_UID)
+    # 매 진입마다 샘플로 리셋 — 외부 검증자가 데이터를 바꿔도 다음 진입 시 깨끗
+    ud = _load_user_data(DEMO_UID)
+    ud['portfolios'] = {acc: [dict(h) for h in hs] for acc, hs in _DEMO_HOLDINGS.items()}
+    ud['watchlist']  = [{'ticker': w['ticker'], 'name': w['name'], 'group_name': '기본'}
+                        for w in _DEMO_WATCHLIST]
+    _save_user_data(DEMO_UID, ud)
+
+@app.post("/api/auth/demo")
+def auth_demo():
+    """로그인 없이 둘러보기 — 데모 세션 토큰 발급 (샘플 데이터·AI off·비관리자)."""
+    try:
+        _seed_demo_user()
+    except Exception as e:
+        raise HTTPException(500, f"데모 준비 실패: {str(e)[:80]}")
+    token = secrets.token_hex(32)
+    with _db() as conn:
+        conn.execute("INSERT INTO sessions(token,user_id,expires) VALUES(?,?,?)",
+                     (token, DEMO_UID, time() + 7 * 86400))
+    _log_event(DEMO_UID, 'login', {'demo': True})
+    return {
+        "token": token,
+        "user": {"user_id": DEMO_UID, "email": "demo@daon.app", "name": "데모 사용자",
+                 "nickname": "데모", "ai_enabled": True, "is_admin": False, "status": "approved"},
+        "status": "approved",
+        "demo": True,
     }
 
 @app.post("/api/auth/login")
@@ -1493,11 +1670,48 @@ def _ai_error_message(status_code: int, body_excerpt: str = "") -> str:
         return f"AI 서버 일시 장애 ({status_code}) — 잠시 후 다시 시도해주세요."
     return f"AI 비서가 잠시 자리를 비웠습니다 ({status_code})"
 
+# 종목당 AI 입력 텍스트(뉴스/공시 등 가변 데이터) 상한 — 페이로드 과대로 인한 API 400/413 방어
+MAX_STOCK_PAYLOAD_CHARS = 50_000
+
+
+def _sanitize_unicode(s):
+    """JSON 직렬화 불가 문자(lone surrogate 등)를 제거.
+
+    BeautifulSoup으로 긁은 뉴스/공시 텍스트에 깨진 서로게이트(\\ud800~\\udfff 단독)가
+    섞이면 requests의 json.dumps가 'no low surrogate in string' 에러로 400을 유발한다.
+    encode('utf-8','ignore') → decode 로 강제 정제."""
+    if not isinstance(s, str):
+        return s
+    return s.encode('utf-8', 'ignore').decode('utf-8', 'ignore')
+
+
+def _truncate_head(s, limit: int = MAX_STOCK_PAYLOAD_CHARS):
+    """텍스트가 limit를 넘으면 상위(최신) 내용만 남기고 잘라냄.
+
+    뉴스/공시는 최신순으로 쌓이므로 앞부분(head)을 유지하고 뒤를 버린다."""
+    if not isinstance(s, str) or len(s) <= limit:
+        return s
+    return s[:limit] + "\n…(이하 생략 — 입력 길이 제한)"
+
+
+def _sanitize_payload(obj):
+    """payload 내 모든 문자열 값을 재귀적으로 유니코드 정제 (json.dumps 전처리)."""
+    if isinstance(obj, str):
+        return _sanitize_unicode(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_payload(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_payload(v) for v in obj]
+    return obj
+
+
 def _anthropic_post(payload: dict, api_key: str, timeout: int) -> requests.Response:
     """Anthropic /v1/messages 호출 — 429/529 시 1회 자동 재시도 (Retry-After 헤더 존중, 최대 8초 대기)."""
     url = "https://api.anthropic.com/v1/messages"
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
+    # json.dumps(requests 내부) 전에 깨진 유니코드를 강제 정제 — 'no low surrogate' 400 차단
+    payload = _sanitize_payload(payload)
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
     if resp.status_code in (429, 529):
         # Retry-After 헤더가 있으면 그 값(초)을, 없으면 6초 대기. 단 8초로 상한.
@@ -2310,7 +2524,72 @@ def _batch_prices(tickers: list) -> dict:
     return result
 
 @ttl_cache(3600)
+def _parse_kr_num(s) -> Optional[float]:
+    """Naver 텍스트 숫자 파싱: '26.03'→26.03, '12,372'→12372.0, '-'/''→None."""
+    try:
+        s = str(s).replace(',', '').strip()
+        if not s or s in ('-', 'N/A'):
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+@ttl_cache(1800)
+def _kr_fundamentals(ticker: str) -> dict:
+    """한국 종목 Valuation — Naver 종목 메인의 투자정보 ID(_per/_pbr/_eps/_dvr/_cns_per/
+    _market_sum) + 동일업종비교 ROE 스크래핑. yfinance KR info가 비는 격차 보완.
+    HTML 구조 변경 시 빈 dict 반환(프론트가 '데이터 없음'으로 분기)."""
+    code = kr_code(ticker)
+    out: dict = {}
+    try:
+        r = _session.get(f'https://finance.naver.com/item/main.naver?code={code}',
+                         headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+        if r.status_code != 200:
+            return {}
+        soup = BeautifulSoup(r.text, 'html.parser')
+        def by_id(eid):
+            el = soup.find(id=eid)
+            return _parse_kr_num(el.get_text(strip=True)) if el else None
+        # 시가총액 — _market_sum "1,882조 5,017" (조 + 억)
+        mc = None
+        msum = soup.find(id='_market_sum')
+        if msum:
+            txt = msum.get_text(' ', strip=True)
+            jo = re.search(r'([\d,]+)\s*조', txt)
+            rest = re.sub(r'[\d,]+\s*조', '', txt)
+            ok = re.search(r'([\d,]+)', rest)
+            if jo:
+                mc = int(jo.group(1).replace(',', '')) * 10**12 \
+                     + (int(ok.group(1).replace(',', '')) if ok else 0) * 10**8
+            elif ok:
+                mc = int(ok.group(1).replace(',', '')) * 10**8
+        # ROE — 동일업종비교 self(첫) 컬럼
+        roe = None
+        sec = soup.select_one('.section.trade_compare')
+        if sec:
+            for tr in sec.select('table tbody tr'):
+                th = tr.find('th')
+                if th and 'ROE' in th.get_text():
+                    td = tr.find('td')
+                    if td:
+                        roe = _parse_kr_num(td.get_text(strip=True))
+                    break
+        out = {
+            'market_cap':    int(mc) if mc else None,
+            'trailing_pe':   by_id('_per'),
+            'forward_pe':    by_id('_cns_per'),   # 추정 PER(컨센서스)
+            'price_to_book': by_id('_pbr'),
+            'diluted_eps':   by_id('_eps'),
+            'div_yield':     by_id('_dvr'),
+            'roe':           roe,
+        }
+    except Exception:
+        return {}
+    return out if any(v is not None for v in out.values()) else {}
+
 def _stock_fundamentals(ticker: str) -> dict:
+    if is_kr(ticker):
+        return _kr_fundamentals(ticker)
     try:
         info = _yf_info_safe(ticker.upper(), timeout=10)
         def safe_pct(v):
@@ -2353,20 +2632,131 @@ def safe_i_local(v):
     try: return int(v) if v and not _nan(v) else None
     except: return None
 
+# AI 기반 신약개발 플랫폼(TechBio) — peer 큐레이션.
+# Yahoo 추천은 'AI' 키워드로 데이터센터(APLD)·로봇(SERV) 등 이종 섹터를 섞으므로,
+# 이 universe 종목은 동일 'AI 신약개발 플랫폼'끼리만 비교군을 구성한다.
+# 우선순위 순서(저명한 AI 신약개발 플랫폼 먼저) — peer 선정 시 앞에서부터 채운다.
+_AIDRUG_PEERS = ['RXRX', 'SDGR', 'EXAI', 'ABCL', 'RLAY', 'ABSI', 'CGEM', 'GRPH']
+
+def _curated_aidrug_peers(ticker: str):
+    """TechBio(AI 신약개발) universe면 큐레이션 peer 티커(자기 제외, 최대 4), 아니면 None.
+    'AI' 키워드로 데이터센터(APLD)·로봇(SERV)이 섞이는 것 방지. (순수 함수 — 회귀 테스트로 보호)"""
+    t = str(ticker).upper()
+    if t in _AIDRUG_PEERS:
+        return [p for p in _AIDRUG_PEERS if p != t][:4]
+    return None
+
+def _audit_stock_analysis(ticker: str, data: dict) -> list:
+    """생성된 종목 분석이 섹터별 비즈니스 로직 규칙을 어겼는지 결정적 휴리스틱으로 점검.
+    TechBio(AI 신약개발) 한정 — 위반 메시지 리스트 반환(빈 리스트=통과).
+    저장 시 자동 실행되어 '경고'로 반환됨 → 사용자가 아니라 시스템이 출력 품질을 자가 검증."""
+    issues = []
+    if str(ticker).upper() not in _AIDRUG_PEERS:
+        return issues
+
+    def _txt(v):
+        return ' '.join(str(x) for x in v) if isinstance(v, list) else str(v or '')
+
+    # item 1 — 공동창업자 이사회 퇴임 + 전문경영인 전담을 '리스크'로 기계 분류 금지
+    bear = _txt(data.get('bear'))
+    if (('창업자' in bear) and (('퇴임' in bear) or ('이사회' in bear))
+            and (('리스크' in bear) or ('불확실' in bear))):
+        issues.append("item1 경영진: 창업자 이사회 퇴임을 리스크로 분류함 — "
+                      "'연구→상업화·계약 단계 전환'의 중립~긍정 맥락으로 다시 서술 필요")
+
+    # item 2 — 제조식 수주잔고만 있고 마일스톤/기술수출 언급 없음
+    backlog = _txt(data.get('backlog'))
+    if ((('수주 잔고' in backlog) or ('수주잔고' in backlog))
+            and ('마일스톤' not in backlog) and ('기술수출' not in backlog)
+            and ('License' not in backlog)):
+        issues.append("item2 재무지표: 제조식 수주잔고 위주 — "
+                      "잠재 마일스톤·기술수출(License-out) 잠재력으로 서술 필요")
+    return issues
+
+@ttl_cache(1800)
+def _kr_peers(ticker: str) -> list:
+    """한국 종목 동종비교 — Naver 종목 메인의 '동일업종비교' 테이블 스크래핑.
+    self(첫 컬럼) 포함 최대 5개. US peers와 동일 dict 키. 실패 시 []."""
+    code = kr_code(ticker)
+    try:
+        r = _session.get(f'https://finance.naver.com/item/main.naver?code={code}',
+                         headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, 'html.parser')
+        sec = soup.select_one('.section.trade_compare')
+        if not sec:
+            return []
+        # 종목 컬럼 (코드 + 명) — 중복 제거, 순서 유지, 최대 5
+        cols, seen = [], set()
+        for a in sec.select('a[href*="code="]'):
+            m = re.search(r'code=(\d{6})', a.get('href', ''))
+            if not m:
+                continue
+            cd = m.group(1)
+            if cd in seen:
+                continue
+            seen.add(cd)
+            nm = re.sub(r'\*?' + cd + r'$', '', a.get_text(strip=True)).rstrip('*').strip()
+            cols.append({'code': cd, 'name': nm})
+        cols = cols[:5]
+        if not cols:
+            return []
+        def row_vals(pred):
+            for tr in sec.select('table tbody tr'):
+                th = tr.find('th')
+                if th and pred(th.get_text(' ', strip=True)):
+                    return [td.get_text(' ', strip=True) for td in tr.find_all('td')]
+            return []
+        prices = row_vals(lambda t: t.startswith('현재가'))
+        chgs   = row_vals(lambda t: '등락률' in t)
+        mcaps  = row_vals(lambda t: t.startswith('시가총액'))
+        epss   = row_vals(lambda t: '주당순이익' in t)
+        peers = []
+        for i, c in enumerate(cols):
+            g = lambda arr: arr[i] if i < len(arr) else ''
+            price = _parse_kr_num(g(prices))
+            eps   = _parse_kr_num(g(epss))
+            mcap  = _parse_kr_num(g(mcaps))      # 억 단위
+            raw_chg = g(chgs)
+            cm = re.search(r'([\d.]+)\s*%', raw_chg)
+            chg = float(cm.group(1)) if cm else None
+            if chg is not None and ('하락' in raw_chg or '하향' in raw_chg or '-' in raw_chg):
+                chg = -abs(chg)
+            peers.append({
+                'ticker':     c['code'],
+                'name':       c['name'],
+                'price':      price,
+                'change_pct': chg,
+                'market_cap': int(mcap * 1e8) if mcap else None,   # 억 → 원
+                # 동일업종비교 EPS는 분기/기간 불일치로 PER 계산 시 왜곡 → 미표시
+                'pe_ratio':   None,
+                'eps':        eps,
+                'forward_pe': None,
+                'sector':     '',
+            })
+        return peers
+    except Exception:
+        return []
+
 @ttl_cache(3600)
 def _stock_peers(ticker: str) -> list:
-    # KR 종목은 Yahoo Finance peer 데이터 없음 → 즉시 반환
+    # KR 종목은 Naver 동일업종비교 스크래핑 (Yahoo peer 데이터 없음)
     if is_kr(ticker):
-        return []
+        return _kr_peers(ticker)
     try:
-        url = (f'https://query1.finance.yahoo.com/v6/finance/recommendationsbysymbol/'
-               f'{urllib.parse.quote(ticker.upper())}')
-        r = _session.get(url, timeout=8)
-        peer_tickers = []
-        if r.status_code == 200:
-            recs = (r.json().get('finance', {}).get('result') or [{}])[0].get('recommendedSymbols', [])
-            peer_tickers = [x['symbol'] for x in recs[:4] if x.get('symbol')]
-        all_tickers = [ticker.upper()] + peer_tickers
+        t = ticker.upper()
+        # TechBio(AI 신약개발)는 큐레이션 — 이종 'AI'(데이터센터·로봇) 배제. 그 외는 Yahoo 추천.
+        peer_tickers = _curated_aidrug_peers(t)
+        if peer_tickers is None:
+            peer_tickers = []
+            url = (f'https://query1.finance.yahoo.com/v6/finance/recommendationsbysymbol/'
+                   f'{urllib.parse.quote(t)}')
+            r = _session.get(url, timeout=8)
+            if r.status_code == 200:
+                recs = (r.json().get('finance', {}).get('result') or [{}])[0].get('recommendedSymbols', [])
+                peer_tickers = [x['symbol'] for x in recs[:4] if x.get('symbol')]
+        all_tickers = [t] + peer_tickers
 
         def _fetch_peer(pt):
             try:
@@ -2550,7 +2940,24 @@ def get_stock(ticker: str):
                 hist = hist_fut.result(timeout=15)
             except Exception:
                 hist = None
-        if not d: raise HTTPException(404, "Not found")
+
+        # 가격 + 히스토리 모두 실패 → 펀드/일부 ETF로 추정 (Naver·yfinance 모두 미제공)
+        if not d and not hist:
+            raise HTTPException(404, detail={
+                'error_code': 'unsupported_kr_fund',
+                'ticker': ticker,
+                'message': '한국 펀드/일부 ETF는 외부 시세 소스(Naver Finance · yfinance)에서 조회되지 않습니다.',
+                'hint': '보유 종목 등록은 가능하지만 실시간 시세·차트는 표시되지 않습니다. 자산 추이/비중 계산은 평균단가로 추정됩니다.',
+                'sources_tried': ['naver_finance', 'yfinance.KS', 'yfinance.KQ'],
+            })
+        # 가격만 실패 (히스토리 있음) — 거래정지/공시 휴장 등
+        if not d:
+            raise HTTPException(404, detail={
+                'error_code': 'kr_price_unavailable',
+                'ticker': ticker,
+                'message': '현재가 조회만 실패했습니다. 거래정지/공시 휴장 또는 일시적 데이터 소스 오류일 수 있습니다.',
+            })
+
         # 52주 고가·저가·총 거래량 등을 hist에서 계산
         extra = {}
         if hist:
@@ -2576,10 +2983,34 @@ def get_stock(ticker: str):
                     short_name = el.get_text(strip=True)
         except Exception:
             pass
-        return {**d, **extra, 'ticker': ticker, 'hist': hist or [], 'short_name': short_name}
+
+        # stale fallback 사용 시 사용자에게 명시
+        is_stale = bool(d.get('_stale'))
+        stale_min = int(d.get('_stale_age_sec', 0) // 60) if is_stale else 0
+        data_status = 'stale' if is_stale else 'ok'
+        data_message = (
+            f"한국 시세 1·2차 소스가 일시 응답하지 않아 약 {stale_min}분 전 가격을 표시합니다. "
+            f"자동 재시도 중입니다."
+            if is_stale else None
+        )
+        return {
+            **d, **extra,
+            'ticker': ticker, 'hist': hist or [],
+            'short_name': short_name,
+            '_data_status':  data_status,
+            '_data_message': data_message,
+            '_data_source':  d.get('_source'),
+        }
+
     d = _stock_full(ticker.upper())
-    if not d: raise HTTPException(404, "Not found")
-    return d
+    if not d:
+        raise HTTPException(404, detail={
+            'error_code': 'delisted_or_invalid',
+            'ticker': ticker.upper(),
+            'message': '잘못된 티커이거나 상장폐지 종목일 수 있습니다.',
+            'hint': '티커 철자를 확인하시거나, 검색에서 종목을 다시 선택해주세요.',
+        })
+    return {**d, '_data_status': 'ok', '_data_message': None}
 
 @app.get("/api/stock/{ticker}/price")
 def get_price(ticker: str):
@@ -2767,10 +3198,11 @@ def _sector_stocks_us(sector: str) -> list:
                 if p:
                     return {'ticker': tkr, 'name': name,
                             'price': round(p['current_price'], 2),
-                            'change_pct': round(p['change_pct'], 2), 'market_cap': 0}
+                            'change_pct': round(p['change_pct'], 2), 'market_cap': 0,
+                            'spark': p.get('spark', [])}
         except Exception:
             pass
-        return {'ticker': tkr, 'name': name, 'price': 0, 'change_pct': 0, 'market_cap': 0}
+        return {'ticker': tkr, 'name': name, 'price': 0, 'change_pct': 0, 'market_cap': 0, 'spark': []}
     result_map = {}
     with _cf.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(_fetch, tn): tn[0] for tn in stocks}
@@ -2792,12 +3224,13 @@ def _sector_stocks_kr(sector: str) -> list:
         tkr, name = tkr_name
         try:
             p = _kr_price(tkr)
+            sp = _kr_spark(tkr) or []
             return {'ticker': tkr, 'name': name,
                     'price': p.get('current_price', 0) if p else 0,
                     'change_pct': round(p.get('change_pct', 0), 2) if p else 0,
-                    'market_cap': 0}
+                    'market_cap': 0, 'spark': sp}
         except Exception:
-            return {'ticker': tkr, 'name': name, 'price': 0, 'change_pct': 0, 'market_cap': 0}
+            return {'ticker': tkr, 'name': name, 'price': 0, 'change_pct': 0, 'market_cap': 0, 'spark': []}
     result_map = {}
     with _cf.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(_fetch, tn): tn[0] for tn in stocks}
@@ -2906,13 +3339,10 @@ class StockAnalyzeReq(BaseModel):
 @app.get("/api/stock/{ticker}/analyze/cached")
 def get_cached_analysis(ticker: str, name: str = ''):
     """캐시된 분석이 있으면 반환, 없으면 cached=False. 분석 자동 트리거 안 함."""
-    name_hint = (name or '').strip()
-    cache_key = f"stock_v2:{ticker.upper()}:{name_hint}"
-    cached = _get_ai_cache(cache_key)
+    # 티커 기준 조회 (이름 무시 + TTL 무시) — 한 번 분석한 종목은 날짜와 함께 기존 결과를 기본 표시
+    cached, ts = _get_stock_cache_by_ticker(ticker)
     if cached is None:
         return {"cached": False}
-    with _lock:
-        ts = _ai_cache_ts.get(cache_key, 0)
     return {
         "cached": True,
         "data": cached,
@@ -2924,19 +3354,25 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
     api_key = req.api_key or _stored_api_key()
     if not api_key:
         raise HTTPException(400, "API key required")
+    if _is_demo(cu):
+        req.force_refresh = False  # 데모: 공유 캐시 재사용, 재분석 강제 차단
     # 종목명을 캐시 키에 포함 — 다른 사용자가 잘못된 이름으로 캐시 오염시켰을 때 방어
     name_hint = (req.name or '').strip()
     # v2: 새 분석 스키마 — 종목 분석은 공개 데이터 + AI 결과이므로 사용자 간 캐시 공유 (비용 최적화)
     cache_key = f"stock_v2:{ticker.upper()}:{name_hint}"
     if not req.force_refresh:
-        cached = _get_ai_cache(cache_key)
+        # 티커 기준(이름·TTL 무시) — 기존 분석이 있으면 그대로 반환. 갱신은 force_refresh로 사용자가 결정.
+        cached, ts = _get_stock_cache_by_ticker(ticker)
         if cached is not None:
-            with _lock:
-                ts = _ai_cache_ts.get(cache_key, 0)
             out = dict(cached)
             out["_cached"] = True
             out["_computed_at"] = ts
             return out
+    # 데모: 미캐시 티커는 라이브 생성 — 24h 롤링 한도 초과 시 차단(비용 상한)
+    if _is_demo(cu) and not _demo_ai_budget_ok():
+        raise HTTPException(429,
+            "데모 체험용 AI 분석 일일 한도에 도달했습니다 — 이미 분석된 종목은 계속 열람 가능합니다. "
+            "회원가입 후 모든 종목을 무제한 분석해보세요.")
     _log_event(cu['user_id'], 'ai_call', {'kind': 'stock_analyze', 'ticker': ticker.upper()})
     _bump_ai_call(cu['user_id'])
 
@@ -3030,7 +3466,9 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
         from datetime import date as _date
         today = _date.today().isoformat()
 
-        prompt = (
+        # 종목별 가변 데이터(가격/펀더멘털/뉴스/공시) — 너무 크면 API가 거절하므로
+        # 상위(최신) 내용만 남기고 50,000자 내외로 자른다. 고정 지침은 별도로 뒤에 붙여 보존.
+        context_block = _truncate_head(
             f"오늘 날짜: {today}\n"
             f"분석 대상: {company_name}\n"
             f"티커: {ticker_str}\n"
@@ -3038,16 +3476,30 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
             + (f"{fundamentals_str}\n" if fundamentals_str else "")
             + (f"{target_str}\n" if target_str else "")
             + extra_guidance
-            + f"\n[수집된 최근 뉴스 헤드라인 (참고용)]\n{news_block}\n"
+            + f"\n[수집된 최근 뉴스 헤드라인 (참고용)]\n{news_block}\n",
+            MAX_STOCK_PAYLOAD_CHARS,
+        )
+
+        prompt = (
+            context_block
             + (
                 "\n[작업 절차]\n"
-                "STEP 1: web_search 도구로 다음 8가지를 최신 정보로 조사하세요 (각 항목 별 1-2회 검색):\n"
+                "STEP 0 (섹터 판별 후 분기): 먼저 종목의 섹터·비즈니스 모델을 판별하라.\n"
+                "  ▶ TechBio/바이오 플랫폼(AI 기반 신약 발굴 등 임상단계 신약개발사 — 예: RXRX, SDGR, EXAI)인 경우 아래를 반드시 반영:\n"
+                "     (a) 경영진 변경 해석: 공동창업자의 이사회 퇴임 + 전문경영인(신약개발·상업화 전문가)의 경영 전담을 "
+                "'단순 경영진 불확실성 리스크'로 기계적 분류하지 말 것. '연구 단계 → 상업화·파트너십/계약 단계로의 전환'이라는 중립~긍정 맥락으로 해석하라.\n"
+                "     (b) 재무지표: 제조업식 '수주 잔고/백로그' 조사를 강제하지 말 것. 대신 '잠재 마일스톤(Potential Milestones) 총액'과 "
+                "'기술수출(License-out) 계약 잠재력'(파트너십당 개발·규제 마일스톤 잠재 규모, 선급금·로열티 구조)을 우선 추적하라.\n"
+                "     (c) 동종업계(Peer): 'AI' 키워드만으로 데이터센터(APLD)·로봇(SERV) 등 이종 섹터를 비교군에 넣지 말 것. "
+                "SDGR·EXAI 등 'AI 기반 신약개발 플랫폼' 기업으로만 비교하라.\n"
+                "  ▶ 그 외 섹터(제조·반도체·SW·소비재 등)는 STEP 1 표준 절차를 그대로 따른다.\n"
+                "STEP 1: web_search로 다음을 충분히 조사하세요 (총 4회 이내, 실적·호재·애널리스트·전략 위주):\n"
                 "  ① 회사 최근 사업 진행, 신사업 진출, 미래 전략 (최근 3-6개월)\n"
                 "  ② CEO/경영진의 최근 발언, 인터뷰, IR/투자자 컨퍼런스\n"
                 "  ③ 가장 최근 분기 실적: 매출·영업이익·EPS (컨센서스 대비)·가이던스\n"
                 "  ④ 단기 호재 (1-3M): 신제품·규제승인·수주·파트너십 — 반드시 정량 수치\n"
                 "  ⑤ 중기 호재 (3-12M): 신사업 매출 기여·시장 확장·캐파 증설 — 정량\n"
-                "  ⑥ 수주 잔고/백로그 또는 RPO/Deferred Revenue (해당 시)\n"
+                "  ⑥ (제조·SW형) 수주 잔고/백로그·RPO·Deferred Revenue / (TechBio형) 잠재 마일스톤 총액·기술수출(License-out) 잠재력 — 섹터에 맞는 지표만\n"
                 "  ⑦ 최근 1-2개월 애널리스트 보고서 (기관·목표가·의견 변경)\n"
                 "  ⑧ 무료 다운로드 가능한 보고서/IR 페이지 URL\n\n"
                 "STEP 2: 모든 조사가 끝나면, 다음 JSON을 한국어로 작성하여 단일 메시지로 응답하세요.\n"
@@ -3057,18 +3509,21 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
                 "{\n"
                 '  "recommendation": "매수" | "보유" | "매도",\n'
                 '  "priceTarget": null 또는 숫자 (USD 또는 KRW 단위, 표시 통화에 맞게),\n'
-                '  "summary": "한국어 2-3문장 핵심 요약",\n'
-                '  "company_overview": "한국어 4-6줄. 최근 동향·신사업·미래 전략을 사실 기반으로 서술. 핵심 수치 포함.",\n'
-                '  "earnings_ir": "한국어 4-6줄. 최근 분기 실적(매출/영업이익/EPS), 컨센서스 대비, CEO 발언, 가이던스.",\n'
-                '  "catalysts_short": ["한국어, 정량 수치 포함한 단기 호재 3개"],\n'
-                '  "catalysts_medium": ["한국어, 정량 수치 포함한 중기 호재 3개"],\n'
-                '  "backlog": "한국어. 수주 잔고/백로그 현황 (없으면 빈 문자열)",\n'
-                '  "analyst_views": "한국어 3-4줄. 최근 발간 애널리스트 보고서 요약 (기관명·목표가·의견 변동).",\n'
-                '  "bull": ["한국어 강세 포인트 3개"],\n'
-                '  "bear": ["한국어 리스크 3개"],\n'
-                '  "verdict": "한국어 1-2줄 최종 의견"\n'
+                '  "summary": "한국어 3-4문장. 투자 논거의 핵심을 서술형으로.",\n'
+                '  "company_overview": "한국어 5-7줄 상세 서술. 사업 구조·최근 동향·신사업·미래 전략을 인과관계와 핵심 수치로 설명. 단어 나열 금지, 완결된 문장으로.",\n'
+                '  "earnings_ir": "한국어 5-7줄 상세. 최근 분기 매출/영업이익/EPS를 컨센서스·전년동기 대비 수치로, 가이던스와 CEO 발언의 함의까지 서술.",\n'
+                '  "catalysts_short": ["단기 호재 3개 — 각 항목을 1-2문장으로 근거·정량 수치·시점과 함께 서술 (단어 나열 금지)"],\n'
+                '  "catalysts_medium": ["중기 호재 3개 — 각 항목을 1-2문장으로 근거·정량 수치와 함께 서술"],\n'
+                '  "backlog": "한국어 2-3줄. (제조·SW형) 수주 잔고/백로그/RPO 현황·추이. (TechBio/바이오 플랫폼) 대신 잠재 마일스톤 총액·기술수출(License-out) 계약 잠재력을 서술. 해당 없으면 빈 문자열",\n'
+                '  "analyst_views": "한국어 4-5줄 상세. 최근 애널리스트 보고서를 기관명·목표가·의견 변동과 그 논거까지 서술.",\n'
+                '  "bull": ["강세 논거 3개 — 각 항목을 1-2문장으로 근거와 함께 서술 (단어 조각 금지)"],\n'
+                '  "bear": ["리스크 3개 — 각 항목을 1-2문장으로 근거·발생 가능성과 함께 서술"],\n'
+                '  "verdict": "한국어 2-3문장 최종 의견 — 매수/보유/매도 판단의 핵심 근거와 조건."\n'
                 "}\n"
                 "[규칙]\n"
+                "- 【분량·깊이 필수】 company_overview·earnings_ir·analyst_views·backlog 각 필드는 **최소 4문장 이상** 상세 서술. "
+                "catalysts/bull/bear의 각 항목도 **완결된 1-2문장(근거+구체 수치)**. "
+                "'Azure 고성장', 'Copilot 채택 확대' 같은 **키워드·단어 나열식 짧은 답변은 거부됨** — 반드시 '왜·얼마나·언제'를 문장으로 풀어쓸 것.\n"
                 "- 모든 string 값은 한국어로 작성. 회사명·티커·통화기호·전문용어 약어는 영어 그대로 OK.\n"
                 "- 확인되지 않은 항목은 정확히 \"확인 필요\" 라고만 적고, 추측 절대 금지.\n"
                 "- 모든 수치는 출처·시점을 함께 명시 (예: 'Q1 FY26 매출 $200.3M (YoY +63.5%, 2026-05-08 발표)').\n"
@@ -3081,7 +3536,7 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
             api_key=api_key,
             model="claude-sonnet-4-6",
             prompt=prompt,
-            max_tokens=8192,
+            max_tokens=8000,
             max_searches=4,
             timeout=180,
         )
@@ -3331,6 +3786,8 @@ class StrategyReq(BaseModel):
     prices:   dict = {}
     scope:    str  = 'ALL'        # 어떤 계좌 필터로 분석했는지 (캐시 저장용)
     force_refresh: bool = False   # True면 캐시 무시하고 새로 분석
+    years_to_retirement: int | None = None   # 은퇴까지 남은 햇수 (Life Timeline)
+    monthly_inflow:      float | None = None  # 매월 추가 투입 가능액 (KRW)
 
 @app.get("/api/portfolio/strategy/cached")
 def portfolio_strategy_cached(scope: str = 'ALL', cu: dict = Depends(get_current_user)):
@@ -3359,9 +3816,15 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     api_key = _stored_api_key()
     if not api_key:
         raise HTTPException(400, "AI 비서가 잠시 자리를 비웠습니다 — 관리 탭에서 Anthropic API Key를 먼저 입력해주세요")
+    # 데모: force_refresh 무시 → '업데이트' 반복 클릭해도 캐시 재사용(재과금 차단)
+    if _is_demo(cu):
+        req.force_refresh = False
     _log_event(cu['user_id'], 'ai_call', {'kind': 'portfolio_strategy', 'scope': req.scope})
     _bump_ai_call(cu['user_id'])
-    _fp = hashlib.md5(json.dumps(sorted(h.get('ticker','') for h in req.holdings)).encode()).hexdigest()
+    _fp = hashlib.md5(json.dumps([
+        sorted(h.get('ticker', '') for h in req.holdings),
+        req.years_to_retirement, req.monthly_inflow,
+    ]).encode()).hexdigest()
     _cache_key = f"strategy:{cu['user_id']}:{_fp}"
     # 1) force_refresh면 캐시 무시
     if not req.force_refresh:
@@ -3381,6 +3844,12 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
                 return json.loads(row['result_json'])
             except Exception:
                 pass
+
+    # 데모: 캐시 미스에서만 라이브 생성 — 24h 롤링 한도 초과 시 차단(비용 상한)
+    if _is_demo(cu) and not _demo_ai_budget_ok():
+        raise HTTPException(429,
+            "데모 체험용 AI 분석 일일 한도에 도달했습니다 — 잠시 후 다시 시도하거나, "
+            "회원가입 후 본인 포트폴리오로 무제한 이용해보세요.")
 
     usd_krw = 1380.0
     enriched = []
@@ -3450,38 +3919,59 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     avg_mdd  = sum(e['mdd'] for e in valid_m) / len(valid_m) if valid_m else 0
     avg_sh   = sum(e['sharpe'] for e in valid_m) / len(valid_m) if valid_m else 0
 
-    prompt = f"""당신은 15년 경력의 월스트리트 & 한국 주식시장 투자 전략가입니다.
-아래 포트폴리오 데이터를 심층 분석하여 전문 투자 리포트를 작성해주세요.
+    # Life Timeline 입력 정제
+    _accounts = sorted({e['account'] for e in enriched if e.get('account')})
+    _acct_str = ', '.join(_accounts) if _accounts else '미지정'
+    _yrs = req.years_to_retirement
+    _yrs_eff = _yrs if (_yrs and _yrs > 0) else 15
+    _yrs_str = f"{_yrs}년" if (_yrs and _yrs > 0) else "미입력(기본 15년 가정)"
+    _inflow_str = (f"₩{req.monthly_inflow:,.0f}/월"
+                   if (req.monthly_inflow and req.monthly_inflow > 0) else "미입력")
 
-=== 포트폴리오 현황 (총 평가액 ₩{total_krw:,.0f}) ===
+    prompt = f"""[역할] 당신은 월스트리트 출신 세계 최고 수준의 자산 배분가(Asset Allocator)이자 글로벌 매크로 분석가입니다. 보유 자산과 은퇴까지 남은 시간(Life Timeline)을 결합해 5년 단위 포괄적 자산배분(주식·채권·금·부동산/리츠·암호화폐·연금) 전략을 도출합니다. 명료하고 냉철한 전문 어조로 한국어로 작성하세요.
+
+=== 입력 데이터 ===
+- 총 평가 자산(Total_Capital): ₩{total_krw:,.0f}
+- 은퇴까지 남은 시간(Years_To_Retirement): {_yrs_str}
+- 운영 계좌(Account_Types): {_acct_str}
+- 매월 추가 투입금(Monthly_Inflow): {_inflow_str}
+- 종합 지표(1년): 평균 수익률 {avg_ret:+.1f}% | 평균 MDD {avg_mdd:.1f}% | 평균 샤프 {avg_sh:.2f}
+
+=== 보유 종목 ===
 {chr(10).join(holding_lines)}
 
 === 섹터 비중 ===
 {chr(10).join(sector_lines)}
 
-=== 포트폴리오 종합 지표 (1년 기준) ===
-  평균 수익률: {avg_ret:+.1f}% | 평균 MDD: {avg_mdd:.1f}% | 평균 샤프지수: {avg_sh:.2f}
+[작성 지침]
+- [1] 종합 리스크 진단: 은퇴 잔여 시간 대비 현재 변동성(MDD)·섹터 쏠림이 유효한지, 절세 계좌(DC/ISA 등)의 혜택이 현재 종목 구성에 올바르게 활용되는지 세무/금융 관점으로 진단.
+- [2] 5년 단위 자산배분: {_yrs_eff}년을 5년 단위 Phase로 나눠(예: 15년→3개, 10년→2개) 각 Phase의 자산 비중(%)·계좌별 운용·추가 유입금 투입 방향을 구체적으로 제시.
+- [3] 월 배당 시뮬레이션: 전액을 월 배당형으로 대전환할 경우의 계좌별 추천 자산·비중·예상 월 현금흐름 + [월가의 경고](성장 기회비용 상실을 은퇴 타임라인과 비교해 날카롭게).
+- [예외] 적자 마이크로캡/초소형 성장주는 5% 미만 또는 종목당 고정금액으로 리스크 격리 지시. 환율은 장기 복리 증식 관점.
 
-다음 형식으로 JSON만 응답해주세요 (다른 텍스트 없이).
-중요: 문자열 값 안에 큰따옴표(")를 절대 사용하지 마세요. 작은따옴표(')나 다른 표현을 사용하세요.
+다음 JSON만 응답하세요 (다른 텍스트 없이). 문자열 값 안에 큰따옴표(")를 절대 쓰지 말고 작은따옴표(')를 쓰세요.
 {{
-  "expert_review": "전문가 총평 — 포트폴리오 전반적 진단 및 강약점 (3문장 이내)",
-  "risk_factors": [
-    {{"title": "리스크 제목", "detail": "구체적 설명 (1-2문장)"}},
-    {{"title": "...", "detail": "..."}},
-    {{"title": "...", "detail": "..."}}
+  "expert_review": "전문가 총평 — 포트폴리오 전반 진단·강약점 (3-4문장)",
+  "risk_diagnosis": "[1] 종합 리스크 진단 — 타임라인 대비 변동성·섹터 쏠림 유효성 + 절세계좌(DC/ISA) 활용 진단 (5-7문장)",
+  "allocation_phases": [
+    {{"name": "단계명(예: 공격적 성장기)", "years": "1~5년차", "allocation": {{"주식": 60, "채권": 15, "금": 10, "리츠": 10, "암호화폐": 5}}, "account_strategy": "계좌별 운용 — 어떤 계좌(ISA/DC 등)에서 어떤 자산을 매집", "inflow_direction": "추가 유입금 최적 투입 방향"}}
   ],
+  "dividend_simulation": {{
+    "rows": [{{"account": "계좌", "asset": "추천 배당자산(ETF/리츠)", "weight": 30, "monthly_cashflow": "₩예상 월현금흐름"}}],
+    "total_monthly": "₩총 예상 월 현금흐름",
+    "warning": "[월가의 경고] 성장 기회비용(Capital Gain 상실)을 은퇴 타임라인과 비교한 날카로운 경고 (2-3문장)"
+  }},
+  "risk_factors": [{{"title": "리스크 제목", "detail": "구체적 설명 (1-2문장)"}}],
   "rebalancing": "구체적 리밸런싱 제안 — 확대/축소할 종목·섹터 명시 (3문장 이내)",
-  "actions": [
-    {{"priority": "HIGH", "action": "즉시 실행할 액션 (1문장)"}},
-    {{"priority": "MED",  "action": "중기 검토 액션 (1문장)"}},
-    {{"priority": "LOW",  "action": "장기 전략 액션 (1문장)"}}
-  ],
-  "macro_view": "현재 글로벌 매크로 환경과 이 포트폴리오의 포지셔닝 평가 (2문장 이내)"
-}}"""
+  "actions": [{{"priority": "HIGH", "action": "즉시 실행 (1문장)"}}, {{"priority": "MED", "action": "중기 (1문장)"}}, {{"priority": "LOW", "action": "장기 (1문장)"}}],
+  "macro_view": "글로벌 매크로 환경과 이 포트폴리오 포지셔닝 평가 (2문장)",
+  "edge_notes": "마이크로캡 격리·환율 등 예외 처리 코멘트 (해당 없으면 빈 문자열)"
+}}
+
+[규칙] allocation_phases 는 {_yrs_eff}년을 5년 단위로 나눈 개수만큼 생성하고, 각 Phase allocation 자산 비중의 합은 반드시 100이어야 한다."""
 
     try:
-        text = _call_claude(api_key, "claude-haiku-4-5-20251001", prompt, 4096, 120)
+        text = _call_claude(api_key, "claude-sonnet-4-6", prompt, 7000, 150)
         try:
             result = _parse_claude_json(text)
         except Exception as pe:
@@ -3886,6 +4376,40 @@ def _compute_holding_summary(rows: list) -> dict:
         'total_fee':        round(total_fee, 2),
     }
 
+def _sync_holding_from_tx(user_id: int, account: str, ticker: str, name: str = ''):
+    """해당 계좌·종목의 거래내역을 FIFO로 재계산 → 보유(portfolios)에 반영.
+    전량 매도(수량 0)면 보유에서 제거. 거래기록이 보유·비중·차트 등 전 탭에 연동되게 함."""
+    ticker = str(ticker).upper()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT side, quantity, price, fee, tax FROM transactions "
+            "WHERE user_id=? AND account=? AND UPPER(ticker)=? "
+            "ORDER BY traded_at ASC, id ASC",
+            (user_id, account, ticker)
+        ).fetchall()
+    s = _compute_holding_summary([dict(r) for r in rows])
+    qty = s['current_quantity']
+    ud = _load_user_data(user_id)
+    holdings = ud['portfolios'].get(account, [])
+    idx = next((i for i, x in enumerate(holdings)
+                if str(x.get('ticker', '')).upper() == ticker), None)
+    if qty <= 1e-9:
+        if idx is not None:
+            holdings.pop(idx)
+            ud['portfolios'][account] = holdings
+            _save_user_data(user_id, ud)
+        return
+    if idx is not None:
+        holdings[idx]['quantity']  = qty
+        holdings[idx]['avg_price'] = s['avg_cost']
+        if name and not str(holdings[idx].get('name') or '').strip():
+            holdings[idx]['name'] = name
+    else:
+        holdings.append({'ticker': ticker, 'name': name or ticker,
+                         'quantity': qty, 'avg_price': s['avg_cost'], 'sector': ''})
+    ud['portfolios'][account] = holdings
+    _save_user_data(user_id, ud)
+
 @app.get("/api/transactions")
 def list_transactions(ticker: str = '', limit: int = 200, cu: dict = Depends(require_approved)):
     """거래내역 조회. ticker 지정 시 해당 종목만."""
@@ -3934,17 +4458,32 @@ def add_transaction(req: TransactionReq, cu: dict = Depends(require_approved)):
              side, req.quantity, req.price, req.fee, req.tax, traded, req.memo, time())
         )
         new_id = cur.lastrowid
+    # 거래 → 보유 동기화 (보유·비중·차트 전 탭 연동)
+    try:
+        _sync_holding_from_tx(cu['user_id'], req.account, req.ticker, req.name)
+    except Exception:
+        pass
     return {'ok': True, 'id': new_id}
 
 @app.delete("/api/transactions/{tx_id}")
 def delete_transaction(tx_id: int, cu: dict = Depends(require_approved)):
     with _db() as conn:
+        row = conn.execute(
+            "SELECT account, ticker, name FROM transactions WHERE id=? AND user_id=?",
+            (tx_id, cu['user_id'])
+        ).fetchone()
         cur = conn.execute(
             "DELETE FROM transactions WHERE id=? AND user_id=?",
             (tx_id, cu['user_id'])
         )
     if cur.rowcount == 0:
         raise HTTPException(404, "거래내역을 찾을 수 없습니다")
+    # 삭제 후 보유 재동기화
+    if row:
+        try:
+            _sync_holding_from_tx(cu['user_id'], row['account'], row['ticker'], row['name'] or '')
+        except Exception:
+            pass
     return {'ok': True}
 
 # ─── 백테스트 (P1-2) ──────────────────────────────────────────────────
@@ -4723,57 +5262,107 @@ def portfolio_correlation(req: CorrelationReq, cu: dict = Depends(require_approv
     }
 
 # ─── 실적 캘린더 (B안-B4) ────────────────────────────────────────────
+# 참고 유니버스 — S&P500 상위 ~50 + Nasdaq100 상위 ~50 (시총 상위 근사, 중복 제거)
+# 실적 캘린더 유니버스 — 시총 상위: 나스닥 30 + S&P500 30 + KOSPI 30 (2026 기준 큐레이션)
+_NASDAQ_TOP30 = [
+    'AAPL','MSFT','NVDA','AMZN','GOOGL','META','AVGO','TSLA','COST','NFLX',
+    'ADBE','AMD','PEP','CSCO','TMUS','INTC','QCOM','INTU','TXN','AMGN',
+    'ISRG','AMAT','BKNG','HON','VRTX','ADP','MU','LRCX','REGN','PANW',
+]
+_SP500_TOP30 = [
+    'AAPL','MSFT','NVDA','AMZN','GOOGL','META','BRK-B','LLY','AVGO','TSLA',
+    'JPM','WMT','V','UNH','XOM','MA','JNJ','PG','HD','COST',
+    'ORCL','ABBV','MRK','CVX','AMD','KO','PEP','BAC','NFLX','ADBE',
+]
+_KOSPI_TOP30 = [
+    '005930','000660','373220','207940','005380','000270','068270','105560',
+    '035420','012330','028260','005490','055550','035720','051910','006400',
+    '086790','000810','015760','033780','096770','003670','017670','316140',
+    '011200','259960','010130','009150','011070','032830',
+]
+_EARNINGS_REF_TICKERS = sorted(set(_NASDAQ_TOP30 + _SP500_TOP30 + _KOSPI_TOP30))
+_earnings_cache: Dict[str, tuple] = {}   # ticker -> (fetched_ts, [events])
+_EARNINGS_TTL = 43200  # 12h — 실적일은 자주 안 바뀜
+
 class EarningsReq(BaseModel):
     tickers: list = []
     days_ahead: int = 90
 
 @app.post("/api/earnings/calendar")
 def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
-    """보유·관심 종목의 다음 실적 발표일 일괄 조회."""
-    if not req.tickers:
-        return {'events': []}
+    """보유·관심 + 참고 유니버스(나스닥30·S&P500 30·KOSPI30)의 실적 발표일 일괄 조회.
+    보유종목이 없어도 참고 유니버스는 항상 표시한다."""
     import yfinance as yf
     from datetime import timedelta as _td
     days_ahead = max(1, min(req.days_ahead, 365))
     cutoff = datetime.now() + _td(days=days_ahead)
 
+    now = datetime.now()
+    win_lo = now - _td(days=45)   # 이번 달 '과거' 발표일도 표시 (예: 지난주 NVDA 발표)
+
     def _fetch(tkr):
+        tkr = str(tkr).upper()
+        is_kr = bool(re.match(r'^A?\d{6}$', tkr))
+        nowt = time()
+        c = _earnings_cache.get(tkr)
+        if c and nowt - c[0] < _EARNINGS_TTL:
+            return c[1]
+        out = []
         try:
-            if re.match(r'^A?\d{6}$', tkr):
-                # KR 종목은 yfinance earnings 데이터 거의 없음 — 스킵
-                return None
-            t = yf.Ticker(tkr.upper())
-            # earnings_dates: DataFrame with index=date
-            ed = t.earnings_dates
-            if ed is None or ed.empty: return None
-            now = datetime.now()
-            # tz-naive 비교
-            for ts_idx in ed.index:
-                try:
-                    ts = ts_idx.to_pydatetime().replace(tzinfo=None)
-                except Exception:
-                    continue
-                if ts >= now and ts <= cutoff:
-                    row = ed.loc[ts_idx]
-                    return {
-                        'ticker':       tkr.upper(),
-                        'date':         ts.strftime('%Y-%m-%d'),
-                        'eps_estimate': float(row.get('EPS Estimate')) if row.get('EPS Estimate') == row.get('EPS Estimate') else None,
-                        'eps_actual':   float(row.get('Reported EPS')) if row.get('Reported EPS') == row.get('Reported EPS') else None,
-                    }
-        except Exception: pass
-        return None
+            if is_kr:
+                # KR: .KS(KOSPI) → .KQ(KOSDAQ) 순으로 earnings 시도 (있는 종목만 표시)
+                code = tkr.lstrip('A')
+                ed = None
+                for _sfx in ('.KS', '.KQ'):
+                    try:
+                        _cand = yf.Ticker(code + _sfx).earnings_dates
+                        if _cand is not None and not _cand.empty:
+                            ed = _cand; break
+                    except Exception:
+                        continue
+            else:
+                ed = yf.Ticker(tkr).earnings_dates   # DataFrame, index=date
+            if ed is not None and not ed.empty:
+                for ts_idx in ed.index:
+                    try:
+                        ts = ts_idx.to_pydatetime().replace(tzinfo=None)
+                    except Exception:
+                        continue
+                    if win_lo <= ts <= cutoff:
+                        row = ed.loc[ts_idx]
+                        out.append({
+                            'ticker': tkr,
+                            'date':   ts.strftime('%Y-%m-%d'),
+                            'eps_estimate': float(row.get('EPS Estimate')) if row.get('EPS Estimate') == row.get('EPS Estimate') else None,
+                            'eps_actual':   float(row.get('Reported EPS')) if row.get('Reported EPS') == row.get('Reported EPS') else None,
+                        })
+        except Exception:
+            pass
+        _earnings_cache[tkr] = (nowt, out)
+        return out
+
+    # 보유·관심 + 참고 유니버스(S&P500·Nasdaq100 상위) 병합
+    held = {str(t).upper() for t in req.tickers}
+    all_tickers = sorted(held | set(_EARNINGS_REF_TICKERS))
 
     events = []
-    with _cf.ThreadPoolExecutor(max_workers=min(len(req.tickers), 20)) as ex:
-        futs = [ex.submit(_fetch, t) for t in req.tickers]
-        for fut in _cf.as_completed(futs, timeout=20):
+    # with 블록 금지(느린 스레드 대기 → 먹통) → 수동 executor + 비대기 shutdown.
+    ex = _cf.ThreadPoolExecutor(max_workers=min(len(all_tickers), 24))
+    try:
+        futs = [ex.submit(_fetch, t) for t in all_tickers]
+        for fut in _cf.as_completed(futs, timeout=22):
             try:
                 r = fut.result(timeout=0)
-                if r: events.append(r)
+                if r: events.extend(r)
             except Exception: pass
+    except Exception:
+        pass  # TimeoutError 등 — 모인 결과만 (캐시 워밍 후 다음 호출은 빠름)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    for e in events:
+        e['held'] = e['ticker'] in held
     events.sort(key=lambda x: x['date'])
-    return {'events': events, 'tickers_checked': len(req.tickers)}
+    return {'events': events, 'tickers_checked': len(all_tickers)}
 
 # ─── 차트 비교 모드 (B안-B5) — 가격 시계열 일괄 ────────────────────
 class CompareSeriesReq(BaseModel):
@@ -5093,6 +5682,125 @@ def mark_all_notifications_read(cu: dict = Depends(require_approved)):
     return {'ok': True, 'marked': cnt}
 
 
+# ─── Web Push (V2) — VAPID + 구독 + 발송 ───────────────────────────
+# 인앱 알림(V1, notifications 테이블)에 더해 브라우저가 닫혀 있어도 도달하는 푸시.
+# VAPID 키는 최초 호출 시 1회 생성해 settings에 저장(cron_secret 패턴과 동일).
+PUSH_VAPID_SUB = 'mailto:rising.yu@gmail.com'   # VAPID claims sub (연락처)
+
+def _get_vapid() -> tuple[str, str]:
+    """(private_pem, public_app_server_key_b64url) 반환. 없으면 생성·저장."""
+    with _db() as conn:
+        rows = {r['key']: r['value'] for r in conn.execute(
+            "SELECT key, value FROM settings WHERE key IN ('vapid_private','vapid_public')"
+        ).fetchall()}
+    priv, pub = rows.get('vapid_private'), rows.get('vapid_public')
+    if priv and pub:
+        return priv, pub
+    # 최초 1회 생성 (cryptography는 pywebpush 의존성으로 항상 존재)
+    import base64
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    pk = ec.generate_private_key(ec.SECP256R1())
+    priv = pk.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()).decode()
+    raw_pub = pk.public_key().public_bytes(
+        serialization.Encoding.X962,
+        serialization.PublicFormat.UncompressedPoint)
+    pub = base64.urlsafe_b64encode(raw_pub).rstrip(b'=').decode()
+    with _db() as conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)",
+                     ('vapid_private', priv))
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)",
+                     ('vapid_public', pub))
+    return priv, pub
+
+def _send_push(user_id: str, title: str, body: str, url: str = '/') -> int:
+    """user_id의 모든 구독에 푸시 발송. 만료 구독(404/410)은 정리. 발송 성공 수 반환.
+    실패해도 호출부(알림 INSERT 등)에 영향 없도록 전부 격리."""
+    try:
+        from pywebpush import webpush, WebPushException
+    except Exception:
+        return 0
+    try:
+        priv, _ = _get_vapid()
+    except Exception:
+        return 0
+    with _db() as conn:
+        subs = conn.execute(
+            "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?",
+            (user_id,)
+        ).fetchall()
+    if not subs:
+        return 0
+    payload = json.dumps({'title': title, 'body': body, 'url': url})
+    sent, dead = 0, []
+    for s in subs:
+        try:
+            webpush(
+                subscription_info={
+                    'endpoint': s['endpoint'],
+                    'keys': {'p256dh': s['p256dh'], 'auth': s['auth']},
+                },
+                data=payload,
+                vapid_private_key=priv,
+                vapid_claims={'sub': PUSH_VAPID_SUB},  # 매 호출 새 dict (라이브러리가 변형)
+                timeout=10,
+            )
+            sent += 1
+        except WebPushException as e:
+            code = getattr(getattr(e, 'response', None), 'status_code', None)
+            if code in (404, 410):       # 만료/해지된 구독
+                dead.append(s['endpoint'])
+        except Exception:
+            pass
+    if dead:
+        with _db() as conn:
+            conn.executemany("DELETE FROM push_subscriptions WHERE endpoint=?",
+                             [(e,) for e in dead])
+    return sent
+
+@app.get("/api/push/public_key")
+def push_public_key(cu: dict = Depends(require_approved)):
+    _, pub = _get_vapid()
+    return {'key': pub}
+
+class PushSubReq(BaseModel):
+    endpoint: str
+    keys: Dict[str, str] = {}
+
+@app.post("/api/push/subscribe")
+def push_subscribe(req: PushSubReq, cu: dict = Depends(require_approved)):
+    p256dh, auth = req.keys.get('p256dh'), req.keys.get('auth')
+    if not req.endpoint or not p256dh or not auth:
+        raise HTTPException(400, "invalid subscription")
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO push_subscriptions "
+            "(endpoint, user_id, p256dh, auth, created_at) VALUES (?,?,?,?,?)",
+            (req.endpoint, cu['user_id'], p256dh, auth, time())
+        )
+    return {'ok': True}
+
+class PushUnsubReq(BaseModel):
+    endpoint: str
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(req: PushUnsubReq, cu: dict = Depends(require_approved)):
+    with _db() as conn:
+        conn.execute("DELETE FROM push_subscriptions WHERE endpoint=? AND user_id=?",
+                     (req.endpoint, cu['user_id']))
+    return {'ok': True}
+
+@app.post("/api/push/test")
+def push_test(cu: dict = Depends(require_approved)):
+    """본인에게 테스트 푸시 1건 — 구독/발송 동작 검증용."""
+    sent = _send_push(cu['user_id'], '다온 알림 테스트',
+                      '푸시 알림이 정상 동작합니다. 🎉', '/')
+    return {'ok': True, 'sent': sent}
+
+
 # ─── 알림 트리거 cron (모든 활성 알림 가격 체크) ────────────────────
 class TriggerReq(BaseModel):
     cron_secret: str = ''
@@ -5148,6 +5856,7 @@ def cron_check_alerts(req: TriggerReq):
             pass
 
     triggered = 0
+    pushed: list = []   # (user_id, msg) — 커밋 후 Web Push 발송 대상
     with _db() as conn:
         for r in rows:
             cur = prices.get(r['ticker'])
@@ -5174,9 +5883,190 @@ def cron_check_alerts(req: TriggerReq):
                 (now, r['id'])
             )
             triggered += 1
+            pushed.append((r['user_id'], msg))
+
+    # 인앱 알림 INSERT 후 Web Push 발송 (DB 커밋 이후, 실패해도 격리)
+    for uid, msg in pushed:
+        _send_push(uid, '다온 가격 알림', msg, '/')
 
     return {'checked': len(rows), 'triggered': triggered,
             'unique_tickers': len(tickers)}
+
+
+# ─── AI 주간 리밸런싱 리포트 (cron, 주 1회) ────────────────────────
+def _weekly_rebalance_for_user(uid: str, api_key: str) -> int:
+    """ai_enabled 사용자 1인의 포트폴리오를 조립 → Haiku로 리밸런싱 핵심 3가지 →
+    notifications(info) INSERT + Web Push. 생성=1, 스킵/실패=0. 전부 격리."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ticker, name, avg_price, quantity, sector "
+            "FROM portfolios WHERE user_id=?", (uid,)
+        ).fetchall()
+    holdings = [dict(r) for r in rows if float(r['quantity'] or 0) > 0]
+    if len(holdings) < 2:
+        return 0   # 리밸런싱 의미 최소 2종목
+    usd_krw = 1380.0   # 상대 비중 계산용 (전략 엔드포인트와 동일 가정)
+    enriched, total = [], 0.0
+    for h in holdings:
+        tkr = h['ticker']; qty = float(h['quantity']); avg = float(h['avg_price'] or 0)
+        is_us = not is_kr(tkr)
+        p = (_price_fast(tkr) if is_us else _kr_price(tkr)) or {}
+        cur = float(p.get('current_price') or avg)
+        val = qty * cur * (usd_krw if is_us else 1.0)
+        total += val
+        enriched.append({'tkr': tkr, 'name': h['name'] or tkr,
+                         'sector': h['sector'] or '기타', 'val': val,
+                         'pnl': ((cur - avg) / avg * 100 if avg > 0 else 0.0)})
+    if total <= 0:
+        return 0
+    enriched.sort(key=lambda x: -x['val'])
+    lines = [f"  [{e['tkr']}] {e['name']} | 섹터:{e['sector']} | "
+             f"비중:{e['val']/total*100:.1f}% | 수익률:{e['pnl']:+.1f}%" for e in enriched]
+    sec: dict = {}
+    for e in enriched:
+        sec[e['sector']] = sec.get(e['sector'], 0) + e['val']
+    sec_lines = [f"  {k}: {v/total*100:.1f}%" for k, v in
+                 sorted(sec.items(), key=lambda x: -x[1])]
+    prompt = (
+        "[역할] 당신은 자산배분 전문가입니다. 아래 포트폴리오를 '이번 주 리밸런싱' 관점에서 "
+        "검토해 핵심 3가지를 한국어로 간결히 제시하세요. 과도한 집중·부진 종목·분산 보완 위주로, "
+        "각 항목 1~2문장 불릿(•)만. 군더더기·인사말 금지.\n\n"
+        f"총자산: ₩{total:,.0f}\n=== 보유 ===\n" + "\n".join(lines) +
+        "\n=== 섹터 비중 ===\n" + "\n".join(sec_lines)
+    )
+    try:
+        text = _call_claude(api_key, "claude-haiku-4-5-20251001", prompt, 700, 60)
+    except Exception:
+        return 0
+    if not text or not text.strip():
+        return 0
+    msg = text.strip()[:900]
+    now = time()
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO notifications (user_id, ticker, name, kind, message, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (uid, '', '주간 리밸런싱', 'info', msg, now)
+        )
+    _bump_ai_call(uid)
+    _send_push(uid, '다온 주간 리밸런싱',
+               msg[:110] + ('…' if len(msg) > 110 else ''), '/')
+    return 1
+
+@app.post("/api/cron/weekly_rebalance")
+def cron_weekly_rebalance(req: TriggerReq):
+    """주 1회 cron 호출. ai_enabled 승인 사용자별 AI 리밸런싱 리포트 생성.
+    cron_secret 검증(check_alerts와 동일). 비용 제어: ai_enabled 사용자만."""
+    secret = ''
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='cron_secret'"
+        ).fetchone()
+        if row: secret = row['value']
+    if not secret or req.cron_secret != secret:
+        raise HTTPException(403, "invalid cron secret")
+    api_key = _stored_api_key()
+    if not api_key:
+        return {'processed': 0, 'reason': 'no_api_key'}
+    with _db() as conn:
+        users = conn.execute(
+            "SELECT user_id FROM users WHERE ai_enabled=1 AND status='approved'"
+        ).fetchall()
+    processed = 0
+    for u in users:
+        try:
+            processed += _weekly_rebalance_for_user(u['user_id'], api_key)
+        except Exception:
+            pass
+    return {'processed': processed, 'eligible_users': len(users)}
+
+
+# ─── AI 캐시 외부 import (Claude Code/채팅에서 만든 분석 결과 주입) ────
+# 사용 시나리오: API 호출 비용/rate limit 없이 무료 Claude로 분석 →
+#                결과 JSON을 본 endpoint로 inject → 종목 탭이 즉시 표시.
+# 권한: admin만 사용 가능 (다른 사용자의 분석 캐시까지 영향 주므로).
+REQUIRED_FIELDS = {'recommendation', 'summary'}   # 최소 검증 (스키마 호환)
+
+class AiCacheImportItem(BaseModel):
+    ticker: str
+    name:   str = ''
+    data:   dict                       # 다온 stock_v2 스키마 전체 (recommendation, priceTarget, ...)
+    source: str = 'manual_import'      # 'manual_import' | 'claude_code' | 'free_chat'
+
+class AiCacheImportReq(BaseModel):
+    items: list                        # list of AiCacheImportItem-like dict
+    overwrite: bool = True             # False면 기존 캐시 있으면 skip
+
+def _require_admin(cu: dict = Depends(get_current_user)):
+    if not cu.get('is_admin'):
+        raise HTTPException(403, "admin only")
+    return cu
+
+@app.post("/api/admin/ai_cache/import")
+def import_ai_cache(req: AiCacheImportReq, cu: dict = Depends(_require_admin)):
+    """외부 도구로 만든 종목 분석 결과를 캐시에 일괄 inject.
+    body: { items: [{ticker, name, data, source}], overwrite: bool }
+    응답: { imported, skipped, failed: [{ticker, error}] }
+    """
+    imported, skipped, failed, audit_warnings = 0, 0, [], []
+    for raw in req.items or []:
+        try:
+            ticker = str(raw.get('ticker') or '').strip().upper()
+            name   = str(raw.get('name') or '').strip()
+            data   = raw.get('data') or {}
+            source = str(raw.get('source') or 'manual_import')
+            if not ticker:
+                failed.append({'ticker': '', 'error': 'ticker required'})
+                continue
+            # 최소 스키마 검증
+            missing = REQUIRED_FIELDS - set(data.keys())
+            if missing:
+                failed.append({'ticker': ticker,
+                    'error': f'missing fields: {", ".join(sorted(missing))}'})
+                continue
+            cache_key = f"stock_v2:{ticker}:{name}"
+            if not req.overwrite and _get_ai_cache(cache_key) is not None:
+                skipped += 1
+                continue
+            _set_ai_cache(cache_key, data, source=source)
+            imported += 1
+            # 출력 품질 자가 감사 — TechBio 비즈니스 로직 위반 시 경고 (저장은 유지)
+            w = _audit_stock_analysis(ticker, data)
+            if w:
+                audit_warnings.append({'ticker': ticker, 'issues': w})
+        except Exception as e:
+            failed.append({'ticker': str(raw.get('ticker') or '?'),
+                          'error': str(e)[:200]})
+
+    _log_event(cu['user_id'], 'ai_cache_import', {
+        'imported': imported, 'skipped': skipped, 'failed_count': len(failed),
+    })
+    return {
+        'imported': imported,
+        'skipped':  skipped,
+        'failed':   failed,
+        'total_in_cache': len(_ai_cache),
+        'audit_warnings': audit_warnings,   # 비즈니스 로직 위반 자동 점검 결과
+    }
+
+@app.get("/api/admin/ai_cache/list")
+def list_ai_cache(cu: dict = Depends(_require_admin)):
+    """현재 캐시된 분석 목록 (관리용)."""
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT cache_key, source, computed_at FROM ai_cache "
+                "ORDER BY computed_at DESC LIMIT 500"
+            ).fetchall()
+        items = [{
+            'cache_key':  r['cache_key'],
+            'source':     r['source'],
+            'computed_at': r['computed_at'],
+            'age_hours':  round((time() - float(r['computed_at'])) / 3600, 1),
+        } for r in rows]
+        return {'items': items, 'count': len(items)}
+    except Exception as e:
+        return {'items': [], 'count': 0, 'error': str(e)}
 
 
 if __name__ == "__main__":

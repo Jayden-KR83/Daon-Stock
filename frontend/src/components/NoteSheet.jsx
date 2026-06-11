@@ -68,7 +68,7 @@ export default function NoteSheet({ ticker, name, isUs, onClose, onSaved }) {
           transition={{ duration: 0.24, ease: [0.22, 0.61, 0.36, 1] }}
           onClick={e => e.stopPropagation()}
           style={{
-            background: 'var(--clr-surface)', borderRadius: 16,
+            background: 'var(--clr-surface)', borderRadius: 4,
             padding: 20, width: '100%', maxWidth: 460,
             border: '1px solid var(--clr-border-md)',
             boxShadow: '0 20px 50px rgba(15,23,42,.25)',

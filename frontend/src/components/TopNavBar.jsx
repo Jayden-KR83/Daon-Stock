@@ -77,7 +77,7 @@ export default function TopNavBar() {
           {showDrop && results.length > 0 && (
             <div ref={dropRef} style={{
               position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-              background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)', borderRadius: 10,
+              background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)', borderRadius: 4,
               boxShadow: '0 8px 24px rgba(15,23,42,.12)', zIndex: 1000, maxHeight: 320, overflowY: 'auto',
             }}>
               {results.slice(0, 8).map(r => (
@@ -128,7 +128,7 @@ function RecentSearches({ onPick, dropRef }) {
     <div ref={dropRef} style={{
       position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
       background: 'var(--clr-surface)', border: '1px solid var(--clr-border-md)',
-      borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,.12)',
+      borderRadius: 4, boxShadow: '0 8px 24px rgba(15,23,42,.12)',
       zIndex: 1000, padding: '6px 0',
     }}>
       <div style={{ padding: '4px 12px', fontSize: 10, fontWeight: 700,

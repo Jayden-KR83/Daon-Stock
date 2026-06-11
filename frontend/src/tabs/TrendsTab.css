@@ -206,8 +206,8 @@
 /* ── 거래량 리스트 ── */
 .tt-list-header {
   display: grid;
-  grid-template-columns: minmax(0,1fr) 80px 72px 64px 64px;
-  gap: 8px; padding: 6px 8px 10px;
+  grid-template-columns: minmax(0,1fr) 72px 56px 56px 52px;
+  gap: 6px; padding: 6px 8px 10px;
   border-bottom: 1px solid var(--clr-border);
   font-size: 10px; font-weight: 700;
   color: var(--clr-text-muted);
@@ -221,8 +221,8 @@
 
 .tt-asset-row {
   display: grid;
-  grid-template-columns: minmax(0,1fr) 80px 72px 64px 64px;
-  gap: 8px; align-items: center;
+  grid-template-columns: minmax(0,1fr) 72px 56px 56px 52px;
+  gap: 6px; align-items: center;
   padding: 9px 8px;
   border-bottom: 1px solid var(--clr-bg);
   cursor: pointer; transition: background var(--t-fast);
@@ -235,6 +235,9 @@
 .tt-asset-row:last-child { border-bottom: none; }
 
 .tt-asset-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* 티커/이름 묶음 div 도 min-width:0 이어야 콘텐츠 폭으로 늘어나 옆 칸(현재가)을 침범하지 않음 */
+.tt-asset-left > div { min-width: 0; overflow: hidden; }
+.tt-asset-left > :first-child { flex-shrink: 0; }   /* 로고는 줄지 않음 */
 .tt-asset-ticker {
   font-size: 12px; font-weight: 800;
   color: var(--clr-text-strong);
@@ -262,6 +265,43 @@
   font-size: 10px; font-weight: 600;
   color: var(--clr-text-muted);
   text-align: right; font-variant-numeric: tabular-nums;
+}
+
+/* ── 공유 종목 행 (.tt-srow) — 섹터 드릴 / 거래량 Top10 공통. flex 기반이라 좁은 폭에서도 안 잘림 ── */
+.tt-srow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--clr-bg);
+  cursor: pointer; transition: background var(--t-fast);
+  border-radius: var(--r-md);
+}
+.tt-srow:hover { background: var(--clr-bg); }
+.tt-srow:last-child { border-bottom: none; }
+.tt-srow > *:not(.tt-srow-info) { flex-shrink: 0; }   /* 로고·스파크·가격은 안 줄어듦 */
+.tt-srow-info { flex: 1; min-width: 0; }   /* 핵심: 티커/이름 칸이 옆을 침범하지 않게 */
+.tt-srow-ticker {
+  font-size: 13px; font-weight: 800; color: var(--clr-text-strong);
+  letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tt-srow-name {
+  font-size: 11px; color: var(--clr-text-muted); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
+}
+.tt-srow-spark { flex-shrink: 0; width: 50px; display: flex; align-items: center; justify-content: center; }
+.tt-srow-right { flex-shrink: 0; text-align: right; min-width: 76px; }
+.tt-srow-price {
+  font-size: 13px; font-weight: 700; color: var(--clr-text-strong);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.tt-srow-pct {
+  font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums;
+  white-space: nowrap; margin-top: 1px;
+}
+.tt-srow-pct.pos { color: var(--clr-pos-dark); }
+.tt-srow-pct.neg { color: var(--clr-neg-dark); }
+.tt-srow-sub {
+  font-size: 10px; color: var(--clr-text-muted); font-weight: 600;
+  white-space: nowrap; font-variant-numeric: tabular-nums; margin-top: 2px;
 }
 
 /* ── AI 위젯 ── */

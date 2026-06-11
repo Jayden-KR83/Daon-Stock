@@ -42,7 +42,7 @@ export default function NetWorthChart() {
   // 빈 상태 (스냅샷이 0~1개)
   if (!isLoading && snapshots.length < 2) {
     return (
-      <div style={{ background: 'var(--clr-surface)', borderRadius: 14,
+      <div style={{ background: 'var(--clr-surface)', borderRadius: 4,
         padding: 18, marginBottom: 12,
         boxShadow: '0 1px 3px rgba(15,23,42,.05)',
         border: '1px dashed var(--clr-border-md)' }}>

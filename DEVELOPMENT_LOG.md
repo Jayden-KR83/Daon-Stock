@@ -1,9 +1,23 @@
 # 다온(Daon) 포트폴리오 앱 — 개발 로그
 
-> 마지막 업데이트: **2026-05-19** (대규모 업그레이드)
-> 모델: claude-opus-4-7 (1M context)
-> 서버: ubuntu@168.107.13.20 | 포트: 8501
+> 마지막 업데이트: **2026-06-12** (상용 배포 + 로드맵 4건 + 보안)
+> 모델: claude-opus-4-8
+> 서버: ubuntu@168.107.13.20 | 포트: 8501 (127.0.0.1 전용) · 공개: https://daonwealth.com
 > 로컬: `C:\Users\user\Desktop\쿠든카피 주식앱\`
+
+## 🆕 2026-06 세션 (상용화 + 로드맵 실행 + 보안)
+
+**한 줄 요약**: 도메인·HTTPS 상용 배포 → Web Push·KR Fundamentals/Peers·모바일 스와이프·AI 주간 리밸런싱 로드맵 4건 → 가이드/여정 탭 최신화 → 보안 감사·하드닝. 문서·릴리스 반영 사이클 + 월간 클라우드 루틴 자동화.
+
+- **도메인 + HTTPS 상용 배포**: daonwealth.com · Cloudflare(DNS/프록시) → nginx 리버스 프록시(443→8501) + Cloudflare Origin Cert(Full strict) · uvicorn `127.0.0.1` 바인딩(외부 직노출 차단). 설정: [deploy/](deploy/)
+- **Web Push (V2)**: `push_subscriptions` 테이블 + VAPID 자동생성(`_get_vapid`) + `_send_push` + 엔드포인트 4종(`/api/push/public_key·subscribe·unsubscribe·test`) + `push-sw.js`(importScripts) + 알림벨 켜기/끄기·테스트 토글(`pushClient.js`). cron 알림 트리거 시 푸시 동반.
+- **한국 종목 Fundamentals & Peers**: Naver 스크래핑 `_kr_fundamentals`(PER·PBR·ROE·시총·EPS·배당) + `_kr_peers`(동일업종비교). 프론트 게이트(`isUs`) KR 개방 + 통화 인식(₩ 조/억).
+- **모바일 스와이프 탭 전환**: `useSwipeNav.js` — 좌우 스와이프로 인접 탭(BottomNav 순서). 차트 드래그·가로 스크롤·입력칸 충돌 가드. (풀투리프레시는 회귀 위험으로 보류)
+- **AI 주간 리밸런싱**: `/api/cron/weekly_rebalance` + `_weekly_rebalance_for_user`(Haiku) → 인앱 알림 + 푸시. 서버 cron `0 9 * * 1`(월 KST 18시).
+- **가이드 탭 최신화**: 탭명 전면 교체(포트폴리오·분석·종목·시장·등록·설정) + 가격알림/Web Push/배당/PWA/KR Valuation 추가.
+- **여정 탭**: 로드맵 verdict 완료 4건 + 마일스톤 P30~P33 + 인프라(Cloudflare·nginx) 반영.
+- **보안 감사(/security)**: 심각 0건. CORS `*`→daonwealth.com 제한, daon.db 644→600 즉시 조치. 중장기: 로그인 레이트리밋·관리자 2FA 권고.
+- **운영 자동화**: 문서·릴리스 반영 사이클 문서화([docs/deployment.md](docs/deployment.md) 5.5) + 월간 릴리스 클라우드 루틴 등록(매월 1일 → 여정탭 PR).
 
 ## 🆕 2026-05-19 ~ 2026-05-21 세션 (대규모 업그레이드)
 **자세한 내용**: [SESSION_2026-05-19.md](SESSION_2026-05-19.md)

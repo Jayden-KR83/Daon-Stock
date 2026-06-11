@@ -143,7 +143,7 @@ export default function CompareChart() {
             exit={{ opacity: 0, scale: 0.9 }}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '5px 9px', borderRadius: 18,
+              padding: '5px 9px', borderRadius: 4,
               background: `${COLORS[i]}22`,
               border: `1px solid ${COLORS[i]}66`,
               fontSize: 11, fontWeight: 700, color: COLORS[i],
@@ -174,7 +174,7 @@ export default function CompareChart() {
             <div ref={dropRef} style={{
               position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
               background: 'var(--clr-surface)',
-              border: '1px solid var(--clr-border-md)', borderRadius: 10,
+              border: '1px solid var(--clr-border-md)', borderRadius: 4,
               boxShadow: '0 8px 24px rgba(15,23,42,.12)', zIndex: 50,
               maxHeight: 260, overflowY: 'auto',
             }}>
@@ -233,7 +233,7 @@ export default function CompareChart() {
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35 }}>
             {/* 차트 */}
-            <div style={{ background: 'var(--clr-bg)', borderRadius: 10,
+            <div style={{ background: 'var(--clr-bg)', borderRadius: 4,
               padding: 8, marginTop: 8 }}>
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
@@ -271,11 +271,16 @@ export default function CompareChart() {
                   return (
                     <div key={s.ticker} style={{
                       flex: '1 1 100px', padding: '8px 10px',
-                      background: 'var(--clr-bg)', borderRadius: 8,
-                      borderLeft: `3px solid ${color}`,
+                      background: 'var(--clr-bg)', borderRadius: 4,
+                      border: '1px solid var(--m-outline-variant)',
                     }}>
                       <div style={{ fontSize: 11, fontWeight: 700,
-                        color: 'var(--clr-text-strong)' }}>{s.ticker}</div>
+                        color: 'var(--clr-text-strong)', display: 'flex',
+                        alignItems: 'center', gap: 5 }}>
+                        <i style={{ width: 8, height: 8, borderRadius: 2,
+                          background: color, flexShrink: 0 }} />
+                        {s.ticker}
+                      </div>
                       <div style={{ fontSize: 14, fontWeight: 900,
                         color: s.change >= 0 ? 'var(--clr-pos-dark)' : 'var(--clr-neg-dark)',
                         fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>

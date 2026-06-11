@@ -27,6 +27,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Web Push 핸들러(push/notificationclick)를 생성 SW에 주입 (public/push-sw.js)
+        // ?v= : 파일 부재 시절 Cloudflare가 캐시한 404를 우회(새 캐시 키)
+        importScripts: ['push-sw.js?v=1'],
         // API 호출은 캐시하지 않음 (실시간 데이터 우선)
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [

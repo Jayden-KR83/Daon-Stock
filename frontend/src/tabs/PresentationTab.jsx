@@ -40,6 +40,8 @@ const TECH_STACK = [
   { category: '인프라', items: [
     { name: 'Oracle Cloud VM',  role: 'Always Free Tier ARM 인스턴스, 24/7 무중단 운영' },
     { name: 'systemd + cron',   role: '서비스 + 일별 백업 + 자동 스냅샷 + OOM swap 보호' },
+    { name: 'Cloudflare',       role: 'daonwealth.com DNS · 프록시(WAF/DDoS 방어) · 엣지 HTTPS' },
+    { name: 'nginx + Origin SSL', role: '리버스 프록시(443→8501) · Origin 인증서 Full strict 암호화' },
   ]},
 ]
 
@@ -154,9 +156,9 @@ const STATS = [
   { label: '계좌 유형',       value: '동적',    sub: '사용자별 추가 (9종 통화 지원)' },
   { label: '개발 세션',       value: '60+',     sub: 'Claude Code 대화 세션 누적' },
   { label: '오류 수정',       value: '100+',    sub: '주요 버그 픽스 누적 건수' },
-  { label: '개발 기간',       value: '4개월',   sub: '2026.02 → 2026.05' },
+  { label: '개발 기간',       value: '5개월',   sub: '2026.02 → 2026.06' },
   { label: 'AI 모델',        value: '2종',     sub: 'Sonnet 4.6 (심층) + Haiku 4.5 (전략)' },
-  { label: '배포 환경',       value: 'Oracle',  sub: 'Cloud VM · 24/7 운영 + 자동 백업' },
+  { label: '배포 환경',       value: 'Live',    sub: 'daonwealth.com · Cloudflare HTTPS' },
   { label: '회귀 테스트',     value: 'PASS',    sub: 'Puppeteer 자동 회귀 시스템' },
 ]
 
@@ -188,9 +190,13 @@ const MILESTONES = [
   { phase: 'P25', label: 'PWA 설치 & 오프라인',    desc: 'vite-plugin-pwa · manifest + 192/512 아이콘 + workbox runtime cache · InstallPrompt UI.', done: true },
   { phase: 'P26', label: '가격 알림 (V1 인앱)',    desc: '목표가·손절가 등록 → 서버 cron 5분 간격 체크 → 알림 벨 + 미확인 카운트. Web Push는 도메인 후 V2.', done: true },
   { phase: 'P27', label: '배당금 이력 & 캘린더',   desc: 'yfinance dividends 기반 24개월 이력 + 연간 예상 + 다가오는 ex-date. 분석 탭 임베드.', done: true },
-  { phase: 'Next', label: 'Web Push 알림 (V2)',    desc: '도메인·SSL 확보 후 service-worker push API + VAPID 키 발급.', done: false },
-  { phase: 'Next', label: 'JS 번들 코드 스플릿',   desc: 'manualChunks + 탭별 React.lazy(). 초기 1.5MB → 800KB 목표.', done: false },
-  { phase: 'Next', label: 'KR 데이터 이중화',      desc: 'Naver fallback 강화 + 5분 stale-while-revalidate. 한국 종목 안정성 ↑.', done: false },
+  { phase: 'P28', label: 'JS 번들 코드 스플릿',   desc: 'manualChunks(vendor 분리) + 탭별 React.lazy(). 초기 번들 192KB(gzip)로 축소.', done: true },
+  { phase: 'P29', label: 'KR 가격 이중화',        desc: 'Naver 1차 → yfinance .KS/.KQ 2차 → 30분 stale-while-revalidate 3차. 한국 종목 안정성 확보.', done: true },
+  { phase: 'P30', label: '도메인 + HTTPS 상용 배포', desc: 'daonwealth.com 등록 · Cloudflare DNS/프록시 · nginx 리버스 프록시 + Origin 인증서(Full strict) · 8501 내부 잠금. 누구나 https로 안전하게 접속.', done: true },
+  { phase: 'P31', label: 'Web Push 알림 (V2)',    desc: 'VAPID + service-worker push로 브라우저 종료 시에도 OS 알림 도달. 알림 벨 켜기/끄기·테스트 토글 + cron 푸시 발송.', done: true },
+  { phase: 'P32', label: '한국 종목 Fundamentals & Peers', desc: 'Naver 스크래핑으로 KR PER·PBR·ROE·시총·EPS·배당 + 동일업종비교. 종목 탭 게이트(isUs) KR 개방.', done: true },
+  { phase: 'P33', label: '모바일 스와이프 + AI 주간 리밸런싱', desc: '좌우 스와이프 탭 전환(충돌 가드) + 매주 월요일 Haiku 리밸런싱 리포트 자동 발송(cron + 푸시).', done: true },
+  { phase: 'Next', label: '상용화 — 결제·약관·모니터링', desc: '구독 결제 연동 · 이용약관/개인정보처리방침 · 업타임 모니터링/알림 · support@ 이메일 도메인.', done: false },
 ]
 
 const COMPARE_FEATURES = [
@@ -220,40 +226,41 @@ const ROADMAP = [
     considerations: 'KRX Open API는 인증 토큰 필요. 3종목만 위해 추가 의존성 도입은 비용 대비 효과 낮음.',
     verdict: '보류 권장', verdictReason: '해당 3종목만 영향. 수동 가격 입력 필드 추가로 해결 가능' },
   { title: 'Web Push 알림 (V2)', priority: 'High',
-    desc: 'V1 인앱 알림은 도입 완료. V2는 service-worker push API + VAPID 키로 브라우저 닫혀 있어도 알림 도달.',
-    cost: 'Web Push 무료 (도메인 + SSL 필요)', devTime: '2~3 세션 (4~6h)',
-    considerations: '도메인 등록 + Let\'s Encrypt 후 진행. iOS Safari는 PWA 설치 필요.',
-    verdict: '실행 권장', verdictReason: '인앱 알림 사용 데이터 확보 후 적용 가치 높음' },
+    desc: 'VAPID + service-worker push로 브라우저를 닫아도 목표가·손절가 도달 알림이 OS로 도착. 알림 벨에 켜기/끄기·테스트 토글.',
+    cost: 'Web Push 무료', devTime: '완료 (2026.06)',
+    considerations: 'pywebpush + push_subscriptions 테이블. iOS는 홈 화면 설치 후 동작.',
+    verdict: '완료', verdictReason: 'cron 트리거 시 인앱 알림과 함께 푸시 발송 — 라이브 검증 완료' },
   { title: 'WebSocket 실시간 가격', priority: 'Medium',
     desc: '현재 60초 폴링 → WebSocket 스트림.',
     cost: 'Oracle Free Tier 내 가능', devTime: '3~5 세션 (6~10h)',
     considerations: 'Yahoo·Naver WebSocket 미제공. 서버 측 폴링 후 푸시 구조.',
     verdict: '보류 권장', verdictReason: '데이터 소스 한계로 진정한 실시간 불가' },
   { title: '한국 종목 Fundamentals & Peers', priority: 'Medium',
-    desc: 'KR 종목 Valuation·Financials·동종업계 비교가 빈 값. 네이버/DART 파싱 보강 필요.',
-    cost: '추가 비용 0', devTime: '3~4 세션 (6~8h)',
-    considerations: 'yfinance KR info는 일부만 채워짐. 네이버 증권 스크래핑 보강.',
-    verdict: '실행 권장', verdictReason: '한국 종목 차트 탭의 정보 격차 해소 필요' },
+    desc: 'KR 종목 Valuation(PER·PBR·ROE·시총·EPS·배당) + 동일업종비교를 Naver 스크래핑으로 채움. 종목 탭에서 미국과 동일하게 표시.',
+    cost: '추가 비용 0', devTime: '완료 (2026.06)',
+    considerations: 'Naver 투자정보 ID + 동일업종비교 테이블 파싱. 프론트 게이트(isUs)도 KR 개방.',
+    verdict: '완료', verdictReason: '삼성전자·SK하이닉스 등 라이브 검증 — 정보 격차 해소' },
   { title: 'AI 자동 주간 리밸런싱 리포트', priority: 'Low',
-    desc: '매주 월요일 자동 AI 분석 → 리밸런싱 권고 이메일.',
-    cost: 'Haiku 주 1회: 월 $0.5~1', devTime: '3~5 세션 (6~10h)',
-    considerations: 'cron 추가. 사용자별 알림 주기 설정.',
-    verdict: '조건부 실행', verdictReason: '목표가 알림 기능과 통합 시 효율적' },
+    desc: '매주 월요일(KST 18시) ai_enabled 사용자별 포트폴리오를 Haiku로 분석 → 리밸런싱 핵심 3가지를 인앱 알림 + 푸시로 발송.',
+    cost: 'Haiku 주 1회: 월 $0.5~1', devTime: '완료 (2026.06)',
+    considerations: '서버 cron(0 9 * * 1) + /api/cron/weekly_rebalance. 가격 알림 푸시 인프라 재사용.',
+    verdict: '완료', verdictReason: '목표가 알림 푸시와 통합 — eligible 사용자 발송 검증' },
   { title: '글로벌 주식 확장 (일본·유럽)', priority: 'Low',
     desc: '일본 7203.T, 유럽 SIE.DE, 홍콩 0700.HK 등 거래소 확장.',
     cost: '추가 비용 0', devTime: '4~5 세션 (8~10h)',
     considerations: 'JPY/EUR/HKD 환율 API 확장 필요. 수요 확인 필요.',
     verdict: '보류', verdictReason: '현재 사용자는 미국·한국 위주. 수요 발생 시 구현' },
-  { title: '모바일 터치 제스처 강화', priority: 'Low',
-    desc: '차트 핀치 줌, 좌우 스와이프 탭 전환, 풀투리프레시.',
-    cost: '추가 비용 0', devTime: '2~3 세션 (4~6h)',
-    considerations: 'react-swipeable 등 라이브러리 추가. PWA와 함께 도입 권장.',
-    verdict: '조건부 실행', verdictReason: 'PWA 전환 시 함께 도입하면 효율적' },
+  { title: '모바일 터치 제스처 (스와이프 탭 전환)', priority: 'Low',
+    desc: '앱/모바일에서 좌우 스와이프로 인접 탭 전환 (BottomNav 순서 미러링). 차트 드래그·가로 스크롤·입력칸과 충돌 방지 가드.',
+    cost: '추가 비용 0', devTime: '완료 (2026.06)',
+    considerations: '풀투리프레시는 스크롤 충돌 위험으로 보류. 핀치 줌은 차트 드래그 줌으로 대체.',
+    verdict: '완료', verdictReason: '스와이프 탭 전환 도입 — PTR은 회귀 위험으로 의도적 제외' },
 ]
 
 /* ─── 헬퍼 ─── */
 function verdictClass(v) {
   if (!v) return 'is-med'
+  if (v.startsWith('완료')) return 'is-low'    // 완료 — positive
   if (v.startsWith('실행')) return 'is-low'
   if (v.startsWith('조건부')) return 'is-high'
   return 'is-med'  // 보류
@@ -321,7 +328,7 @@ export default function PresentationTab() {
         </div>
         <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text-secondary)',
           marginBottom: 14 }}>
-          Claude Code와의 협업으로 완성한 개인 투자 플랫폼 · 2026.02 → 2026.05
+          Claude Code와의 협업으로 완성한 개인 투자 플랫폼 · 2026.02 → 2026.06
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
           gap: 0, borderTop: '1px solid var(--m-outline-variant)', paddingTop: 14 }}>
@@ -347,8 +354,9 @@ export default function PresentationTab() {
             <div className="mono-section-title is-accent" style={{ marginBottom: 10 }}>
               최초 빌드 프롬프트
             </div>
-            <div style={{ borderLeft: '2px solid var(--m-primary)',
-              paddingLeft: 12, paddingTop: 4, paddingBottom: 4 }}>
+            <div style={{ background: 'var(--m-surface-variant)',
+              border: '1px solid var(--m-outline-variant)', borderRadius: 4,
+              padding: '8px 12px' }}>
               <div className="m3-label" style={{ marginBottom: 6 }}>USER → Claude Code</div>
               <pre className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text-secondary)',
                 lineHeight: 1.85, whiteSpace: 'pre-wrap',
@@ -491,8 +499,9 @@ export default function PresentationTab() {
                 </div>
 
                 {/* KEY CHANGE — 좌측 색띠만 */}
-                <div style={{ borderLeft: '2px solid var(--m-text)',
-                  paddingLeft: 10, paddingTop: 2, paddingBottom: 2, marginBottom: 10 }}>
+                <div style={{ background: 'var(--m-surface-variant)',
+                  border: '1px solid var(--m-outline-variant)', borderRadius: 4,
+                  padding: '6px 10px', marginBottom: 10 }}>
                   <div className="m3-label" style={{ marginBottom: 2 }}>KEY CHANGE</div>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--m-text)' }}>
                     {p.keyChange}
@@ -758,8 +767,8 @@ export default function PresentationTab() {
               gap: 6, marginBottom: 14 }}>
               {[
                 { label: '총 검토', value: ROADMAP.length },
-                { label: '실행 권장', value: ROADMAP.filter(r => r.verdict?.startsWith('실행')).length },
-                { label: '조건부', value: ROADMAP.filter(r => r.verdict?.startsWith('조건부')).length },
+                { label: '완료', value: ROADMAP.filter(r => r.verdict?.startsWith('완료')).length },
+                { label: '진행 대기', value: ROADMAP.filter(r => r.verdict && (r.verdict.startsWith('실행') || r.verdict.startsWith('조건부'))).length },
                 { label: '보류', value: ROADMAP.filter(r => r.verdict?.startsWith('보류')).length },
               ].map(s => (
                 <div key={s.label} style={{ borderRadius: 2,
@@ -794,8 +803,9 @@ export default function PresentationTab() {
                   {/* 판단 사유 — 좌측 색띠 */}
                   {r.verdictReason && (
                     <div style={{
-                      borderLeft: '2px solid var(--m-text)',
-                      paddingLeft: 10, paddingTop: 2, paddingBottom: 2, marginBottom: 8 }}>
+                      background: 'var(--m-surface-variant)',
+                      border: '1px solid var(--m-outline-variant)', borderRadius: 4,
+                      padding: '6px 10px', marginBottom: 8 }}>
                       <span className="m3-label" style={{ marginRight: 6 }}>사유</span>
                       <span className="ko-keep" style={{ fontSize: 11,
                         color: 'var(--m-text)' }}>{r.verdictReason}</span>
@@ -830,12 +840,12 @@ export default function PresentationTab() {
               지속 개선이 필요한 관점
             </div>
             {[
-              { tag: 'SECURITY', sev: 'is-critical',
-                title: '인증 없는 포트폴리오 접근',
-                desc: '서버 IP를 아는 누구나 접근 가능. PBKDF2 인증은 추가 완료. OAuth 또는 IP 화이트리스트 검토 가능.' },
-              { tag: 'PERF', sev: 'is-high',
-                title: 'JS 번들 1.5MB 초기 로딩',
-                desc: 'Code Splitting 적용 시 초기 로딩 50% 개선 가능. 탭별 Lazy Loading 도입 검토.' },
+              { tag: 'SECURITY', sev: 'is-high',
+                title: '엣지 보안 강화 (HTTPS 적용 완료)',
+                desc: 'PBKDF2 인증 + Cloudflare 프록시 + nginx Origin 인증서(Full strict) + 8501 내부 잠금 완료. 추가로 OAuth/2FA·Cloudflare Access SSO 검토 가능.' },
+              { tag: 'PERF', sev: 'is-med',
+                title: '번들 최적화 (코드 스플릿 적용 완료)',
+                desc: 'manualChunks + 탭별 lazy로 초기 192KB(gzip) 달성. 추가로 이미지/폰트 최적화·HTTP 캐시 헤더 튜닝 여지.' },
               { tag: 'DATA', sev: 'is-high',
                 title: 'Naver Finance 스크래핑 취약성',
                 desc: '네이버 HTML 구조 변경 시 한국 주가 전체 오류 발생. 공식 Open API 전환 또는 대체 소스 이중화 검토.' },

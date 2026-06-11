@@ -1,6 +1,31 @@
 /* ── HoldingsTab ── */
 .holdings-tab { padding-top: 4px; }
 
+/* 계좌 필터 드롭다운 — 정렬 토글과 같은 행에 정렬, 네이티브 select 커스텀 */
+.acc-filter-select {
+  appearance: none; -webkit-appearance: none;
+  height: 30px;
+  padding: 0 30px 0 12px;
+  border: 1px solid var(--clr-border-md);
+  border-radius: var(--r-md);
+  background-color: var(--clr-surface);
+  color: var(--clr-text-strong);
+  font-size: 16px;            /* iOS 포커스 자동 줌 방지 (≥16px) */
+  font-weight: 700;
+  font-family: inherit;
+  letter-spacing: -.01em;
+  line-height: 1;
+  cursor: pointer;
+  /* 커스텀 chevron */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+.acc-filter-select:focus {
+  outline: none;
+  border-color: var(--clr-pos-dark);
+}
+
 /* ──────────────────────────────────────────
    Holding Row — sparkline 중앙 배치, 폰트 위계 (value 큼/pnl 작음)
    columns: avatar · identity · spark(중앙) · value · actions

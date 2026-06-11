@@ -7,6 +7,7 @@ import LogoCircle from '../components/LogoCircle'
 import Sparkline from '../components/Sparkline'
 import NumberTicker from '../components/NumberTicker'
 import NoteSheet from '../components/NoteSheet'
+import TransactionsSection from '../components/TransactionsSection'
 import Sparkles from '../components/Sparkles'
 import { SkeletonRow } from '../components/Skeleton'
 import { usePriceFlash } from '../hooks/usePriceFlash'
@@ -130,7 +131,7 @@ export default function HoldingsTab() {
           style={{
             position: 'absolute', top: 12, right: 12, zIndex: 2,
             display: 'inline-flex', alignItems: 'center', gap: 4,
-            padding: '5px 10px', borderRadius: 12,
+            padding: '5px 10px', borderRadius: 4,
             background: 'var(--clr-bg)',
             border: '1px solid var(--clr-border-md)',
             color: 'var(--clr-text-sub)',
@@ -220,37 +221,41 @@ export default function HoldingsTab() {
         </div>
       </div>
 
-      {/* Account filter */}
-      <div className="seg-ctrl" style={{ marginBottom: 10 }}>
-        {['전체', ...ACCOUNTS].map(acc => (
-          <button key={acc} className={`seg-btn ${accFilter === acc ? 'active' : ''}`}
-            onClick={() => setAccFilter(acc)}>
-            {acc === '전체' ? '전체' : ACC_LABELS[acc]}
-          </button>
-        ))}
-      </div>
+      {/* 필터 + 뷰 옵션 — 계좌(드롭다운)와 정렬 토글을 한 행으로 통합 */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* 계좌 필터 (드롭다운) */}
+        <select
+          className="acc-filter-select"
+          value={accFilter}
+          onChange={e => setAccFilter(e.target.value)}
+          aria-label="계좌 필터"
+        >
+          {['전체', ...ACCOUNTS].map(acc => (
+            <option key={acc} value={acc}>
+              {acc === '전체' ? '전체 계좌' : ACC_LABELS[acc]}
+            </option>
+          ))}
+        </select>
 
-      {/* 뷰 옵션 툴바 */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
         {/* 평가액/시세 */}
         <div className="seg-ctrl" style={{ flex: 'none' }}>
           {['평가액', '시세'].map(v => (
             <button key={v} className={`seg-btn ${viewMode === v ? 'active' : ''}`}
-              onClick={() => setViewMode(v)} style={{ minWidth: 46 }}>{v}</button>
+              onClick={() => setViewMode(v)} style={{ minWidth: 44 }}>{v}</button>
           ))}
         </div>
         {/* 높은순/낮은순 */}
         <div className="seg-ctrl" style={{ flex: 'none' }}>
           {['높은순', '낮은순'].map(v => (
             <button key={v} className={`seg-btn ${sortOrder === v ? 'active' : ''}`}
-              onClick={() => setSortOrder(v)} style={{ minWidth: 52 }}>{v}</button>
+              onClick={() => setSortOrder(v)} style={{ minWidth: 48 }}>{v}</button>
           ))}
         </div>
         {/* KRW/USD */}
         <div className="seg-ctrl" style={{ flex: 'none' }}>
           {['KRW', 'USD'].map(v => (
             <button key={v} className={`seg-btn ${currencyMode === v ? 'active' : ''}`}
-              onClick={() => setCurrencyMode(v)} style={{ minWidth: 46 }}>{v === 'KRW' ? '₩원화' : '$달러'}</button>
+              onClick={() => setCurrencyMode(v)} style={{ minWidth: 44 }}>{v === 'KRW' ? '₩원화' : '$달러'}</button>
           ))}
         </div>
       </div>
@@ -263,7 +268,7 @@ export default function HoldingsTab() {
         </div>
       ) : sorted.length === 0 ? (
         <div style={{ padding: '24px 20px', background: 'var(--clr-surface)',
-          border: '1px solid var(--clr-border-md)', borderRadius: 14,
+          border: '1px solid var(--clr-border-md)', borderRadius: 4,
           textAlign: 'center', boxShadow: '0 1px 3px rgba(15,23,42,.04)' }}>
           <div className="emoji-mute" style={{ fontSize: 40, marginBottom: 6 }}>💼</div>
           <div className="ko-keep" style={{ fontSize: 15, fontWeight: 800,
@@ -293,15 +298,24 @@ export default function HoldingsTab() {
         >
         <AnimatePresence initial={false}>
         {sorted.map(h => {
-          const isUs    = !/^A?\d{6}$/.test(h.ticker)
-          const priceData = prices[h.ticker]
-          const cur     = priceData?.current_price ?? h.avg_price
-          const chgPct  = priceData?.change_pct ?? 0
+          // 모든 숫자 필드를 안전하게 변환 — DB 또는 외부 API가 string·null·NaN 반환해도 NaN 전파 차단
+          const ticker = String(h.ticker || '')
+          const qty    = Number(h.quantity) || 0
+          const avg    = Number(h.avg_price) || 0
+          const isUs   = !/^A?\d{6}$/.test(ticker)
+          const priceData = prices[ticker]
+          const rawCur = priceData?.current_price
+          const hasLivePrice = priceData != null && rawCur != null
+            && typeof rawCur === 'number' && !isNaN(rawCur)
+          const isStale = !!priceData?._stale
+          const cur     = hasLivePrice ? rawCur : avg
+          const chgPct  = Number(priceData?.change_pct) || 0
           const up      = chgPct >= 0
-          const costKrw = h.quantity * h.avg_price * (isUs ? usdKrw : 1)
-          const curKrw  = h.quantity * cur * (isUs ? usdKrw : 1)
+          const mul     = isUs ? (Number(usdKrw) || 1) : 1
+          const costKrw = qty * avg * mul
+          const curKrw  = qty * cur * mul
           const pnlKrw  = curKrw - costKrw
-          const pnlPct  = costKrw > 0 ? pnlKrw / costKrw * 100 : 0
+          const pnlPct  = costKrw > 0 ? (pnlKrw / costKrw) * 100 : 0
 
           if (editTicker === `${h.account}-${h.ticker}`) {
             return (
@@ -378,9 +392,19 @@ export default function HoldingsTab() {
                 )}
               </div>
 
-              {/* 4. Value (평가액 또는 시세 — 큰 글자) */}
+              {/* 4. Value (평가액 또는 시세 — 큰 글자). 가격 미수신 시 chip 표시. */}
               <div className="h-value">
-                {viewMode === '평가액' ? (
+                {!hasLivePrice ? (
+                  <span title="외부 시세 소스에서 가격을 받지 못했습니다 (한국 펀드/일부 ETF). 평균단가 기준."
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '2px 7px', borderRadius: 2,
+                      border: '1px dashed var(--m-text-tertiary)',
+                      color: 'var(--m-text-tertiary)',
+                      fontSize: 10, fontWeight: 700,
+                      letterSpacing: '.04em', textTransform: 'uppercase',
+                    }}>시세 없음</span>
+                ) : viewMode === '평가액' ? (
                   <FlashPrice
                     value={curKrw}
                     fmt={v => mask(fmtVal(v))}
@@ -397,11 +421,22 @@ export default function HoldingsTab() {
                     className="h-value-main"
                   />
                 )}
+                {hasLivePrice && isStale && (
+                  <div title="실시간 1·2차 소스 응답 없음 → 30분 내 마지막 정상값"
+                    style={{
+                      marginTop: 2, fontSize: 9, fontWeight: 700,
+                      color: '#B45309', letterSpacing: '.04em',
+                    }}>STALE</div>
+                )}
               </div>
 
-              {/* 5. PnL (손익 — 평가액 모드는 금액+%, 시세 모드는 평단+%) */}
+              {/* 5. PnL (손익 — 평가액 모드는 금액+%, 시세 모드는 평단+%). 가격 없으면 — 표기. */}
               <div className="h-pnl">
-                {viewMode === '평가액' ? (
+                {!hasLivePrice ? (
+                  <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)' }}>
+                    수동 추정만 가능
+                  </span>
+                ) : viewMode === '평가액' ? (
                   <div className="h-pnl-row">
                     <FlashPrice
                       value={pnlKrw}
@@ -432,8 +467,33 @@ export default function HoldingsTab() {
                 )}
               </div>
 
-              {/* 6. Actions (메모 버튼만 — 차트는 row 자체 클릭) */}
+              {/* 6. Actions — 수정(매수/매도 기록) + 메모. 차트는 row 자체 클릭 */}
               <div className="h-actions">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditTicker(`${h.account}-${h.ticker}`)
+                  }}
+                  title="수정 · 매수/매도 거래 기록"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--m-outline-variant)',
+                    color: 'var(--m-text-tertiary)',
+                    width: 26, height: 26, borderRadius: 6, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: 'inherit',
+                  }}>
+                  {/* sliders/settings 아이콘 — 메모(연필)와 명확히 구분 */}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    width="13" height="13">
+                    <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+                    <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+                    <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+                    <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>
+                    <line x1="17" y1="16" x2="23" y2="16"/>
+                  </svg>
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -530,6 +590,15 @@ function EditPanel({ holding, onSave, onCancel, onDelete }) {
         <button className="btn-secondary" onClick={onCancel}>취소</button>
         <button className="btn-secondary" style={{ color: 'var(--clr-neg-dark)', borderColor: '#FCA5A5' }}
           onClick={onDelete}>삭제</button>
+      </div>
+
+      {/* 매수·매도 거래 기록 — 입력 시 보유 수량·평단이 FIFO로 자동 반영되고 전 탭에 연동됨 */}
+      <div style={{ marginTop: 14, borderTop: '1px solid var(--m-outline-variant)', paddingTop: 8 }}>
+        <TransactionsSection
+          ticker={holding.ticker}
+          name={holding.name || ''}
+          isUs={!/^A?\d{6}$/.test(holding.ticker)}
+        />
       </div>
     </div>
   )

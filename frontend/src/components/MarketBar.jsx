@@ -15,14 +15,32 @@ import './MarketBar.css'
 export default function MarketBar() {
   const setChartTicker = useStore(s => s.setChartTicker)
 
-  const { data = [] } = useQuery({
+  const { data = [], isLoading, isError } = useQuery({
     queryKey: ['market'],
     queryFn: getMarket,
     staleTime: 300_000,
     refetchInterval: 300_000,
   })
 
+  // 응답이 비었을 때 — 로딩/오류 구분해서 사용자에게 명확히 알림
   if (!data || data.length === 0) {
+    if (isLoading) {
+      return (
+        <div className="mbar mbar-empty" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 10.5, color: 'var(--m-text-tertiary)',
+          letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700,
+        }}>마켓 데이터 로딩…</div>
+      )
+    }
+    if (isError) {
+      return (
+        <div className="mbar mbar-empty" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 10.5, color: 'var(--m-negative)', fontWeight: 700,
+        }}>마켓 데이터 일시 미연결 — 5분 후 자동 재시도</div>
+      )
+    }
     return <div className="mbar mbar-empty" />
   }
 

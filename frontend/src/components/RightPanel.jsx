@@ -381,7 +381,7 @@ function ChartPanel() {
               title={isStarred ? '관심 목록에서 제거' : '관심 목록에 추가'}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '4px 10px', borderRadius: 14, border: '1px solid',
+                padding: '4px 10px', borderRadius: 4, border: '1px solid',
                 borderColor: isStarred ? 'var(--clr-warn)' : 'var(--clr-border-strong)',
                 background: isStarred ? 'var(--clr-warn-bg)' : 'var(--clr-surface)',
                 color: isStarred ? 'var(--clr-warn-dark)' : 'var(--clr-text-sub)',
@@ -394,7 +394,7 @@ function ChartPanel() {
           {isOwned && (
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '4px 10px', borderRadius: 14,
+              padding: '4px 10px', borderRadius: 4,
               background: 'var(--clr-pos-bg-soft)', color: '#15803D',
               fontSize: 11, fontWeight: 700,
             }}>💼 보유중</span>

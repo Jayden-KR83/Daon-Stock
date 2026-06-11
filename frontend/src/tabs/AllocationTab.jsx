@@ -10,6 +10,7 @@ import NetWorthChart from '../components/NetWorthChart'
 import HealthScoreCard from '../components/HealthScoreCard'
 import AlertsCard from '../components/AlertsCard'
 import DividendsCard from '../components/DividendsCard'
+import BatchAnalyzeCard from '../components/BatchAnalyzeCard'
 import PortfolioSummaryBanner from '../components/PortfolioSummaryBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
@@ -160,6 +161,9 @@ export default function AllocationTab() {
   const [strategyErr, setStrategyErr] = useState('')
   const [strategyAcc, setStrategyAcc] = useState('ALL')
   const [strategyComputedAt, setStrategyComputedAt] = useState(0)  // epoch seconds
+  // Life Timeline 입력 (localStorage 지속)
+  const [retireYears, setRetireYears] = useState(() => localStorage.getItem('daon_retire_years') || '')
+  const [monthlyInflow, setMonthlyInflow] = useState(() => localStorage.getItem('daon_monthly_inflow') || '')
 
   // 계좌 필터/최초 진입 시: 저장된 전략 결과 미리보기
   useEffect(() => {
@@ -197,6 +201,8 @@ export default function AllocationTab() {
         prices,
         scope: strategyAcc,
         force_refresh: forceRefresh,
+        years_to_retirement: retireYears ? Number(retireYears) : null,
+        monthly_inflow: monthlyInflow ? Number(monthlyInflow) : null,
       })
       setStrategyReport(result)
       setStrategyComputedAt(Math.floor(Date.now() / 1000))
@@ -315,6 +321,11 @@ export default function AllocationTab() {
         <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
       )}
 
+      {/* 보유 종목 AI 일괄 분석 — 종목 탭 진입 시 cached 표시 자동 활용 */}
+      {allHoldings.length > 0 && aiEnabled && (
+        <BatchAnalyzeCard allHoldings={allHoldings} />
+      )}
+
 
       {/* View toggle */}
       <div className="seg-ctrl" style={{ marginBottom: 12 }}>
@@ -346,9 +357,9 @@ export default function AllocationTab() {
       ) : (
         <>
           {/* 파이 차트 — 슬라이스별 그라데이션 + 부드러운 drop-shadow */}
-          <div style={{ background: 'var(--clr-surface)', borderRadius: 16,
+          <div style={{ background: 'var(--clr-surface)', borderRadius: 4,
             padding: '20px 0 12px', marginBottom: 12,
-            boxShadow: '0 4px 14px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)',
+            border: '1px solid var(--m-outline-variant)',
             position: 'relative', overflow: 'hidden' }}>
             {/* 배경 mesh-gradient (얇은 액센트) */}
             <div aria-hidden="true" style={{
@@ -404,7 +415,7 @@ export default function AllocationTab() {
                 <Tooltip
                   formatter={(v, name) => [`₩${v.toLocaleString()}`, name]}
                   contentStyle={{
-                    borderRadius: 10,
+                    borderRadius: 4,
                     border: '1px solid var(--clr-border-md)',
                     boxShadow: '0 8px 24px rgba(15,23,42,.12)',
                     fontSize: 12,
@@ -433,8 +444,8 @@ export default function AllocationTab() {
           </div>
 
           {/* 범례 리스트 */}
-          <div style={{ background: 'var(--clr-surface)', borderRadius: 16, padding: '4px 16px 8px',
-            boxShadow: '0 1px 3px rgba(0,0,0,.05)', marginBottom: 16 }}>
+          <div style={{ background: 'var(--clr-surface)', borderRadius: 4, padding: '4px 16px 8px',
+            border: '1px solid var(--m-outline-variant)', marginBottom: 16 }}>
             {pieData.map((d, i) => {
               const isStock = !!d.ticker
               const color = COLORS[i % COLORS.length]
@@ -592,7 +603,7 @@ export default function AllocationTab() {
                   disabled={metricsLoading}
                   onClick={() => runMetrics(true)}
                   style={{
-                    width: '100%', padding: '10px 0', borderRadius: 10, border: '1px solid #0EA5E9',
+                    width: '100%', padding: '10px 0', borderRadius: 4, border: '1px solid #0EA5E9',
                     background: 'var(--clr-surface)', color: 'var(--clr-info-dark)', fontWeight: 700, fontSize: 13,
                     cursor: metricsLoading ? 'not-allowed' : 'pointer',
                     opacity: metricsLoading ? 0.6 : 1, fontFamily: 'inherit',
@@ -639,44 +650,81 @@ export default function AllocationTab() {
               />
             )}
             <div className="tt-ai-content">
-              <div className="tt-ai-badge">AI POWERED</div>
-              <div className="tt-ai-title">Portfolio Strategy Report</div>
-              <div className="tt-ai-desc">
-                종목별 MDD·샤프지수를 계산한 뒤 AI가 포트폴리오 전략 리포트를 생성합니다.
-                전체 소요 시간: 약 1~3분 (종목 수에 따라 다름)
+              {/* AI POWERED + 타이틀 한 줄 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div className="tt-ai-badge">AI POWERED</div>
+                <div className="tt-ai-title">Portfolio Strategy Report</div>
+              </div>
+              <div className="tt-ai-desc" style={{ marginTop: 6 }}>
+                보유 종목 + 은퇴 타임라인을 결합해 5년 단위 자산배분·월배당 시뮬을 생성합니다. 소요 약 1~3분.
               </div>
 
-              {/* 분석 대상 선택 (다크 테마) */}
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 10, color: 'rgba(248,250,252,.55)', fontWeight: 700,
-                  letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 6 }}>분석 대상</div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {['ALL', ...ACCOUNTS].map(acc => {
-                    const active = strategyAcc === acc
-                    return (
-                      <button key={acc}
-                        onClick={() => setStrategyAcc(acc)}
-                        style={{
-                          padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                          fontFamily: 'inherit', cursor: 'pointer',
-                          border: '1px solid',
-                          borderColor: active ? 'rgba(99,102,241,.6)' : 'rgba(148,163,184,.3)',
-                          background: active ? 'rgba(99,102,241,.25)' : 'transparent',
-                          color: active ? '#fff' : 'rgba(248,250,252,.7)',
-                        }}>
-                        {acc === 'ALL' ? '전체' : ACC_LABELS[acc]}
-                        {acc !== 'ALL' && (
-                          <span style={{ fontSize: 10, marginLeft: 3, opacity: .6 }}>
-                            ({allHoldings.filter(h => h.account === acc).length})
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
+              {/* Life Timeline 입력 — 은퇴까지 햇수 · 매월 추가 투입 (선택, 입력 시 더 정밀) */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 130px' }}>
+                  <span style={{ fontSize: 10, color: 'rgba(248,250,252,.6)', fontWeight: 700 }}>은퇴까지 (년)</span>
+                  <input type="number" value={retireYears} min={1} max={50} placeholder="예: 15"
+                    onChange={e => { setRetireYears(e.target.value); localStorage.setItem('daon_retire_years', e.target.value) }}
+                    style={{ height: 36, padding: '0 10px', borderRadius: 6, fontSize: 16,
+                      border: '1px solid rgba(148,163,184,.35)', background: 'rgba(15,23,42,.45)',
+                      color: '#F8FAFC', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px' }}>
+                  <span style={{ fontSize: 10, color: 'rgba(248,250,252,.6)', fontWeight: 700 }}>매월 추가 투입 (₩)</span>
+                  <input type="number" value={monthlyInflow} min={0} step={100000} placeholder="예: 1000000"
+                    onChange={e => { setMonthlyInflow(e.target.value); localStorage.setItem('daon_monthly_inflow', e.target.value) }}
+                    style={{ height: 36, padding: '0 10px', borderRadius: 6, fontSize: 16,
+                      border: '1px solid rgba(148,163,184,.35)', background: 'rgba(15,23,42,.45)',
+                      color: '#F8FAFC', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+                </label>
               </div>
 
-              {/* 저장된 분석 미리보기 안내 */}
+              {/* 분석 대상(드롭다운 필터) + 실행 버튼 — 같은 줄 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8,
+                flexWrap: 'wrap', marginTop: 12 }}>
+                <select
+                  value={strategyAcc}
+                  onChange={e => setStrategyAcc(e.target.value)}
+                  aria-label="분석 대상 계좌"
+                  style={{
+                    appearance: 'none', WebkitAppearance: 'none',
+                    height: 36, padding: '0 30px 0 12px', borderRadius: 8,
+                    border: '1px solid rgba(148,163,184,.35)',
+                    background: 'rgba(15,23,42,.45)', color: '#F8FAFC',
+                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                    cursor: 'pointer', letterSpacing: '-.01em',
+                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23CBD5E1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")",
+                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 9px center',
+                  }}>
+                  {['ALL', ...ACCOUNTS].map(acc => (
+                    <option key={acc} value={acc} style={{ color: '#0F172A' }}>
+                      {acc === 'ALL'
+                        ? '전체 계좌'
+                        : `${ACC_LABELS[acc]} (${allHoldings.filter(h => h.account === acc).length})`}
+                    </option>
+                  ))}
+                </select>
+
+                <ShimmerButton
+                  variant="ai"
+                  disabled={strategyLoading || !hasAnthropicKey || !aiEnabled}
+                  onClick={() => runStrategy(!!strategyReport)}
+                  style={{ width: 'fit-content' }}>
+                  {strategyLoading ? (
+                    <><Spinner /> AI가 분석 중입니다...</>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                      </svg>
+                      {strategyReport ? '↻ 최신 정보로 업데이트' : 'AI 전략 분석 시작'}
+                    </>
+                  )}
+                </ShimmerButton>
+              </div>
+
+              {/* 저장된 분석 미리보기 박스 — 사용자 요청으로 비표시 (주석 보존, 2026-06-06)
               {strategyReport && !strategyLoading && strategyComputedAt > 0 && (
                 <div style={{
                   marginTop: 12, padding: '8px 12px', borderRadius: 8,
@@ -684,30 +732,12 @@ export default function AllocationTab() {
                   border: '1px solid rgba(99,102,241,.35)',
                   fontSize: 11, color: 'rgba(248,250,252,.85)', lineHeight: 1.5,
                 }}>
-                  <span style={{ fontWeight: 700, color: '#C7D2FE' }}>📋 저장된 분석 미리보기</span>
+                  <span style={{ fontWeight: 700, color: '#C7D2FE' }}>저장된 분석 미리보기</span>
                   <span style={{ marginLeft: 6, opacity: 0.85 }}>
                     · {formatRelativeKo(strategyComputedAt)}
                   </span>
                 </div>
-              )}
-
-              <ShimmerButton
-                variant="ai"
-                disabled={strategyLoading || !hasAnthropicKey || !aiEnabled}
-                onClick={() => runStrategy(!!strategyReport)}
-                style={{ marginTop: 10, width: 'fit-content' }}>
-                {strategyLoading ? (
-                  <><Spinner /> AI가 분석 중입니다...</>
-                ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                      strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                    </svg>
-                    {strategyReport ? '↻ 최신 정보로 업데이트' : 'AI 전략 분석 시작'}
-                  </>
-                )}
-              </ShimmerButton>
+              )} */}
             </div>
             {!hasAnthropicKey && (
               <div className="tt-ai-nokey">⚠ API Key 미설정 — 관리 탭에서 설정하세요</div>
@@ -766,7 +796,7 @@ function MetricsResult({ data, holdings }) {
     <div>
       {/* 포트폴리오 요약 카드 */}
       {summary && summary.valid_count > 0 && (
-        <div style={{ background: 'var(--clr-bg)', borderRadius: 12, padding: '12px 14px', marginBottom: 14,
+        <div style={{ background: 'var(--clr-bg)', borderRadius: 4, padding: '12px 14px', marginBottom: 14,
           border: '1px solid var(--clr-border-md)' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--clr-text-mid)', marginBottom: 10 }}>
             포트폴리오 종합 ({summary.valid_count}개 종목 평균)
@@ -921,56 +951,16 @@ function riskSeverity(title = '', detail = '') {
 }
 
 function DaonAIReport({ data }) {
-  const summary = data._metrics_summary || {}
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
     MED:  { color: '#D97706', bg: 'rgba(217,119,6,.10)', label: '중기', desc: '1-3개월',  icon: '◆'  },
     LOW:  { color: '#16A34A', bg: 'rgba(22,163,74,.10)', label: '장기', desc: '6개월+',  icon: '✓'  },
   }
 
-  // 평균 수익률을 게이지로 시각화 — -30% ~ +50% 범위
-  const returnPct = Math.max(-30, Math.min(50, summary.avg_return || 0))
-  const returnGaugePos = ((returnPct + 30) / 80) * 100  // 0~100%
-  // MDD 게이지 — 0~50%
-  const mddPct = Math.min(50, Math.abs(summary.avg_mdd || 0))
-  const mddGaugePos = (mddPct / 50) * 100
-  // 샤프 게이지 — -1 ~ 3 범위
-  const sharpe = Math.max(-1, Math.min(3, summary.avg_sharpe || 0))
-  const sharpeGaugePos = ((sharpe + 1) / 4) * 100
-
   return (
     <div>
-      {/* 분석 메타 — 게이지 시각화로 강화 */}
-      {summary.stock_count > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-            <span className="emoji-mute" style={{ fontSize: 14 }}>📊</span>
-            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--clr-text-strong)' }}>
-              포트폴리오 건강도
-            </span>
-            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--clr-text-muted)' }}>
-              총 {summary.stock_count}종 분석
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-            <GaugeTile label="평균 수익률"
-              value={`${summary.avg_return >= 0 ? '+' : ''}${summary.avg_return}%`}
-              pos={returnGaugePos}
-              color={summary.avg_return >= 0 ? '#16A34A' : '#DC2626'}
-              caption={summary.avg_return >= 0 ? '플러스 수익' : '손실 구간'} />
-            <GaugeTile label="평균 MDD"
-              value={`-${summary.avg_mdd}%`}
-              pos={mddGaugePos}
-              color={summary.avg_mdd <= 15 ? '#16A34A' : summary.avg_mdd <= 25 ? '#D97706' : '#DC2626'}
-              caption={summary.avg_mdd <= 15 ? '안정적' : summary.avg_mdd <= 25 ? '보통' : '높은 변동'} />
-            <GaugeTile label="평균 샤프"
-              value={`${summary.avg_sharpe}`}
-              pos={sharpeGaugePos}
-              color={summary.avg_sharpe >= 1 ? '#16A34A' : summary.avg_sharpe >= 0 ? '#D97706' : '#DC2626'}
-              caption={summary.avg_sharpe >= 1 ? '우수' : summary.avg_sharpe >= 0 ? '보통' : '비효율'} />
-          </div>
-        </div>
-      )}
+      {/* 포트폴리오 건강도 지표(평균 수익률·MDD·샤프)는 Portfolio Health Score 카드로 일원화 —
+          MDD·샤프 중복 제거, Report는 AI 정성 분석에 집중 (2026-06-06) */}
 
       {/* 전문가 총평 */}
       <div className="mono-card" style={{ marginBottom: 12 }}>
@@ -981,6 +971,77 @@ function DaonAIReport({ data }) {
           color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
       </div>
 
+      {/* [1] 종합 리스크 진단 — 타임라인 vs 현재 포지션 */}
+      {data.risk_diagnosis && (
+        <div className="mono-card" style={{ marginBottom: 12 }}>
+          <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>
+            종합 리스크 진단 · 타임라인 vs 현재 포지션
+          </div>
+          <BulletList items={splitToSentences(data.risk_diagnosis)}
+            color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
+        </div>
+      )}
+
+      {/* [2] 인생 타임라인 5년 단위 자산배분 */}
+      {data.allocation_phases?.length > 0 && (
+        <div className="mono-card" style={{ marginBottom: 12 }}>
+          <div className="mono-section-title is-accent" style={{ marginBottom: 10 }}>
+            인생 타임라인 · 5년 단위 자산배분
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {data.allocation_phases.map((ph, i) => <AllocPhase key={i} phase={ph} idx={i} />)}
+          </div>
+        </div>
+      )}
+
+      {/* [3] 월 배당 전환 시뮬레이션 */}
+      {data.dividend_simulation
+        && (data.dividend_simulation.rows?.length > 0 || data.dividend_simulation.warning) && (
+        <div className="mono-card" style={{ marginBottom: 12 }}>
+          <div className="mono-section-header">
+            <div className="mono-section-title is-accent">월 배당 전환 시뮬레이션</div>
+            {data.dividend_simulation.total_monthly && (
+              <span className="mono-pill" style={{ color: 'var(--m-positive)' }}>
+                월 {data.dividend_simulation.total_monthly}
+              </span>
+            )}
+          </div>
+          {data.dividend_simulation.rows?.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                <thead>
+                  <tr style={{ color: 'var(--m-text-tertiary)' }}>
+                    <th style={thStyle}>계좌</th><th style={thStyle}>추천 자산</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>비중</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>예상 월</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.dividend_simulation.rows.map((r, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid var(--m-outline-variant)' }}>
+                      <td style={tdStyle}>{r.account}</td>
+                      <td style={tdStyle}>{r.asset}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.weight}%</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{r.monthly_cashflow}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {data.dividend_simulation.warning && (
+            <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--m-surface-variant)',
+              border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--m-negative)',
+                letterSpacing: '.03em', marginBottom: 3 }}>월가의 경고</div>
+              <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)', lineHeight: 1.6 }}>
+                {String(data.dividend_simulation.warning).replace(/^\s*\[?월가의 경고\]?\s*[:·-]?\s*/, '')}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 매크로 뷰 */}
       {data.macro_view && (
         <div className="mono-card" style={{ marginBottom: 12 }}>
@@ -988,7 +1049,7 @@ function DaonAIReport({ data }) {
             글로벌 매크로 포지셔닝
           </div>
           <BulletList items={splitToSentences(data.macro_view)}
-            color="var(--m-text-secondary)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
+            color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
         </div>
       )}
 
@@ -1007,14 +1068,15 @@ function DaonAIReport({ data }) {
             return (
               <div key={i} className="mono-row">
                 <div className="mono-row-content">
-                  <div className="mono-row-title ko-keep">
+                  {/* 배지 좌측 통일 (추천 액션과 동일 위치) */}
+                  <div className="mono-row-title ko-keep" style={{ display: 'flex',
+                    alignItems: 'center', gap: 6 }}>
+                    <span className={`sev-label ${sevClass}`}>{sev.label}</span>
                     <span style={{ color: 'var(--m-text)' }}>{r.title}</span>
-                    <span className={`sev-label ${sevClass}`}
-                      style={{ marginLeft: 'auto' }}>{sev.label}</span>
                   </div>
                   <div className="mono-row-body ko-keep">
                     <BulletList items={splitToSentences(r.detail)}
-                      color="var(--m-text-secondary)"
+                      color="var(--m-text)"
                       bulletColor="var(--m-text-tertiary)" tone="neutral" small />
                   </div>
                 </div>
@@ -1024,19 +1086,8 @@ function DaonAIReport({ data }) {
         </div>
       )}
 
-      {/* 리밸런싱 제안 */}
-      {data.rebalancing && (
-        <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-title is-positive" style={{ marginBottom: 8 }}>
-            리밸런싱 제안
-          </div>
-          <BulletList items={splitToSentences(data.rebalancing)}
-            color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
-        </div>
-      )}
-
-      {/* 추천 액션 — 무채색 timeline (sev-dot 제거, 우선순위 chip만) */}
-      {data.actions?.length > 0 && (
+      {/* 실행 가이드 — 리밸런싱(비중 조정) + 추천 액션 통합. 둘 다 "무엇을 할까"라 한 카드로. */}
+      {(data.rebalancing || data.actions?.length > 0) && (
         <div className="mono-card" style={{ marginBottom: 12 }}>
           <div className="mono-section-header">
             <div className="mono-section-title is-accent">추천 액션</div>
@@ -1044,7 +1095,21 @@ function DaonAIReport({ data }) {
               우선순위 순
             </span>
           </div>
-          {data.actions.map((a, i) => {
+
+          {/* 리밸런싱 = 비중 조정 제안 (좌측 띠 banner — design.md R1) */}
+          {data.rebalancing && (
+            <div style={{ marginBottom: data.actions?.length > 0 ? 12 : 0,
+              background: 'var(--m-surface-variant)',
+              border: '1px solid var(--m-outline-variant)',
+              borderRadius: 4, padding: '8px 12px' }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--m-positive)',
+                letterSpacing: '.03em', marginBottom: 4 }}>리밸런싱 · 비중 조정</div>
+              <BulletList items={splitToSentences(data.rebalancing)}
+                color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" small />
+            </div>
+          )}
+
+          {data.actions?.map((a, i) => {
             const m = priorityMeta[a.priority] || priorityMeta.MED
             const sevClass = a.priority === 'HIGH' ? 'is-critical'
                            : a.priority === 'MED'  ? 'is-high' : 'is-low'
@@ -1066,12 +1131,74 @@ function DaonAIReport({ data }) {
         </div>
       )}
 
+      {/* 예외 처리 메모 — 마이크로캡 격리·환율 등 */}
+      {data.edge_notes && String(data.edge_notes).trim() && (
+        <div className="mono-card" style={{ marginBottom: 12 }}>
+          <div className="mono-section-title" style={{ marginBottom: 6 }}>예외 처리 메모</div>
+          <BulletList items={splitToSentences(data.edge_notes)}
+            color="var(--m-text-secondary)" bulletColor="var(--m-text-tertiary)" tone="neutral" small />
+        </div>
+      )}
+
       <div style={{ fontSize: 10, color: 'var(--clr-border-strong)', textAlign: 'right', marginTop: 4 }}>
         생성 시각: {new Date().toLocaleString('ko-KR',
-          { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · Claude Haiku 4.5
+          { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · Claude Sonnet 4.6
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
+}
+
+/* ─── Life Timeline 5년 단위 자산배분 Phase 카드 (design.md R1/R2 준수) ─── */
+const ALLOC_COLORS = ['#1F4FD3', '#059669', '#D97706', '#7C3AED', '#0891B2', '#DB2777', '#64748B']
+const thStyle = { padding: '4px 6px', fontWeight: 700, fontSize: 10.5, textAlign: 'left' }
+const tdStyle = { padding: '6px 6px', color: 'var(--m-text)' }
+
+function AllocPhase({ phase, idx }) {
+  const alloc = phase.allocation || {}
+  const entries = Object.entries(alloc).filter(([, v]) => Number(v) > 0)
+  const total = entries.reduce((s, [, v]) => s + Number(v), 0) || 100
+  return (
+    <div style={{ border: '1px solid var(--m-outline-variant)', borderRadius: 4, padding: '10px 12px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--m-text)' }}>
+          {phase.name || `Phase ${idx + 1}`}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--m-text-tertiary)', fontWeight: 700 }}>{phase.years}</span>
+      </div>
+      {/* 자산 비중 스택 바 */}
+      <div style={{ display: 'flex', height: 8, borderRadius: 2, overflow: 'hidden', marginBottom: 6,
+        background: 'var(--m-outline-variant)' }}>
+        {entries.map(([k, v], i) => (
+          <span key={k} title={`${k} ${v}%`}
+            style={{ width: `${Number(v) / total * 100}%`, background: ALLOC_COLORS[i % ALLOC_COLORS.length] }} />
+        ))}
+      </div>
+      {/* 범례 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8, fontSize: 10.5,
+        color: 'var(--m-text-secondary)' }}>
+        {entries.map(([k, v], i) => (
+          <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <i style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2,
+              background: ALLOC_COLORS[i % ALLOC_COLORS.length] }} />
+            {k} <strong style={{ color: 'var(--m-text)' }}>{v}%</strong>
+          </span>
+        ))}
+      </div>
+      {phase.account_strategy && (
+        <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)',
+          lineHeight: 1.6, marginBottom: 3 }}>
+          <span style={{ color: 'var(--m-text-tertiary)', fontWeight: 700 }}>계좌 운용 </span>
+          {phase.account_strategy}
+        </div>
+      )}
+      {phase.inflow_direction && (
+        <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)', lineHeight: 1.6 }}>
+          <span style={{ color: 'var(--m-text-tertiary)', fontWeight: 700 }}>추가 투입 </span>
+          {phase.inflow_direction}
+        </div>
+      )}
     </div>
   )
 }

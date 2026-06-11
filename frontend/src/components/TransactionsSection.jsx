@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useStore } from '../store'
 import { useAccounts } from '../utils/accounts'
 import { listTransactions, addTransaction, deleteTransaction } from '../api'
@@ -11,6 +12,7 @@ import { listTransactions, addTransaction, deleteTransaction } from '../api'
  */
 export default function TransactionsSection({ ticker = '', name = '', isUs = true }) {
   const { accountKeys, accLabels } = useAccounts()
+  const qc = useQueryClient()
   const [txs, setTxs] = useState([])
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -22,6 +24,8 @@ export default function TransactionsSection({ ticker = '', name = '', isUs = tru
   })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [showExtra, setShowExtra] = useState(false)   // 수수료·세금·메모 접기
+  const inpCompact = { padding: '7px 9px' }           // .input(16px 폰트) 유지하되 높이 축소
 
   async function reload() {
     setLoading(true)
@@ -61,6 +65,8 @@ export default function TransactionsSection({ ticker = '', name = '', isUs = tru
       setForm(p => ({ ...p, quantity: '', price: '', fee: '', tax: '', memo: '' }))
       setShowForm(false)
       await reload()
+      // 거래가 보유(수량·평단)에 반영됨 → 보유·비중·차트 등 전 탭 갱신
+      qc.invalidateQueries({ queryKey: ['portfolio'] })
     } catch (e) {
       setErr(e.response?.data?.detail || '추가 실패')
     } finally {
@@ -71,6 +77,7 @@ export default function TransactionsSection({ ticker = '', name = '', isUs = tru
     if (!window.confirm('이 거래내역을 삭제합니다. 실현손익 계산이 다시 됩니다.')) return
     await deleteTransaction(id)
     await reload()
+    qc.invalidateQueries({ queryKey: ['portfolio'] })
   }
 
   const curSym = isUs ? '$' : '₩'
@@ -116,25 +123,23 @@ export default function TransactionsSection({ ticker = '', name = '', isUs = tru
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             style={{ overflow: 'hidden', background: 'var(--clr-bg)',
-              borderRadius: 10, padding: 12, marginBottom: 10,
+              borderRadius: 4, padding: 12, marginBottom: 10,
               border: '1px solid var(--clr-border-md)' }}
           >
-            <div style={{ display: 'grid',
-              gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
-              {/* BUY/SELL */}
-              <div style={{ gridColumn: 'span 2' }}>
-                <label style={lblStyle}>거래 유형</label>
-                <div style={{ display: 'flex', gap: 4 }}>
+            {/* 행1: 유형 · 수량 · 단가 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr 1fr',
+              gap: 6, marginBottom: 6, alignItems: 'end' }}>
+              <div>
+                <label style={lblStyle}>유형</label>
+                <div style={{ display: 'flex', gap: 3 }}>
                   {['BUY','SELL'].map(s => (
                     <button key={s} type="button" onClick={() => setForm(p => ({ ...p, side: s }))}
                       style={{
-                        flex: 1, padding: '6px', borderRadius: 6, border: '1.5px solid',
+                        flex: 1, padding: '8px 0', borderRadius: 4, border: '1.5px solid',
                         borderColor: form.side === s
-                          ? (s === 'BUY' ? 'var(--clr-pos)' : 'var(--clr-neg)')
-                          : 'var(--clr-border-md)',
+                          ? (s === 'BUY' ? 'var(--clr-pos)' : 'var(--clr-neg)') : 'var(--clr-border-md)',
                         background: form.side === s
-                          ? (s === 'BUY' ? 'var(--clr-pos)' : 'var(--clr-neg)')
-                          : 'var(--clr-surface)',
+                          ? (s === 'BUY' ? 'var(--clr-pos)' : 'var(--clr-neg)') : 'var(--clr-surface)',
                         color: form.side === s ? '#fff' : 'var(--clr-text-sub)',
                         fontSize: 11, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
                       }}>
@@ -143,63 +148,70 @@ export default function TransactionsSection({ ticker = '', name = '', isUs = tru
                   ))}
                 </div>
               </div>
-              {/* 계좌 */}
-              <div style={{ gridColumn: 'span 2' }}>
-                <label style={lblStyle}>계좌</label>
-                <select value={form.account}
-                  onChange={e => setForm(p => ({ ...p, account: e.target.value }))}
-                  className="input" style={{ fontFamily: 'inherit' }}>
-                  {accountKeys.map(k => (
-                    <option key={k} value={k}>{accLabels[k] || k}</option>
-                  ))}
-                </select>
-              </div>
-              {/* 수량 / 가격 */}
               <div>
                 <label style={lblStyle}>수량</label>
                 <input type="number" step="any" value={form.quantity}
                   onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))}
-                  className="input" placeholder="0" />
+                  className="input" style={inpCompact} placeholder="0" />
               </div>
               <div>
                 <label style={lblStyle}>단가 ({curSym})</label>
                 <input type="number" step="any" value={form.price}
                   onChange={e => setForm(p => ({ ...p, price: e.target.value }))}
-                  className="input" placeholder="0" />
+                  className="input" style={inpCompact} placeholder="0" />
               </div>
-              {/* 수수료 / 세금 */}
+            </div>
+            {/* 행2: 계좌 · 거래일 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
               <div>
-                <label style={lblStyle}>수수료</label>
-                <input type="number" step="any" value={form.fee}
-                  onChange={e => setForm(p => ({ ...p, fee: e.target.value }))}
-                  className="input" placeholder="0" />
+                <label style={lblStyle}>계좌</label>
+                <select value={form.account}
+                  onChange={e => setForm(p => ({ ...p, account: e.target.value }))}
+                  className="input" style={{ ...inpCompact, fontFamily: 'inherit' }}>
+                  {accountKeys.map(k => <option key={k} value={k}>{accLabels[k] || k}</option>)}
+                </select>
               </div>
               <div>
-                <label style={lblStyle}>세금</label>
-                <input type="number" step="any" value={form.tax}
-                  onChange={e => setForm(p => ({ ...p, tax: e.target.value }))}
-                  className="input" placeholder="0" />
-              </div>
-              {/* 거래일 */}
-              <div style={{ gridColumn: 'span 2' }}>
                 <label style={lblStyle}>거래일</label>
                 <input type="date" value={form.traded_at}
                   onChange={e => setForm(p => ({ ...p, traded_at: e.target.value }))}
-                  className="input" />
-              </div>
-              {/* 메모 */}
-              <div style={{ gridColumn: 'span 2' }}>
-                <label style={lblStyle}>메모 (선택)</label>
-                <input type="text" value={form.memo}
-                  onChange={e => setForm(p => ({ ...p, memo: e.target.value }))}
-                  className="input" placeholder="예: 분할매수 1차" maxLength={200} />
+                  className="input" style={inpCompact} />
               </div>
             </div>
+            {/* 추가 항목 (수수료·세금·메모) — 기본 접힘 */}
+            <button type="button" onClick={() => setShowExtra(v => !v)}
+              style={{ background: 'none', border: 'none', color: 'var(--clr-text-muted)',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: '2px 0',
+                fontFamily: 'inherit' }}>
+              {showExtra ? '추가 항목 닫기 ▴' : '수수료·세금·메모 ▾'}
+            </button>
+            {showExtra && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, margin: '4px 0 6px' }}>
+                <div>
+                  <label style={lblStyle}>수수료</label>
+                  <input type="number" step="any" value={form.fee}
+                    onChange={e => setForm(p => ({ ...p, fee: e.target.value }))}
+                    className="input" style={inpCompact} placeholder="0" />
+                </div>
+                <div>
+                  <label style={lblStyle}>세금</label>
+                  <input type="number" step="any" value={form.tax}
+                    onChange={e => setForm(p => ({ ...p, tax: e.target.value }))}
+                    className="input" style={inpCompact} placeholder="0" />
+                </div>
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={lblStyle}>메모</label>
+                  <input type="text" value={form.memo}
+                    onChange={e => setForm(p => ({ ...p, memo: e.target.value }))}
+                    className="input" style={inpCompact} placeholder="예: 분할매수 1차" maxLength={200} />
+                </div>
+              </div>
+            )}
             {err && (
-              <div style={{ fontSize: 11, color: 'var(--clr-neg-dark)', marginBottom: 6 }}>{err}</div>
+              <div style={{ fontSize: 11, color: 'var(--clr-neg-dark)', margin: '4px 0 6px' }}>{err}</div>
             )}
             <button type="submit" disabled={busy} className="btn-primary"
-              style={{ width: '100%' }}>
+              style={{ width: '100%', padding: '9px', fontSize: 13, marginTop: 6 }}>
               {busy ? '저장 중…' : '거래 기록 저장'}
             </button>
           </motion.form>
@@ -226,7 +238,7 @@ export default function TransactionsSection({ ticker = '', name = '', isUs = tru
               <div key={tx.id} style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 padding: '8px 10px', background: 'var(--clr-bg)',
-                borderRadius: 8, borderLeft: `3px solid ${isBuy ? 'var(--clr-pos)' : 'var(--clr-neg)'}`,
+                borderRadius: 4, border: '1px solid var(--m-outline-variant)',
               }}>
                 <span style={{
                   padding: '2px 6px', borderRadius: 4, fontSize: 9, fontWeight: 800,

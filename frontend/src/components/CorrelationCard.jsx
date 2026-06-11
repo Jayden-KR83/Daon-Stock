@@ -37,7 +37,7 @@ export default function CorrelationCard({ allHoldings = [] }) {
   if (allHoldings.length < 2) return null
 
   return (
-    <div style={{ background: 'var(--clr-surface)', borderRadius: 14,
+    <div style={{ background: 'var(--clr-surface)', borderRadius: 4,
       padding: 16, marginBottom: 12,
       boxShadow: '0 1px 3px rgba(15,23,42,.05)' }}>
       <div style={{ display: 'flex', alignItems: 'center',
@@ -49,7 +49,7 @@ export default function CorrelationCard({ allHoldings = [] }) {
               종목 간 상관관계
             </span>
             {data && (
-              <span style={{ padding: '2px 8px', borderRadius: 10,
+              <span style={{ padding: '2px 8px', borderRadius: 4,
                 fontSize: 10, fontWeight: 800,
                 background: data.avg_correlation < 0.3 ? 'var(--clr-pos)'
                           : data.avg_correlation < 0.6 ? 'var(--clr-warn, #F59E0B)'

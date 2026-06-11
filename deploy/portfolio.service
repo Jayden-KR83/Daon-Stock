@@ -1,0 +1,26 @@
+# /etc/systemd/system/portfolio.service
+# nginx 도입 후 변경점:
+#   --host 0.0.0.0 → 127.0.0.1  (외부 직노출 차단, nginx만 접근)
+#   --proxy-headers + --forwarded-allow-ips  (X-Forwarded-Proto/For 신뢰)
+# 적용:
+#   sudo cp portfolio.service /etc/systemd/system/portfolio.service
+#   sudo systemctl daemon-reload && sudo systemctl restart portfolio
+[Unit]
+Description=Daon Portfolio FastAPI
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/portfolio/backend
+ExecStart=/usr/bin/python3 -m uvicorn main:app \
+    --host 127.0.0.1 --port 8501 \
+    --proxy-headers --forwarded-allow-ips="127.0.0.1"
+Restart=on-failure
+RestartSec=5
+MemoryHigh=700M
+MemoryMax=850M
+TasksMax=200
+
+[Install]
+WantedBy=multi-user.target
