@@ -63,6 +63,12 @@ const icons = {
       <path d="M9 12l2 2 4-4"/>
     </svg>
   ),
+  discover: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+    </svg>
+  ),
 }
 
 /* 전체 탭 — 한 줄 가로 스크롤 (더보기 시트 폐지). adminOnly 는 관리자만 노출 */
@@ -75,6 +81,7 @@ const ALL_TABS = [
   { label: '등록',       idx: 5, iconKey: 'register'   },
   { label: '설정',       idx: 6, iconKey: 'settings'   },
   { label: '가이드',     idx: 7, iconKey: 'guide'      },
+  { label: '발굴',       idx: 10, iconKey: 'discover'  },
   { label: '여정',       idx: 8, iconKey: 'journey', adminOnly: true },
   { label: '관리자',     idx: 9, iconKey: 'admin',   adminOnly: true },
 ]

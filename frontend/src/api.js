@@ -34,6 +34,7 @@ export const getSectorKr     = ()           => api.get('/sector/kr').then(r => r
 export const getSectorStocks = (mkt, sec)  => api.get(`/sector/stocks/${mkt}/${encodeURIComponent(sec)}`).then(r => r.data)
 export const getHeatmap      = ()           => api.get('/heatmap').then(r => r.data)
 export const getTrendsNews   = ()           => api.get('/trends/news').then(r => r.data)
+export const getDiscover     = (params)     => api.get('/discover', { params }).then(r => r.data)
 
 export const getPricesBatch   = (tickers)   => api.get('/prices', { params: { tickers: tickers.join(',') } }).then(r => r.data)
 export const analyzePortfolio  = (body)      => api.post('/portfolio/analyze', body, { timeout: 90_000 }).then(r => r.data)

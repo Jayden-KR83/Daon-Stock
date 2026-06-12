@@ -29,9 +29,10 @@ const ManageTab       = lazy(() => import('./tabs/ManageTab'))
 const GuideTab        = lazy(() => import('./tabs/GuideTab'))
 const PresentationTab = lazy(() => import('./tabs/PresentationTab'))
 const AdminTab        = lazy(() => import('./tabs/AdminTab'))
+const DiscoverTab     = lazy(() => import('./tabs/DiscoverTab'))
 
-// 탭 순서: 포트폴리오(0) 관심(1) 분석(2) 종목(3) 시장(4) 등록(5) 설정(6) 가이드(7) 여정(8) 관리자(9)
-const TABS = [HoldingsTab, WatchlistTab, AllocationTab, ChartTab, TrendsTab, AddTab, ManageTab, GuideTab, PresentationTab, AdminTab]
+// 탭 순서: 포트폴리오(0) 관심(1) 분석(2) 종목(3) 시장(4) 등록(5) 설정(6) 가이드(7) 여정(8) 관리자(9) 발굴(10)
+const TABS = [HoldingsTab, WatchlistTab, AllocationTab, ChartTab, TrendsTab, AddTab, ManageTab, GuideTab, PresentationTab, AdminTab, DiscoverTab]
 
 /* Suspense fallback — 탭 청크 로딩 중 잠깐 보이는 가벼운 스피너 */
 function TabLoading() {
@@ -198,7 +199,7 @@ export default function App() {
   // 앱/모바일 좌우 스와이프 탭 전환 — BottomNav 순서 미러링 (admin은 여정·관리자 포함)
   const appMainRef = useRef(null)
   const isAdminUser = !!currentUser?.is_admin
-  const swipeOrder = isAdminUser ? [0,1,2,3,4,5,6,7,8,9] : [0,1,2,3,4,5,6,7]
+  const swipeOrder = isAdminUser ? [0,1,2,3,4,5,6,7,8,9,10] : [0,1,2,3,4,5,6,7,10]
   useSwipeNav(appMainRef, {
     order: swipeOrder, active: activeTab, onChange: setActiveTab, enabled: isApp,
   })

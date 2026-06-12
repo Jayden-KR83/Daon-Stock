@@ -154,6 +154,7 @@ flowchart TD
 | audit_log | id | event_type, details (json) | 활동 로그 |
 | price_alerts | id | ticker, target_high/low, enabled, triggered_at | 목표가 알림 |
 | notifications | id | kind, target_price, current_price, read_at | 미확인 알림 |
+| discovery_scores | ticker | market, peg, eps_growth, roe, pct_*, composite_score, gate_pass, data_completeness | 신규 발굴 GARP 일배치 (공용) |
 
 ### DB 접근 패턴 (모든 endpoint 공통)
 ```python

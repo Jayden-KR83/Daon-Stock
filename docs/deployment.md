@@ -70,11 +70,20 @@ WantedBy=multi-user.target
 0 19 * * * cp ~/portfolio/daon.db ~/portfolio/backup/daon-$(date +\%Y\%m\%d).db
 # 일별 KST 17:00 — 자산 추이 스냅샷
 0 8  * * * /usr/local/bin/daon-daily-snapshot.sh
-# 5분 간격 — 가격 알림 체크
+# 5분 간격 — 가격 알림 체크 (cron_secret POST)
 */5 * * * * /usr/local/bin/daon-check-alerts.sh
+# 5분 간격 — 캐시 워밍 (sector/kr·sector/us·heatmap 콜드 대기 제거, 공개 GET)
+*/5 * * * * /usr/local/bin/daon-cache-warm.sh
+# 월요일 KST 18:00 — AI 주간 리밸런싱 (ai_enabled 사용자, cron_secret POST + 푸시)
+0 9 * * 1 /usr/local/bin/daon-weekly-rebalance.sh
+# 일별 KST 07:00(UTC 22:00) — 신규 종목 발굴 GARP 스캔 (US 마감 후·저트래픽, 공용 캐시)
+# 주의: 월요일 09:00 UTC 리밸런싱과 시간 분리 — 두 무거운 작업 동시 실행 시 1GB VM OOM 위험
+0 22 * * * /usr/local/bin/daon-discover-scan.sh
 ```
 
-각 스크립트는 cron_secret으로 인증된 POST 호출.
+- 인증 cron(check-alerts·weekly-rebalance)은 cron_secret POST. cache-warm은 공개 GET이라 secret 불필요.
+- **cache-warm**: 무거운 KR 스크래핑 엔드포인트(콜드 2~6초)를 5분마다 미리 호출 → 30분 캐시를 늘 데워둠 → 사용자는 캐시 hit(~0.05초)만 만남.
+발굴 스캔은 `discovery_scores` 테이블을 갱신하며 사용자 무관 공용 데이터(AI 비용 0).
 
 ## 5. 검증 체크리스트 (배포 후 반드시 확인)
 
@@ -82,7 +91,7 @@ WantedBy=multi-user.target
 - [ ] `npm run build` 오류 없이 완료
 - [ ] `python3 -m py_compile backend/main.py`
 - [ ] systemd `is-active portfolio`
-- [ ] 핵심 endpoint 200: `/api/market`, `/api/stock/AAPL`, `/api/stock/AAPL/analyze/cached`
+- [ ] 핵심 endpoint 200: `/api/market`, `/api/stock/AAPL`, `/api/stock/AAPL/analyze/cached`, `/api/discover`
 - [ ] 로컬-서버 sha 일치 (sha256sum)
 - [ ] `sw.js` precache가 새 번들 참조: `grep -oE "index-[A-Za-z0-9_-]+\.js" sw.js`
 - [ ] `journalctl -u portfolio -n 30 --no-pager | grep -iE "error|exception|traceback"` 0건
@@ -90,7 +99,7 @@ WantedBy=multi-user.target
 ### 수동 (브라우저)
 - [ ] 로그인/회원가입 정상
 - [ ] 마켓 바 12개 지수 표시 (±5% 범위 일반적)
-- [ ] 탭 전환 정상 (포트폴리오/관심/분석/종목/시장/등록/설정/가이드/여정)
+- [ ] 탭 전환 정상 (포트폴리오/관심/분석/종목/시장/등록/설정/가이드/발굴/여정)
 - [ ] 포트폴리오: 카드 클릭 → 종목 탭 이동, 프라이버시 토글
 - [ ] 분석: 성과 분석 / AI 전략 리포트
 - [ ] 종목: D/W/M 토글, 드래그 줌, AI 심층 분석
