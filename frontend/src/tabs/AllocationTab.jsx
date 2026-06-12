@@ -7,6 +7,7 @@ import LogoCircle from '../components/LogoCircle'
 import BorderBeam from '../components/BorderBeam'
 import BacktestSection from '../components/BacktestSection'
 import NetWorthChart from '../components/NetWorthChart'
+import GoalsCard from '../components/GoalsCard'
 import HealthScoreCard from '../components/HealthScoreCard'
 import AlertsCard from '../components/AlertsCard'
 import DividendsCard from '../components/DividendsCard'
@@ -305,6 +306,9 @@ export default function AllocationTab() {
 
       {/* Net Worth 추이 — 항상 펼침 (시계열은 한번에 봐야 의미) */}
       <NetWorthChart />
+
+      {/* 목표 기반 포트폴리오 — Net Worth 바로 아래 (계획 도구 묶음) */}
+      <GoalsCard />
 
       {/* 핵심 분석: 항상 펼침 — 가장 중요 */}
       {allHoldings.length > 0 && (

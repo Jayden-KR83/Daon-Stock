@@ -214,6 +214,18 @@ def _init_db():
             created_at REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+        CREATE TABLE IF NOT EXISTS goals (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id              TEXT NOT NULL,
+            name                 TEXT NOT NULL DEFAULT '목표',
+            target_amount        REAL NOT NULL,          -- 목표 금액(KRW)
+            target_date          TEXT NOT NULL,          -- 'YYYY-MM-DD'
+            monthly_contribution REAL NOT NULL DEFAULT 0, -- 월 납입(KRW)
+            expected_return      REAL NOT NULL DEFAULT 0.06, -- 연 기대수익률
+            volatility           REAL NOT NULL DEFAULT 0.15, -- 연 변동성
+            created_at           REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
         CREATE TABLE IF NOT EXISTS ai_cache (
             cache_key    TEXT PRIMARY KEY,         -- 'stock_v2:{TICKER}:{name}'
             value_json   TEXT NOT NULL,
@@ -5799,6 +5811,160 @@ def push_test(cu: dict = Depends(require_approved)):
     sent = _send_push(cu['user_id'], '다온 알림 테스트',
                       '푸시 알림이 정상 동작합니다. 🎉', '/')
     return {'ok': True, 'sent': sent}
+
+
+# ─── 목표 기반 포트폴리오 (Goal-Based Investing) ───────────────────
+# MVP: 결정론 모델(Kasten 2013 — 동일 입력이면 몬테카를로와 고도 상관).
+# 위험=변동성이 아니라 '목표 시점 미달 가능성'. ⚠️ 추정치·투자자문 아님(프론트 고지).
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+def _current_net_worth_krw(uid: str) -> float:
+    """현재 총 자산(KRW). 최신 Net Worth 스냅샷 우선(자산추이와 일치), 없으면 라이브 계산."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT total_krw FROM net_worth_snapshots WHERE user_id=? "
+            "ORDER BY snapshot_date DESC LIMIT 1", (uid,)
+        ).fetchone()
+    if row and row['total_krw']:
+        return float(row['total_krw'])
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ticker, avg_price, quantity FROM portfolios WHERE user_id=?", (uid,)
+        ).fetchall()
+    usd_krw, total = 1380.0, 0.0
+    for h in rows:
+        qty = float(h['quantity'] or 0); avg = float(h['avg_price'] or 0)
+        if qty <= 0:
+            continue
+        is_us = not is_kr(h['ticker'])
+        p = (_price_fast(h['ticker']) if is_us else _kr_price(h['ticker'])) or {}
+        cur = float(p.get('current_price') or avg)
+        total += qty * cur * (usd_krw if is_us else 1.0)
+    return total
+
+def _months_until(date_str: str) -> int:
+    try:
+        parts = [int(x) for x in str(date_str).split('-')[:2]]
+        now = datetime.now()
+        return max(1, (parts[0] - now.year) * 12 + (parts[1] - now.month))
+    except Exception:
+        return 1
+
+def _project_goal(current_value: float, monthly: float, months: int,
+                  annual_return: float, annual_vol: float, target: float) -> dict:
+    """결정론 월별 중앙값 경로 + 80% 밴드(lognormal 포락) + 상태 + 달성확률 추정."""
+    months = max(1, int(months))
+    r = (1.0 + annual_return) ** (1.0 / 12.0) - 1.0
+    sigma = max(0.0, annual_vol)
+    path, median_final = [], current_value
+    # 긴 horizon이면 다운샘플(차트 점 과다 방지) — 최대 ~120점
+    step = max(1, months // 120)
+    for t in range(1, months + 1):
+        if abs(r) < 1e-12:
+            med = current_value + monthly * t
+        else:
+            med = current_value * (1.0 + r) ** t + monthly * (((1.0 + r) ** t - 1.0) / r)
+        median_final = med
+        if t % step == 0 or t == months:
+            env = math.exp(1.2816 * sigma * math.sqrt(t / 12.0))   # 80%(10/90 백분위)
+            path.append({'month': t, 'median': round(med),
+                         'low': round(med / env), 'high': round(med * env)})
+    T = months / 12.0
+    sigT = sigma * math.sqrt(T) if T > 0 else sigma
+    prob = None
+    if median_final > 0 and target > 0:
+        if sigT > 1e-9:
+            prob = _norm_cdf((math.log(median_final) - math.log(target)) / sigT)
+        else:
+            prob = 1.0 if median_final >= target else 0.0
+    status = ('on_track' if median_final >= target
+              else 'at_risk' if median_final >= target * 0.9
+              else 'off_track')
+    return {
+        'months': months,
+        'current_value': round(current_value),
+        'median_final': round(median_final),
+        'target': round(target),
+        'shortfall': round(target - median_final),   # 양수=부족
+        'probability': round(prob, 3) if prob is not None else None,
+        'status': status,
+        'path': path,
+    }
+
+class GoalReq(BaseModel):
+    id: int | None = None
+    name: str = '목표'
+    target_amount: float
+    target_date: str                       # 'YYYY-MM-DD'
+    monthly_contribution: float = 0
+    expected_return: float = 0.06
+    volatility: float = 0.15
+
+class GoalProjectReq(BaseModel):
+    target_amount: float
+    target_date: str
+    monthly_contribution: float = 0
+    expected_return: float = 0.06
+    volatility: float = 0.15
+
+@app.get("/api/goals")
+def list_goals(cu: dict = Depends(require_approved)):
+    cur_val = _current_net_worth_krw(cu['user_id'])
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id, name, target_amount, target_date, monthly_contribution, "
+            "expected_return, volatility, created_at FROM goals WHERE user_id=? "
+            "ORDER BY created_at DESC", (cu['user_id'],)
+        ).fetchall()
+    goals = []
+    for r in rows:
+        g = dict(r)
+        g['projection'] = _project_goal(
+            cur_val, g['monthly_contribution'], _months_until(g['target_date']),
+            g['expected_return'], g['volatility'], g['target_amount'])
+        goals.append(g)
+    return {'goals': goals, 'current_value': round(cur_val)}
+
+@app.post("/api/goals")
+def upsert_goal(req: GoalReq, cu: dict = Depends(require_approved)):
+    if req.target_amount <= 0:
+        raise HTTPException(400, "목표 금액이 필요합니다")
+    if not req.target_date:
+        raise HTTPException(400, "목표 시점이 필요합니다")
+    now = time()
+    with _db() as conn:
+        if req.id:
+            conn.execute(
+                "UPDATE goals SET name=?, target_amount=?, target_date=?, "
+                "monthly_contribution=?, expected_return=?, volatility=? "
+                "WHERE id=? AND user_id=?",
+                (req.name, req.target_amount, req.target_date, req.monthly_contribution,
+                 req.expected_return, req.volatility, req.id, cu['user_id']))
+            return {'ok': True, 'id': req.id, 'updated': True}
+        cur = conn.execute(
+            "INSERT INTO goals (user_id, name, target_amount, target_date, "
+            "monthly_contribution, expected_return, volatility, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (cu['user_id'], req.name, req.target_amount, req.target_date,
+             req.monthly_contribution, req.expected_return, req.volatility, now))
+        return {'ok': True, 'id': cur.lastrowid, 'created': True}
+
+@app.delete("/api/goals/{goal_id}")
+def delete_goal(goal_id: int, cu: dict = Depends(require_approved)):
+    with _db() as conn:
+        conn.execute("DELETE FROM goals WHERE id=? AND user_id=?",
+                     (goal_id, cu['user_id']))
+    return {'ok': True}
+
+@app.post("/api/goals/project")
+def project_goal_preview(req: GoalProjectReq, cu: dict = Depends(require_approved)):
+    """저장 전 실시간 미리보기. 현재 Net Worth는 서버 계산."""
+    cur_val = _current_net_worth_krw(cu['user_id'])
+    return {'current_value': round(cur_val),
+            'projection': _project_goal(
+                cur_val, req.monthly_contribution, _months_until(req.target_date),
+                req.expected_return, req.volatility, req.target_amount)}
 
 
 # ─── 알림 트리거 cron (모든 활성 알림 가격 체크) ────────────────────

@@ -183,4 +183,10 @@ export const subscribePush     = (sub) => api.post('/push/subscribe', sub).then(
 export const unsubscribePush   = (endpoint) => api.post('/push/unsubscribe', { endpoint }).then(r => r.data)
 export const sendTestPush      = () => api.post('/push/test').then(r => r.data)
 
+// 목표 기반 포트폴리오 (Goal-Based Investing)
+export const listGoals   = ()     => api.get('/goals').then(r => r.data)
+export const upsertGoal  = (body) => api.post('/goals', body).then(r => r.data)
+export const deleteGoal  = (id)   => api.delete(`/goals/${id}`).then(r => r.data)
+export const projectGoal = (body) => api.post('/goals/project', body).then(r => r.data)
+
 export default api
