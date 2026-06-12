@@ -233,6 +233,35 @@ def _init_db():
             source       TEXT NOT NULL DEFAULT 'api'   -- 'api' | 'manual_import' | 'claude_code'
         );
         CREATE INDEX IF NOT EXISTS idx_aicache_ts ON ai_cache(computed_at DESC);
+        CREATE TABLE IF NOT EXISTS discovery_scores (
+            ticker            TEXT PRIMARY KEY,         -- universe 중복 종목은 1행 (INSERT OR REPLACE)
+            market            TEXT NOT NULL,            -- 'US' | 'KR'
+            name              TEXT NOT NULL DEFAULT '',
+            sector            TEXT NOT NULL DEFAULT '',
+            -- raw 지표 (없으면 NULL — 가짜값 절대 금지)
+            peg               REAL,
+            rel_per           REAL,                     -- 시장 내 상대 PER (median 대비)
+            eps_growth        REAL,                     -- YoY %
+            rev_growth        REAL,                     -- YoY %
+            roe               REAL,
+            debt_to_equity    REAL,                     -- KR=NULL (Naver 미제공)
+            near_52w_high     REAL,                     -- 현재가/52주고가 (0~1)
+            analyst_upside    REAL,                     -- (target_mean-cur)/cur %, KR=NULL
+            -- 축별 백분위 (0~100, 시장 내 정규화). N/A 축은 NULL
+            pct_value         REAL,
+            pct_growth        REAL,
+            pct_quality       REAL,
+            pct_momentum      REAL,
+            pct_sentiment     REAL,
+            -- 종합
+            composite_score   REAL NOT NULL DEFAULT 0,  -- 가용 축 재정규화 가중합 (0~100)
+            gate_pass         INTEGER NOT NULL DEFAULT 0,
+            gate_fail_reason  TEXT NOT NULL DEFAULT '',
+            data_completeness INTEGER NOT NULL DEFAULT 0,-- 5축 중 데이터 확보 축 수 (0~5)
+            computed_at       REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_discovery_score ON discovery_scores(gate_pass DESC, composite_score DESC);
+        CREATE INDEX IF NOT EXISTS idx_discovery_market ON discovery_scores(market, composite_score DESC);
         """)
 
 _init_db()
@@ -2630,6 +2659,7 @@ def _stock_fundamentals(ticker: str) -> dict:
             'profit_margin':    safe_pct(info.get('profitMargins')),
             'roa':              safe_pct(info.get('returnOnAssets')),
             'roe':              safe_pct(info.get('returnOnEquity')),
+            'revenue_growth':   safe_pct(info.get('revenueGrowth')),   # YoY 분기 매출성장 (발굴 Growth축)
             'revenue':          safe_i(info.get('totalRevenue')),
             'net_income':       safe_i(info.get('netIncomeToCommon')),
             'diluted_eps':      safe_f(info.get('trailingEps')),
@@ -2639,6 +2669,222 @@ def _stock_fundamentals(ticker: str) -> dict:
         }
     except Exception:
         return {}
+
+# ─── 신규 종목 발굴 (GARP 스크리닝) ───────────────────────────────────
+# 깔때기: universe(하드코딩 재활용) → 정량 스크리닝(이 섹션) → 랭킹.
+# GARP = 성장 대비 안 비싼 종목(PEG 중심). 게이트는 정적(투명·정직),
+# 스코어는 시장(US/KR)별 백분위(동적 상대평가). KR은 데이터 구멍을
+# N/A 처리 후 가용 축만 재정규화 — 가짜값 절대 금지(정직성 원칙).
+
+GARP_WEIGHTS = {'value': 0.30, 'growth': 0.25, 'quality': 0.20,
+                'momentum': 0.15, 'sentiment': 0.10}
+
+# 신호 → (raw 키, higher_better)  — higher_better=False면 낮을수록 우수
+_GARP_SIGNALS = {
+    'peg':            ('peg', False),
+    'rel_per':        ('rel_per', False),
+    'eps_growth':     ('eps_growth', True),
+    'rev_growth':     ('rev_growth', True),
+    'roe':            ('roe', True),
+    'debt_to_equity': ('debt_to_equity', False),
+    'near_52w_high':  ('near_52w_high', True),
+    'analyst_upside': ('analyst_upside', True),
+}
+# 축 = 소속 신호 백분위 평균(가용분만)
+_GARP_AXIS_SIGNALS = {
+    'value':     ['peg', 'rel_per'],
+    'growth':    ['eps_growth', 'rev_growth'],
+    'quality':   ['roe', 'debt_to_equity'],
+    'momentum':  ['near_52w_high'],
+    'sentiment': ['analyst_upside'],
+}
+
+
+def _median(xs: list):
+    s = sorted(xs); n = len(s)
+    if n == 0:
+        return None
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def _pct_rank(vals: list, v, higher_better: bool) -> float:
+    """vals: 동일 신호의 가용값(None 제외, v 포함). 0~100, 높을수록 우수.
+    higher_better=False(낮을수록 좋음)는 더 큰 값을 '열등'으로 카운트."""
+    n = len(vals)
+    if n <= 1:
+        return 50.0   # 단일 표본 — 순위 불가, 중립
+    if higher_better:
+        worse = sum(1 for x in vals if x < v)
+    else:
+        worse = sum(1 for x in vals if x > v)
+    return round(worse / (n - 1) * 100, 2)
+
+
+def _garp_gate(m: dict):
+    """필수 게이트(정적). raw 값 기준. 데이터 없음(None)은 탈락 아님(면제 — 정직성).
+    반환 (pass: bool, reason: str)."""
+    peg = m.get('peg')
+    if peg is not None and peg > 1.5:
+        return False, 'PEG>1.5'
+    eg = m.get('eps_growth')
+    if eg is not None and eg <= 0:
+        return False, 'EPS성장≤0'
+    dte = m.get('debt_to_equity')
+    if dte is not None and dte >= 200:
+        return False, '부채비율≥200'
+    return True, ''
+
+
+def _garp_score(rows: list) -> list:
+    """universe 전체 raw dict 리스트 입력 → pct_*·composite_score·gate_* 부여 후 반환.
+    백분위·rel_per는 시장(US/KR)별로 분리 계산. 순수함수 (I/O·전역상태 없음)."""
+    rows = [dict(r) for r in rows]   # 비파괴
+    by_market: dict = {}
+    for r in rows:
+        by_market.setdefault(r.get('market', 'US'), []).append(r)
+
+    for group in by_market.values():
+        # rel_per 파생: 시장 내 median PER 대비 (낮을수록 상대적으로 쌈)
+        pes = [r['trailing_pe'] for r in group
+               if r.get('trailing_pe') and r['trailing_pe'] > 0]
+        med = _median(pes)
+        for r in group:
+            pe = r.get('trailing_pe')
+            r['rel_per'] = round(pe / med, 3) if (pe and pe > 0 and med) else None
+
+        # 신호별 가용값 리스트 (시장 내)
+        sig_vals = {sig: [r[key] for r in group if r.get(key) is not None]
+                    for sig, (key, _hb) in _GARP_SIGNALS.items()}
+
+        for r in group:
+            sig_pct = {}
+            for sig, (key, hb) in _GARP_SIGNALS.items():
+                v = r.get(key)
+                sig_pct[sig] = None if v is None else _pct_rank(sig_vals[sig], v, hb)
+            axis_pct = {}
+            for axis, sigs in _GARP_AXIS_SIGNALS.items():
+                avail = [sig_pct[s] for s in sigs if sig_pct[s] is not None]
+                axis_pct[axis] = round(sum(avail) / len(avail), 2) if avail else None
+            r['pct_value']     = axis_pct['value']
+            r['pct_growth']    = axis_pct['growth']
+            r['pct_quality']   = axis_pct['quality']
+            r['pct_momentum']  = axis_pct['momentum']
+            r['pct_sentiment'] = axis_pct['sentiment']
+            r['data_completeness'] = sum(1 for a in axis_pct.values() if a is not None)
+
+            passed, reason = _garp_gate(r)
+            r['gate_pass'] = 1 if passed else 0
+            r['gate_fail_reason'] = reason
+
+            # 가용 축만 가중치 재정규화 후 가중합 → 0~100
+            num = den = 0.0
+            for axis, w in GARP_WEIGHTS.items():
+                ap = axis_pct[axis]
+                if ap is not None:
+                    num += w * ap; den += w
+            r['composite_score'] = round(num / den, 2) if den > 0 else 0.0
+    return rows
+
+
+def _discovery_universe() -> list:
+    """US_SECTOR_TOP + KR_SECTOR_TOP 병합·dedup. 반환 [{ticker, name, market, sector}]."""
+    seen: set = set()
+    out: list = []
+    for market, table in (('US', US_SECTOR_TOP), ('KR', KR_SECTOR_TOP)):
+        for sector, stocks in table.items():
+            for tkr, name in stocks:
+                key = str(tkr).upper()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({'ticker': key, 'name': name,
+                            'market': market, 'sector': sector})
+    return out
+
+
+def _ttm_yoy(vals: list):
+    """분기값 리스트(시간순, 최신이 끝) → TTM YoY 성장률 % 또는 None.
+    최근 4분기 합 vs 직전 4분기 합. 직전 합이 음수/0이면 왜곡 → None."""
+    xs = [v for v in vals if v is not None]
+    if len(xs) < 8:
+        return None
+    recent = sum(xs[-4:]); prior = sum(xs[-8:-4])
+    if prior <= 0:
+        return None
+    return round((recent - prior) / prior * 100, 2)
+
+
+def _eps_yoy_from_trend(trend: dict):
+    """_financials_trend의 eps(과거 실적) → 최신 분기 vs 4분기 전 YoY %.
+    적자(음수) 기준연도는 성장률 왜곡 → None."""
+    eps = [e['actual'] for e in trend.get('eps', [])
+           if not e.get('is_future') and e.get('actual') is not None]
+    if len(eps) < 5:
+        return None
+    latest, prior = eps[-1], eps[-5]
+    if prior is None or prior <= 0:
+        return None
+    return round((latest - prior) / prior * 100, 2)
+
+
+def _discovery_raw_metrics(ticker: str, market: str) -> dict:
+    """1종목 raw 지표 수집. 실패·미제공 축은 None(가짜값 금지). 종목당 격리(예외 흡수)."""
+    m: dict = {
+        'peg': None, 'trailing_pe': None, 'eps_growth': None, 'rev_growth': None,
+        'roe': None, 'debt_to_equity': None, 'near_52w_high': None, 'analyst_upside': None,
+    }
+    try:
+        f = _stock_fundamentals(ticker) or {}
+        m['trailing_pe'] = f.get('trailing_pe')
+        m['roe'] = f.get('roe')
+        try:
+            trend = _financials_trend(ticker) or {}
+        except Exception:
+            trend = {}
+        m['eps_growth'] = _eps_yoy_from_trend(trend)
+        # rev_growth: yfinance info의 revenueGrowth가 US/KR 모두 안정적 → 1차.
+        # 분기 합산 YoY(_ttm_yoy)는 yfinance가 4~5분기만 줘 대개 None → fallback.
+        m['rev_growth'] = _ttm_yoy([r.get('value') for r in trend.get('revenue', [])])
+
+        if market == 'US':
+            if f.get('revenue_growth') is not None:
+                m['rev_growth'] = f.get('revenue_growth')
+            m['peg'] = f.get('peg_ratio')
+            m['debt_to_equity'] = f.get('debt_to_equity')
+            full = _stock_full(ticker) or {}
+            cur = full.get('current_price'); hi = full.get('week_52_high')
+            if cur and hi and hi > 0:
+                m['near_52w_high'] = round(cur / hi, 4)
+            tgt = full.get('target_mean'); na = full.get('num_analysts') or 0
+            if cur and tgt and na >= 3:
+                m['analyst_upside'] = round((tgt - cur) / cur * 100, 2)
+        else:  # KR — PEG 계산, debt·analyst N/A (Naver 미제공)
+            # rev_growth: Naver엔 없으나 yfinance .KS/.KQ info의 revenueGrowth는 잡힘
+            if m['rev_growth'] is None:
+                for sfx in ('.KS', '.KQ'):
+                    info_kr = _yf_info_safe(kr_code(ticker) + sfx, timeout=6)
+                    rg = info_kr.get('revenueGrowth') if info_kr else None
+                    if rg is not None:
+                        m['rev_growth'] = round(rg * 100, 2); break
+            pe, eg = m['trailing_pe'], m['eps_growth']
+            if pe and pe > 0 and eg and eg > 0:
+                m['peg'] = round(pe / eg, 3)
+            # near_52w_high: KR 차트(_kr_history) 마지막 종가 / 1년 최고가
+            try:
+                hist = _kr_history(ticker) or []
+                bars = hist[-252:]
+                highs = [b['high'] for b in bars if b.get('high')]
+                last = bars[-1]['close'] if bars and bars[-1].get('close') else None
+                if highs and last:
+                    mx = max(highs)
+                    if mx > 0:
+                        m['near_52w_high'] = round(last / mx, 4)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return m
+
 
 def safe_i_local(v):
     try: return int(v) if v and not _nan(v) else None
@@ -5692,6 +5938,93 @@ def mark_all_notifications_read(cu: dict = Depends(require_approved)):
         )
         cnt = cur.rowcount
     return {'ok': True, 'marked': cnt}
+
+
+# ─── 신규 종목 발굴 스캔 cron + 조회 endpoint ──────────────────────────
+class DiscoverScanReq(BaseModel):
+    cron_secret: str = ''   # TriggerReq와 동일 형태지만, 정의 순서 의존 회피 위해 별도 선언
+
+@app.post("/api/cron/discover_scan")
+def cron_discover_scan(req: DiscoverScanReq):
+    """일배치(공용). universe 전체 raw 수집 → GARP 스코어 → discovery_scores 저장.
+    cron_secret 검증(check_alerts와 동일). 결과는 사용자 무관 공용 캐시 → AI 비용 0."""
+    secret = ''
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='cron_secret'").fetchone()
+        if row: secret = row['value']
+    if not secret:
+        secret = secrets.token_hex(24)
+        with _db() as conn:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)",
+                         ('cron_secret', secret))
+        return {'error': 'cron_secret 초기화. 다시 호출 필요.', 'set': True}
+    if req.cron_secret != secret:
+        raise HTTPException(403, "invalid cron secret")
+
+    t0 = time()
+    universe = _discovery_universe()
+    rows: list = []
+
+    def _fetch(item):
+        m = _discovery_raw_metrics(item['ticker'], item['market'])
+        m.update({'ticker': item['ticker'], 'name': item['name'],
+                  'market': item['market'], 'sector': item['sector']})
+        return m
+
+    # Oracle 1GB RAM — 동시성 4 제한. 종목당 예외는 _discovery_raw_metrics가 흡수.
+    with _cf.ThreadPoolExecutor(max_workers=4) as ex:
+        for m in ex.map(_fetch, universe):
+            rows.append(m)
+
+    scored = _garp_score(rows)
+    now = time()
+    with _db() as conn:
+        for r in scored:
+            conn.execute(
+                "INSERT OR REPLACE INTO discovery_scores ("
+                "ticker, market, name, sector, peg, rel_per, eps_growth, rev_growth, "
+                "roe, debt_to_equity, near_52w_high, analyst_upside, pct_value, pct_growth, "
+                "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
+                "gate_fail_reason, data_completeness, computed_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (r['ticker'], r['market'], r.get('name', ''), r.get('sector', ''),
+                 r.get('peg'), r.get('rel_per'), r.get('eps_growth'), r.get('rev_growth'),
+                 r.get('roe'), r.get('debt_to_equity'), r.get('near_52w_high'),
+                 r.get('analyst_upside'), r.get('pct_value'), r.get('pct_growth'),
+                 r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
+                 r.get('composite_score', 0), r.get('gate_pass', 0),
+                 r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now))
+
+    return {'scanned': len(universe), 'scored': len(scored),
+            'gate_passed': sum(1 for r in scored if r.get('gate_pass')),
+            'elapsed_s': round(time() - t0, 1)}
+
+
+@app.get("/api/discover")
+def get_discover(market: str = 'ALL', min_score: float = 0, sort: str = 'score',
+                 limit: int = 50, offset: int = 0, include_failed: bool = False):
+    """발굴 랭킹 조회 — discovery_scores read only. 무인증 공용 데이터(데모·비로그인 열람).
+    gate_pass=1 우선, composite_score desc 기본 정렬."""
+    where = ["composite_score >= ?"]
+    params: list = [min_score]
+    if market in ('US', 'KR'):
+        where.append("market = ?"); params.append(market)
+    if not include_failed:
+        where.append("gate_pass = 1")
+    order = {'score': 'composite_score DESC',
+             'completeness': 'data_completeness DESC, composite_score DESC',
+             'roe': 'roe DESC'}.get(sort, 'composite_score DESC')
+    sql = ("SELECT * FROM discovery_scores WHERE " + " AND ".join(where) +
+           f" ORDER BY gate_pass DESC, {order} LIMIT ? OFFSET ?")
+    params += [max(1, min(limit, 200)), max(0, offset)]
+    with _db() as conn:
+        rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        cnt_row = conn.execute(
+            "SELECT COUNT(*) c, MAX(computed_at) mx FROM discovery_scores "
+            "WHERE " + " AND ".join(where), params[:len(params) - 2]).fetchone()
+    return {'items': rows, 'total': cnt_row['c'] if cnt_row else 0,
+            'computed_at': cnt_row['mx'] if cnt_row else None}
 
 
 # ─── Web Push (V2) — VAPID + 구독 + 발송 ───────────────────────────
