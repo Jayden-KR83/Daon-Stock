@@ -18,6 +18,9 @@
 - **여정 탭**: 로드맵 verdict 완료 4건 + 마일스톤 P30~P33 + 인프라(Cloudflare·nginx) 반영.
 - **보안 감사(/security)**: 심각 0건. CORS `*`→daonwealth.com 제한, daon.db 644→600 즉시 조치. 중장기: 로그인 레이트리밋·관리자 2FA 권고.
 - **운영 자동화**: 문서·릴리스 반영 사이클 문서화([docs/deployment.md](docs/deployment.md) 5.5) + 월간 릴리스 클라우드 루틴 등록(매월 1일 → 여정탭 PR).
+- **캐시 워밍**: `daon-cache-warm.sh` cron(5분) — sector/kr·sector/us·heatmap 콜드(2~6초) 제거, 사용자 캐시 hit(~0.05초)만.
+- **목표 기반 포트폴리오(GBI)**: `goals` 테이블 + `_project_goal`(결정론 중앙값+80% 밴드+달성확률) + `/api/goals` CRUD·project. `GoalsCard.jsx`(폼+Recharts fan+상태배지+권고+고지) → 분석 탭 NetWorth 아래. **새 탭 아님(발굴 탭과 충돌 회피)**. 격리 worktree에서 개발 후 발굴과 머지 배포.
+- **신규 종목 발굴(GARP)**: 발굴 탭 + `/api/discover` + `discovery_scores` + GARP cron(다른 CLI 동시개발, 머지 통합).
 
 ## 🆕 2026-05-19 ~ 2026-05-21 세션 (대규모 업그레이드)
 **자세한 내용**: [SESSION_2026-05-19.md](SESSION_2026-05-19.md)
