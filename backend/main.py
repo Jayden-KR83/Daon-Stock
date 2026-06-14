@@ -2667,10 +2667,15 @@ def _stock_fundamentals(ticker: str) -> dict:
 GARP_WEIGHTS = {'value': 0.30, 'growth': 0.25, 'quality': 0.20,
                 'momentum': 0.15, 'sentiment': 0.10}
 
+# 경기민감주 함정 방지: PEG 계산 시 성장률 상한(winsorize). 저점 회복으로
+# 성장률 497% 같은 값이 찍히면 PEG가 0에 수렴해 밸류가 과대평가됨 → 50%로 캡.
+_GROWTH_CAP_FOR_PEG = 50.0
+
 # 신호 → (raw 키, higher_better)  — higher_better=False면 낮을수록 우수
 _GARP_SIGNALS = {
     'peg':            ('peg', False),
-    'rel_per':        ('rel_per', False),
+    'rel_per':        ('rel_per', False),       # 후행 PER 섹터 상대
+    'rel_fwd_pe':     ('rel_fwd_pe', False),    # 포워드(추정) PER 섹터 상대 — 경기민감주 함정 완화
     'eps_growth':     ('eps_growth', True),
     'rev_growth':     ('rev_growth', True),
     'roe':            ('roe', True),
@@ -2680,7 +2685,7 @@ _GARP_SIGNALS = {
 }
 # 축 = 소속 신호 백분위 평균(가용분만)
 _GARP_AXIS_SIGNALS = {
-    'value':     ['peg', 'rel_per'],
+    'value':     ['peg', 'rel_per', 'rel_fwd_pe'],
     'growth':    ['eps_growth', 'rev_growth'],
     'quality':   ['roe', 'debt_to_equity'],
     'momentum':  ['near_52w_high'],
@@ -2720,6 +2725,10 @@ def _garp_gate(m: dict):
     dte = m.get('debt_to_equity')
     if dte is not None and dte >= 200:
         return False, '부채비율≥200'
+    # 가치 함정 방지: 싸도 매출이 급감하는 사양산업은 제외
+    rev = m.get('rev_growth')
+    if rev is not None and rev <= -15:
+        return False, '매출 급감'
     return True, ''
 
 
@@ -2732,13 +2741,20 @@ def _garp_score(rows: list) -> list:
         by_market.setdefault(r.get('market', 'US'), []).append(r)
 
     for group in by_market.values():
-        # rel_per 파생: 시장 내 median PER 대비 (낮을수록 상대적으로 쌈)
-        pes = [r['trailing_pe'] for r in group
-               if r.get('trailing_pe') and r['trailing_pe'] > 0]
-        med = _median(pes)
+        # rel_per·rel_fwd_pe 파생: 같은 섹터 median PER 대비 (낮을수록 상대적으로 쌈).
+        # 시장 전체가 아닌 '섹터 내' 비교 → 은행(저PER)을 반도체(고PER)와 직접 안 비교(2-B 섹터중립).
+        sectors: dict = {}
         for r in group:
-            pe = r.get('trailing_pe')
-            r['rel_per'] = round(pe / med, 3) if (pe and pe > 0 and med) else None
+            sectors.setdefault(r.get('sector', ''), []).append(r)
+        for srows in sectors.values():
+            med_t = _median([r['trailing_pe'] for r in srows
+                             if r.get('trailing_pe') and r['trailing_pe'] > 0])
+            med_f = _median([r['forward_pe'] for r in srows
+                             if r.get('forward_pe') and r['forward_pe'] > 0])
+            for r in srows:
+                pe = r.get('trailing_pe'); fpe = r.get('forward_pe')
+                r['rel_per']    = round(pe / med_t, 3) if (pe and pe > 0 and med_t) else None
+                r['rel_fwd_pe'] = round(fpe / med_f, 3) if (fpe and fpe > 0 and med_f) else None
 
         # 신호별 가용값 리스트 (시장 내)
         sig_vals = {sig: [r[key] for r in group if r.get(key) is not None]
@@ -2818,12 +2834,14 @@ def _eps_yoy_from_trend(trend: dict):
 def _discovery_raw_metrics(ticker: str, market: str) -> dict:
     """1종목 raw 지표 수집. 실패·미제공 축은 None(가짜값 금지). 종목당 격리(예외 흡수)."""
     m: dict = {
-        'peg': None, 'trailing_pe': None, 'eps_growth': None, 'rev_growth': None,
-        'roe': None, 'debt_to_equity': None, 'near_52w_high': None, 'analyst_upside': None,
+        'peg': None, 'trailing_pe': None, 'forward_pe': None, 'eps_growth': None,
+        'rev_growth': None, 'roe': None, 'debt_to_equity': None,
+        'near_52w_high': None, 'analyst_upside': None,
     }
     try:
         f = _stock_fundamentals(ticker) or {}
         m['trailing_pe'] = f.get('trailing_pe')
+        m['forward_pe'] = f.get('forward_pe')   # US: yfinance forwardPE / KR: Naver 추정PER
         m['roe'] = f.get('roe')
         try:
             trend = _financials_trend(ticker) or {}
@@ -2856,7 +2874,7 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
                         m['rev_growth'] = round(rg * 100, 2); break
             pe, eg = m['trailing_pe'], m['eps_growth']
             if pe and pe > 0 and eg and eg > 0:
-                m['peg'] = round(pe / eg, 3)
+                m['peg'] = round(pe / min(eg, _GROWTH_CAP_FOR_PEG), 3)  # 성장률 캡(경기민감주 함정)
             # near_52w_high: KR 차트(_kr_history) 마지막 종가 / 1년 최고가
             try:
                 hist = _kr_history(ticker) or []
@@ -5936,7 +5954,8 @@ _discover_scan_busy = {'v': False}   # 동시 스캔 방지 (cron·관리자 수
 
 def _do_discover_scan() -> dict:
     """universe 전체 raw 수집 → GARP 스코어 → discovery_scores 저장. (cron·관리자 공용)
-    Oracle 1GB RAM — 동시성 4 제한, 종목당 예외는 _discovery_raw_metrics가 흡수."""
+    Oracle 1GB RAM(MemoryMax 850M) — 동시성 2 제한. 4는 pandas/yfinance 피크가
+    한계를 넘겨 OOM-kill 발생(2026-06 확인) → 종목당 예외는 _discovery_raw_metrics가 흡수."""
     _discover_scan_busy['v'] = True
     try:
         t0 = time()
@@ -5949,7 +5968,7 @@ def _do_discover_scan() -> dict:
                       'market': item['market'], 'sector': item['sector']})
             return m
 
-        with _cf.ThreadPoolExecutor(max_workers=4) as ex:
+        with _cf.ThreadPoolExecutor(max_workers=2) as ex:
             for m in ex.map(_fetch, universe):
                 rows.append(m)
 

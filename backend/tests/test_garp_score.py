@@ -35,6 +35,18 @@ class TestGarpGate:
         ok, _ = main._garp_gate({'peg': None, 'eps_growth': 10, 'debt_to_equity': 50})
         assert ok is True
 
+    def test_gate_value_trap_revenue_plunge(self):
+        # 2-C: 싸도 매출 급감(≤-15%)이면 가치 함정 → 제외
+        ok, reason = main._garp_gate({'peg': 0.8, 'eps_growth': 10,
+                                      'debt_to_equity': 50, 'rev_growth': -20})
+        assert ok is False and reason == '매출 급감'
+
+    def test_gate_mild_revenue_dip_ok(self):
+        # 소폭 감소(-10%)는 통과 (사양산업만 거름)
+        ok, _ = main._garp_gate({'peg': 0.8, 'eps_growth': 10,
+                                 'debt_to_equity': 50, 'rev_growth': -10})
+        assert ok is True
+
 
 class TestGarpScore:
     def test_percentile_inverts_low_is_better(self):
@@ -75,6 +87,21 @@ class TestGarpScore:
         rows = [{'market': 'US', 'peg': 3.0, 'eps_growth': 10}]
         out = main._garp_score(rows)[0]
         assert out['gate_pass'] == 0 and out['gate_fail_reason'] == 'PEG>1.5'
+
+    def test_sector_relative_value(self):
+        # 2-B: rel_per은 '같은 섹터' median 대비 — 고PER 섹터 종목도 불이익 없음.
+        # 섹터A PER[10,14] median12, 섹터B PER[30,42] median36.
+        # 각 섹터 최저가(10, 30)는 모두 rel_per≈0.833 → 절대 PER 30이어도 공평.
+        rows = [
+            {'market': 'US', 'sector': 'A', 'trailing_pe': 10},
+            {'market': 'US', 'sector': 'A', 'trailing_pe': 14},
+            {'market': 'US', 'sector': 'B', 'trailing_pe': 30},
+            {'market': 'US', 'sector': 'B', 'trailing_pe': 42},
+        ]
+        out = {(r['sector'], r['trailing_pe']): r['rel_per'] for r in main._garp_score(rows)}
+        assert out[('A', 10)] == out[('B', 30)]      # 섹터 내 동일 상대위치 → 동일 rel_per
+        assert out[('A', 14)] == out[('B', 42)]
+        assert out[('A', 10)] < 1.0 and out[('B', 30)] < 1.0   # 섹터 median보다 쌈
 
 
 class TestGrowthHelpers:
