@@ -348,6 +348,10 @@ input.input, .btn-primary, .btn-secondary {
   box-sizing: border-box;
 }
 
+/* 발굴 탭 표 — 선 없는(borderless) 표, 행 hover 하이라이트만 */
+.discover-row { transition: background var(--t-base); }
+.discover-row:hover { background: var(--m-surface-variant); }
+
 /* 다크/프로 테마: AI 위젯 텍스트 그라데이션 — 항상 가시성 유지 */
 :root[data-theme='dark'] .tt-ai-title,
 :root[data-theme='pro']  .tt-ai-title {

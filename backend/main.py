@@ -5932,10 +5932,56 @@ def mark_all_notifications_read(cu: dict = Depends(require_approved)):
 class DiscoverScanReq(BaseModel):
     cron_secret: str = ''   # TriggerReq와 동일 형태지만, 정의 순서 의존 회피 위해 별도 선언
 
+_discover_scan_busy = {'v': False}   # 동시 스캔 방지 (cron·관리자 수동 겹침 차단)
+
+def _do_discover_scan() -> dict:
+    """universe 전체 raw 수집 → GARP 스코어 → discovery_scores 저장. (cron·관리자 공용)
+    Oracle 1GB RAM — 동시성 4 제한, 종목당 예외는 _discovery_raw_metrics가 흡수."""
+    _discover_scan_busy['v'] = True
+    try:
+        t0 = time()
+        universe = _discovery_universe()
+        rows: list = []
+
+        def _fetch(item):
+            m = _discovery_raw_metrics(item['ticker'], item['market'])
+            m.update({'ticker': item['ticker'], 'name': item['name'],
+                      'market': item['market'], 'sector': item['sector']})
+            return m
+
+        with _cf.ThreadPoolExecutor(max_workers=4) as ex:
+            for m in ex.map(_fetch, universe):
+                rows.append(m)
+
+        scored = _garp_score(rows)
+        now = time()
+        with _db() as conn:
+            for r in scored:
+                conn.execute(
+                    "INSERT OR REPLACE INTO discovery_scores ("
+                    "ticker, market, name, sector, peg, rel_per, eps_growth, rev_growth, "
+                    "roe, debt_to_equity, near_52w_high, analyst_upside, pct_value, pct_growth, "
+                    "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
+                    "gate_fail_reason, data_completeness, computed_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (r['ticker'], r['market'], r.get('name', ''), r.get('sector', ''),
+                     r.get('peg'), r.get('rel_per'), r.get('eps_growth'), r.get('rev_growth'),
+                     r.get('roe'), r.get('debt_to_equity'), r.get('near_52w_high'),
+                     r.get('analyst_upside'), r.get('pct_value'), r.get('pct_growth'),
+                     r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
+                     r.get('composite_score', 0), r.get('gate_pass', 0),
+                     r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now))
+
+        return {'scanned': len(universe), 'scored': len(scored),
+                'gate_passed': sum(1 for r in scored if r.get('gate_pass')),
+                'elapsed_s': round(time() - t0, 1)}
+    finally:
+        _discover_scan_busy['v'] = False
+
+
 @app.post("/api/cron/discover_scan")
 def cron_discover_scan(req: DiscoverScanReq):
-    """일배치(공용). universe 전체 raw 수집 → GARP 스코어 → discovery_scores 저장.
-    cron_secret 검증(check_alerts와 동일). 결과는 사용자 무관 공용 캐시 → AI 비용 0."""
+    """일배치(공용). cron_secret 검증(check_alerts와 동일). 결과는 사용자 무관 공용 캐시."""
     secret = ''
     with _db() as conn:
         row = conn.execute(
@@ -5949,44 +5995,19 @@ def cron_discover_scan(req: DiscoverScanReq):
         return {'error': 'cron_secret 초기화. 다시 호출 필요.', 'set': True}
     if req.cron_secret != secret:
         raise HTTPException(403, "invalid cron secret")
+    return _do_discover_scan()
 
-    t0 = time()
-    universe = _discovery_universe()
-    rows: list = []
 
-    def _fetch(item):
-        m = _discovery_raw_metrics(item['ticker'], item['market'])
-        m.update({'ticker': item['ticker'], 'name': item['name'],
-                  'market': item['market'], 'sector': item['sector']})
-        return m
-
-    # Oracle 1GB RAM — 동시성 4 제한. 종목당 예외는 _discovery_raw_metrics가 흡수.
-    with _cf.ThreadPoolExecutor(max_workers=4) as ex:
-        for m in ex.map(_fetch, universe):
-            rows.append(m)
-
-    scored = _garp_score(rows)
-    now = time()
-    with _db() as conn:
-        for r in scored:
-            conn.execute(
-                "INSERT OR REPLACE INTO discovery_scores ("
-                "ticker, market, name, sector, peg, rel_per, eps_growth, rev_growth, "
-                "roe, debt_to_equity, near_52w_high, analyst_upside, pct_value, pct_growth, "
-                "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
-                "gate_fail_reason, data_completeness, computed_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (r['ticker'], r['market'], r.get('name', ''), r.get('sector', ''),
-                 r.get('peg'), r.get('rel_per'), r.get('eps_growth'), r.get('rev_growth'),
-                 r.get('roe'), r.get('debt_to_equity'), r.get('near_52w_high'),
-                 r.get('analyst_upside'), r.get('pct_value'), r.get('pct_growth'),
-                 r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
-                 r.get('composite_score', 0), r.get('gate_pass', 0),
-                 r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now))
-
-    return {'scanned': len(universe), 'scored': len(scored),
-            'gate_passed': sum(1 for r in scored if r.get('gate_pass')),
-            'elapsed_s': round(time() - t0, 1)}
+@app.post("/api/discover/rescan")
+def discover_rescan(cu: dict = Depends(require_approved)):
+    """관리자 수동 갱신 — 백그라운드 스레드로 스캔(UI 안 막힘). 즉시 상태 반환."""
+    if not cu.get('is_admin'):
+        raise HTTPException(403, "관리자만 갱신할 수 있습니다.")
+    if _discover_scan_busy['v']:
+        return {'status': 'already_running'}
+    import threading
+    threading.Thread(target=_do_discover_scan, daemon=True).start()
+    return {'status': 'started'}
 
 
 @app.get("/api/discover")
