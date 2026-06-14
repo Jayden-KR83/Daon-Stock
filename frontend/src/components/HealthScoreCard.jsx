@@ -128,39 +128,31 @@ export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw 
             </div>
           </details>
 
-          {/* 통계 + 코멘트 */}
+          {/* 종합 평가 — 코멘트 + 개선 포인트 + 핵심 통계 통합 (간결) */}
           <div style={{ marginTop: 10, padding: '10px 12px',
             background: 'var(--clr-bg)', borderRadius: 4,
             border: '1px solid var(--clr-border-md)' }}>
-            <div style={{ fontSize: 11, color: 'var(--clr-text-muted)',
-              fontVariantNumeric: 'tabular-nums', lineHeight: 1.6 }}>
-              {data.stats.holdings_count}종 보유 · 최대 섹터 {data.stats.max_sector_pct}% ·
-              평균 MDD -{data.stats.avg_mdd}% · 샤프 {data.stats.avg_sharpe}
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--clr-text-sub)',
+              letterSpacing: '.04em', textTransform: 'uppercase', marginBottom: 6 }}>
+              종합 평가
             </div>
             <div className="ko-keep" style={{ fontSize: 12,
-              color: 'var(--clr-text-strong)', fontWeight: 600,
-              marginTop: 6, lineHeight: 1.6 }}>
-              💡 {data.comment}
+              color: 'var(--clr-text-strong)', fontWeight: 600, lineHeight: 1.6 }}>
+              {data.comment}
+            </div>
+            {data.grade !== 'S' && data.weakest && S_GRADE_TIPS[data.weakest] && (
+              <div className="ko-keep" style={{ fontSize: 11.5,
+                color: 'var(--m-text-secondary)', lineHeight: 1.6, marginTop: 6 }}>
+                <strong style={{ color: 'var(--m-text)' }}>개선 포인트 「{data.weakest}」</strong>
+                {' '}— {S_GRADE_TIPS[data.weakest]}
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginTop: 6,
+              fontVariantNumeric: 'tabular-nums' }}>
+              {data.stats.holdings_count}종 · 최대섹터 {data.stats.max_sector_pct}% ·
+              MDD -{data.stats.avg_mdd}% · 샤프 {data.stats.avg_sharpe}
             </div>
           </div>
-
-          {/* S 등급으로 가는 길 — 최약점 기반 구체 제안 (이미 S면 숨김) */}
-          {data.grade !== 'S' && data.weakest && S_GRADE_TIPS[data.weakest] && (
-            <div className="ko-keep" style={{ marginTop: 8,
-              background: 'var(--m-surface-variant)',
-              border: '1px solid var(--m-outline-variant)',
-              borderRadius: 4, padding: '10px 12px' }}>
-              <div style={{ fontSize: 10.5, fontWeight: 800,
-                color: 'var(--m-positive)', letterSpacing: '.03em',
-                marginBottom: 3 }}>
-                S 등급으로 가는 길 · 최약점 「{data.weakest}」
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--m-text)',
-                fontWeight: 600, lineHeight: 1.6 }}>
-                {S_GRADE_TIPS[data.weakest]}
-              </div>
-            </div>
-          )}
         </motion.div>
       )}
     </div>

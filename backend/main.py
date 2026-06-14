@@ -5251,23 +5251,27 @@ def _compute_rebalance_alerts(holdings: list, prices: dict, usd_krw: float,
         '에너지':     ['XLE'],
         '소비재':     ['XLY', 'XLP'],
     }
-    tickers_set = {e['ticker'] for e in enriched}
     by_sector = {}
     for e in enriched:
-        by_sector.setdefault(e['sector'], []).append(e['ticker'])
+        by_sector.setdefault(e['sector'], []).append(e)
     for sec, lst in by_sector.items():
         if sec not in sector_etfs: continue
-        etfs_in = [t for t in lst if t in sector_etfs[sec]]
-        non_etfs = [t for t in lst if t not in sector_etfs[sec]]
-        if etfs_in and len(non_etfs) >= 2:
+        etfs_in = [e['ticker'] for e in lst if e['ticker'] in sector_etfs[sec]]
+        non_etf_holds = [e for e in lst if e['ticker'] not in sector_etfs[sec]]
+        if etfs_in and len(non_etf_holds) >= 2:
+            overlaps = sorted(
+                [{'ticker': e['ticker'], 'name': e['name'],
+                  'value': round(e['val'] / total * 100, 1)} for e in non_etf_holds],
+                key=lambda x: -x['value'])
             alerts.append({
                 'rule':     'overlap_exposure',
                 'severity': 'med',
                 'title':    f"섹터 「{sec}」 중복 노출",
-                'detail':   f"{', '.join(etfs_in)} ETF 와 개별 종목 {len(non_etfs)}개 동시 보유. "
+                'detail':   f"{', '.join(etfs_in)} ETF 와 개별 종목 {len(non_etf_holds)}개 동시 보유. "
                            f"이미 ETF에 포함된 종목이라면 비중 중복 가능 — 점검 권장.",
                 'sector':   sec,
                 'etfs':     etfs_in,
+                'overlaps': overlaps,   # [{ticker,name,value(비중%)}] — 프론트 표시용
             })
 
     # 2-5) 종목 수 1-2개만 보유 (극단적 미분산)
@@ -5538,7 +5542,17 @@ _KOSPI_TOP30 = [
     '086790','000810','015760','033780','096770','003670','017670','316140',
     '011200','259960','010130','009150','011070','032830',
 ]
-_EARNINGS_REF_TICKERS = sorted(set(_NASDAQ_TOP30 + _SP500_TOP30 + _KOSPI_TOP30))
+# 캘린더 과밀 완화 — 각 지수 상위 20만 반영 (아이콘 너무 작아지는 문제)
+_EARNINGS_REF_TICKERS = sorted(set(_NASDAQ_TOP30[:20] + _SP500_TOP30[:20] + _KOSPI_TOP30[:20]))
+# KOSPI 상위 20 코드 → 한글명 (캘린더 툴팁용 — 사용자 보유 외 유니버스 종목명)
+_KOSPI_NAMES = {
+    '005930': '삼성전자', '000660': 'SK하이닉스', '373220': 'LG에너지솔루션',
+    '207940': '삼성바이오로직스', '005380': '현대차', '000270': '기아',
+    '068270': '셀트리온', '105560': 'KB금융', '035420': 'NAVER', '012330': '현대모비스',
+    '028260': '삼성물산', '005490': 'POSCO홀딩스', '055550': '신한지주', '035720': '카카오',
+    '051910': 'LG화학', '006400': '삼성SDI', '086790': '하나금융지주', '000810': '삼성화재',
+    '015760': '한국전력', '033780': 'KT&G',
+}
 _earnings_cache: Dict[str, tuple] = {}   # ticker -> (fetched_ts, [events])
 _EARNINGS_TTL = 43200  # 12h — 실적일은 자주 안 바뀜
 
@@ -5588,8 +5602,10 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
                         continue
                     if win_lo <= ts <= cutoff:
                         row = ed.loc[ts_idx]
+                        nm = _KOSPI_NAMES.get(tkr.lstrip('A')) if is_kr else tkr
                         out.append({
                             'ticker': tkr,
+                            'name':   nm,            # KR은 한글명(유니버스), US는 티커
                             'date':   ts.strftime('%Y-%m-%d'),
                             'eps_estimate': float(row.get('EPS Estimate')) if row.get('EPS Estimate') == row.get('EPS Estimate') else None,
                             'eps_actual':   float(row.get('Reported EPS')) if row.get('Reported EPS') == row.get('Reported EPS') else None,

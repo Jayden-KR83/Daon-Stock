@@ -11,7 +11,6 @@ import GoalsCard from '../components/GoalsCard'
 import HealthScoreCard from '../components/HealthScoreCard'
 import AlertsCard from '../components/AlertsCard'
 import DividendsCard from '../components/DividendsCard'
-import BatchAnalyzeCard from '../components/BatchAnalyzeCard'
 import PortfolioSummaryBanner from '../components/PortfolioSummaryBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
@@ -323,11 +322,6 @@ export default function AllocationTab() {
       {/* 배당금 이력 + 캘린더 */}
       {allHoldings.length > 0 && (
         <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
-      )}
-
-      {/* 보유 종목 AI 일괄 분석 — 종목 탭 진입 시 cached 표시 자동 활용 */}
-      {allHoldings.length > 0 && aiEnabled && (
-        <BatchAnalyzeCard allHoldings={allHoldings} />
       )}
 
 
