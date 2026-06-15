@@ -370,14 +370,14 @@ export default function TrendsTab() {
         ))}
       </div>
 
-      {/* ── 차트 비교 모드 (B5) ── */}
+      {/* ── 실적 캘린더 (B4) — 위로 배치 ── */}
       <div style={{ marginTop: 18 }}>
-        <CompareChart />
+        <EarningsCalendar />
       </div>
 
-      {/* ── 실적 캘린더 (B4) ── */}
+      {/* ── 차트 비교 모드 (B5) — 실적 캘린더 아래 ── */}
       <div style={{ marginTop: 12 }}>
-        <EarningsCalendar />
+        <CompareChart />
       </div>
 
       {/* ── 한·미 ETF 비교 도구 ── */}

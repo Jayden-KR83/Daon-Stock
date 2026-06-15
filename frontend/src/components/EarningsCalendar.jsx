@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useStore } from '../store'
 import { getEarningsCalendar, getPortfolio } from '../api'
 import LogoCircle from './LogoCircle'
+import { displayName, isKrTicker } from '../utils/displayName'
 
 /**
  * 실적 캘린더 — 이번 달(이동 가능) 월~금 달력 그리드.
@@ -26,6 +27,22 @@ export default function EarningsCalendar() {
     }
     for (const w of (portfolio.watchlist || [])) set.add(w.ticker)
     return [...set]
+  }, [portfolio])
+
+  // ticker → 종목명 맵 (보유·관심) — KR 종목 툴팁에 코드 대신 이름 표시용
+  const nameByTicker = React.useMemo(() => {
+    const m = {}
+    if (portfolio?.portfolios) {
+      for (const acc of Object.keys(portfolio.portfolios)) {
+        for (const h of (portfolio.portfolios[acc] || [])) {
+          if (h.ticker) m[String(h.ticker).toUpperCase()] = h.name
+        }
+      }
+    }
+    for (const w of (portfolio?.watchlist || [])) {
+      if (w.ticker) m[String(w.ticker).toUpperCase()] = w.name
+    }
+    return m
   }, [portfolio])
 
   const [data, setData] = useState(null)
@@ -161,10 +178,15 @@ export default function EarningsCalendar() {
                             gap: showText ? 8 : 4,
                             justifyContent: n <= 2 ? 'center' : 'flex-start',
                             paddingTop: 2 }}>
-                            {sorted.slice(0, 8).map((e, i) => (
+                            {sorted.slice(0, 8).map((e, i) => {
+                              // KR 종목은 코드 대신 종목명(백엔드 name 또는 보유·관심 맵). US는 티커.
+                              const label = isKrTicker(e.ticker)
+                                ? displayName(e.ticker, e.name || nameByTicker[String(e.ticker).toUpperCase()])
+                                : e.ticker
+                              return (
                               <div key={i}
                                 onClick={() => setChartTicker(e.ticker)}
-                                title={`${e.ticker}${e.held ? ' (보유)' : ''} 실적 발표${e.eps_estimate != null
+                                title={`${label}${e.held ? ' (보유)' : ''} 실적 발표${e.eps_estimate != null
                                   ? ` · EPS 컨센 ${e.eps_estimate.toFixed(2)}` : ''}`}
                                 style={{ cursor: 'pointer', display: 'flex',
                                   flexDirection: 'column', alignItems: 'center', gap: 2 }}>
@@ -177,10 +199,11 @@ export default function EarningsCalendar() {
                                   <span style={{ fontSize: 9, fontWeight: 700, lineHeight: 1,
                                     color: e.held ? 'var(--m-text)' : 'var(--m-text-tertiary)',
                                     maxWidth: sz + 14, overflow: 'hidden',
-                                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.ticker}</span>
+                                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
                                 )}
                               </div>
-                            ))}
+                              )
+                            })}
                             {n > 8 && (
                               <span style={{ fontSize: 9, color: 'var(--m-text-tertiary)',
                                 alignSelf: 'center' }}>+{n - 8}</span>

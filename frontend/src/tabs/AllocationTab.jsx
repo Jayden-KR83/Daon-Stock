@@ -7,10 +7,10 @@ import LogoCircle from '../components/LogoCircle'
 import BorderBeam from '../components/BorderBeam'
 import BacktestSection from '../components/BacktestSection'
 import NetWorthChart from '../components/NetWorthChart'
+import GoalsCard from '../components/GoalsCard'
 import HealthScoreCard from '../components/HealthScoreCard'
 import AlertsCard from '../components/AlertsCard'
 import DividendsCard from '../components/DividendsCard'
-import BatchAnalyzeCard from '../components/BatchAnalyzeCard'
 import PortfolioSummaryBanner from '../components/PortfolioSummaryBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
@@ -231,33 +231,7 @@ export default function AllocationTab() {
   }, [allHoldings, metricsAcc])
 
   // 계좌 필터 또는 최초 진입 시: 저장된 결과 불러오기
-  useEffect(() => {
-    if (allHoldings.length === 0) return
-    let aborted = false
-    ;(async () => {
-      try {
-        const cached = await getPortfolioMetricsCached(metricsAcc)
-        if (aborted) return
-        if (cached?.cached) {
-          setMetrics(cached)
-          setMetricsStale(false)
-          setMetricsErr('')
-        } else {
-          setMetrics(null)
-          setMetricsStale(false)
-        }
-      } catch (e) {
-        if (!aborted) { setMetrics(null); setMetricsStale(false) }
-      }
-    })()
-    return () => { aborted = true }
-  }, [metricsAcc, allHoldings.length])
-
-  // 현재 보유 fingerprint가 저장된 결과와 다르면 stale 표시
-  useEffect(() => {
-    if (!metrics?.cached || !metrics?.fingerprint) { setMetricsStale(false); return }
-    // 저장된 fingerprint는 서버에서 md5 해시, 프론트는 JSON 문자열 — 비교 대신 보유 구성 변경 시 stale로 처리
-  }, [currentFingerprint, metrics?.fingerprint])
+  // (성과 분석 카드 제거됨 — 자동 cached fetch effect 삭제로 불필요 API 호출 차단)
 
   async function runMetrics(forceRefresh = false) {
     const targets = metricsAcc === 'ALL'
@@ -306,6 +280,9 @@ export default function AllocationTab() {
       {/* Net Worth 추이 — 항상 펼침 (시계열은 한번에 봐야 의미) */}
       <NetWorthChart />
 
+      {/* 목표 기반 포트폴리오 — Net Worth 바로 아래 (계획 도구 묶음) */}
+      <GoalsCard />
+
       {/* 핵심 분석: 항상 펼침 — 가장 중요 */}
       {allHoldings.length > 0 && (
         <HealthScoreCard allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
@@ -319,11 +296,6 @@ export default function AllocationTab() {
       {/* 배당금 이력 + 캘린더 */}
       {allHoldings.length > 0 && (
         <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
-      )}
-
-      {/* 보유 종목 AI 일괄 분석 — 종목 탭 진입 시 cached 표시 자동 활용 */}
-      {allHoldings.length > 0 && aiEnabled && (
-        <BatchAnalyzeCard allHoldings={allHoldings} />
       )}
 
 
@@ -553,83 +525,6 @@ export default function AllocationTab() {
           </div>
         </>
       )}
-
-      {/* 성과 분석 (MDD · Sharpe · 수익률) */}
-      {allHoldings.length > 0 && (
-        <div className="mono-card" style={{ marginBottom: 16 }}>
-          <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>
-            성과 분석
-          </div>
-          <div className="mono-section-sub ko-keep" style={{ marginBottom: 12 }}>
-            종목별 수익률 · MDD(최대낙폭) · 샤프지수를 계산합니다 · 1년 과거 데이터 기준 · 무위험수익률 4%
-          </div>
-
-          <div style={{ marginBottom: 10 }}>
-            <div className="seg-ctrl">
-              {['ALL', ...ACCOUNTS].map(acc => (
-                <button key={acc}
-                  className={`seg-btn ${metricsAcc === acc ? 'active' : ''}`}
-                  onClick={() => setMetricsAcc(acc)}
-                  style={{ fontSize: 12 }}>
-                  {acc === 'ALL' ? '전체' : ACC_LABELS[acc]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 저장된 분석이 있으면 cut-off 날짜 + 2-버튼, 없으면 단일 실행 버튼 */}
-          {metrics?.computed_at ? (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 12px', borderRadius: 2, marginBottom: 10,
-                border: '1px solid var(--m-outline-variant)' }}>
-                <div style={{ fontSize: 11, color: 'var(--m-text-secondary)', lineHeight: 1.5 }}>
-                  <span style={{ fontWeight: 700, color: 'var(--m-text)' }}>마지막 분석: </span>
-                  {formatTimestamp(metrics.computed_at)}
-                </div>
-                <span className="mono-pill" style={{
-                  color: metrics.cached ? 'var(--m-text-secondary)' : 'var(--m-positive)' }}>
-                  {metrics.cached ? '저장된 결과' : '방금 분석'}
-                </span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                <button className="btn-primary"
-                  disabled={metricsLoading}
-                  onClick={() => runMetrics(false)}
-                  style={{ width: '100%', opacity: metricsLoading ? 0.6 : 1 }}>
-                  {metricsLoading ? '계산 중...' : '저장된 결과 보기'}
-                </button>
-                <button
-                  disabled={metricsLoading}
-                  onClick={() => runMetrics(true)}
-                  style={{
-                    width: '100%', padding: '10px 0', borderRadius: 4, border: '1px solid #0EA5E9',
-                    background: 'var(--clr-surface)', color: 'var(--clr-info-dark)', fontWeight: 700, fontSize: 13,
-                    cursor: metricsLoading ? 'not-allowed' : 'pointer',
-                    opacity: metricsLoading ? 0.6 : 1, fontFamily: 'inherit',
-                  }}>
-                  🔄 새로 분석
-                </button>
-              </div>
-            </>
-          ) : (
-            <button className="btn-primary"
-              disabled={metricsLoading}
-              onClick={() => runMetrics(false)}
-              style={{ width: '100%', marginBottom: 10 }}>
-              {metricsLoading ? '계산 중... (종목당 2~3초)' : '성과 분석 실행'}
-            </button>
-          )}
-
-          {metricsErr && (
-            <div style={{ padding: 10, borderRadius: 2, border: '1px solid var(--m-negative)',
-              color: 'var(--m-negative)', fontSize: 12, marginBottom: 8 }}>{metricsErr}</div>
-          )}
-
-          {metrics && <MetricsResult data={metrics} holdings={allHoldings} />}
-        </div>
-      )}
-
 
       {/* 백테스트 시뮬레이션 */}
       {allHoldings.length > 0 && (

@@ -96,6 +96,8 @@ export const adminPromoteUser  = (uid, is_admin)  => api.post(`/admin/users/${ui
 export const adminDeleteUser   = (uid)            => api.delete(`/admin/users/${uid}`).then(r => r.data)
 export const adminGetStats     = ()               => api.get('/admin/stats').then(r => r.data)
 export const adminGetAuditLog  = (params = {})    => api.get('/admin/audit-log', { params }).then(r => r.data)
+export const getInviteCode     = ()               => api.get('/admin/invite_code').then(r => r.data)
+export const setInviteCode     = (code)           => api.put('/admin/invite_code', { code }).then(r => r.data)
 
 // 동적 계좌
 export const getAccounts    = ()        => api.get('/accounts').then(r => r.data)
@@ -184,5 +186,11 @@ export const getVapidPublicKey = () => api.get('/push/public_key').then(r => r.d
 export const subscribePush     = (sub) => api.post('/push/subscribe', sub).then(r => r.data)
 export const unsubscribePush   = (endpoint) => api.post('/push/unsubscribe', { endpoint }).then(r => r.data)
 export const sendTestPush      = () => api.post('/push/test').then(r => r.data)
+
+// 목표 기반 포트폴리오 (Goal-Based Investing)
+export const listGoals   = ()     => api.get('/goals').then(r => r.data)
+export const upsertGoal  = (body) => api.post('/goals', body).then(r => r.data)
+export const deleteGoal  = (id)   => api.delete(`/goals/${id}`).then(r => r.data)
+export const projectGoal = (body) => api.post('/goals/project', body).then(r => r.data)
 
 export default api

@@ -23,6 +23,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [pwShow, setPwShow] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -38,11 +39,11 @@ export default function LoginPage() {
     e.preventDefault()
     setError(''); setPendingMessage(''); setLoading(true)
     try {
-      const body = { email, password, ...(mode === 'register' ? { name } : {}) }
+      const body = { email, password, ...(mode === 'register' ? { name, invite_code: inviteCode } : {}) }
       const res = mode === 'login' ? await authLogin(body) : await authRegister(body)
       if (mode === 'register' && (!res.token || res.status === 'pending')) {
         setPendingMessage(res.message || '가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.')
-        setMode('login'); setPassword(''); setName('')
+        setMode('login'); setPassword(''); setName(''); setInviteCode('')
         return
       }
       setAuth(res.token, res.user)
@@ -140,6 +141,15 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
+
+              {mode === 'register' && (
+                <div className="dl-field" style={{ marginBottom: 18 }}>
+                  <label className="dl-label">초대 코드</label>
+                  <input className="dl-input" type="text" placeholder="관리자에게 받은 코드"
+                    value={inviteCode} onChange={e => setInviteCode(e.target.value)}
+                    autoComplete="off" />
+                </div>
+              )}
 
               {pendingMessage && (
                 <div className="dl-msg dl-msg-ok">

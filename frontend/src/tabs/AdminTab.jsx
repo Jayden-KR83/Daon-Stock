@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import {
   listUsers, adminApproveUser, adminRejectUser, adminSuspendUser, adminReinstateUser,
   adminToggleAi, adminPromoteUser, adminDeleteUser, adminGetStats, adminGetAuditLog,
-  adminUnlock, adminSetPassword,
+  adminUnlock, adminSetPassword, getInviteCode, setInviteCode,
 } from '../api'
 
 /**
@@ -131,6 +131,74 @@ function AdminUnlockPanel() {
 }
 
 /* ── 관리자 대시보드 (잠금 해제 후) ── */
+/* ── 가입 초대 코드 카드 (공통 코드 게이트) ── */
+function InviteCodeCard() {
+  const [code, setCode] = useState('')
+  const [enabled, setEnabled] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    getInviteCode()
+      .then(r => { if (alive) { setCode(r.code || ''); setEnabled(!!r.enabled) } })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  async function save() {
+    if (busy) return
+    setBusy(true); setMsg('')
+    try {
+      const r = await setInviteCode(code.trim())
+      setEnabled(!!r.enabled)
+      setMsg(r.enabled ? '저장됨 — 이 코드를 친구에게 공유하세요.'
+                       : '코드를 비웠습니다 — 게이트 해제(누구나 가입 신청 가능).')
+    } catch (e) {
+      setMsg(e.response?.data?.detail || '저장 실패')
+    } finally { setBusy(false) }
+  }
+  function gen() { setCode(`DAON-${Math.floor(1000 + Math.random() * 9000)}`) }
+
+  const inputStyle = {
+    flex: 1, minWidth: 150, boxSizing: 'border-box', padding: '7px 10px',
+    borderRadius: 2, border: '1px solid var(--m-outline-variant)',
+    background: 'var(--m-surface)', color: 'var(--m-text)', fontSize: 13,
+    fontWeight: 700, fontFamily: 'inherit', letterSpacing: '.02em',
+  }
+  return (
+    <div className="mono-card" style={{ marginBottom: 12 }}>
+      <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>가입 초대 코드</div>
+      <div className="mono-section-sub ko-keep" style={{ marginBottom: 10 }}>
+        코드를 설정하면 <strong>이 코드를 입력한 사람만</strong> 가입 신청할 수 있습니다 (봇·낯선 가입 차단).
+        비워두면 게이트가 해제됩니다. 가입 후엔 기존처럼 관리자 승인이 필요합니다.
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input value={code} onChange={e => setCode(e.target.value)}
+          placeholder="예: DAON-1234" autoComplete="off" style={inputStyle} />
+        <button onClick={gen} disabled={busy} style={{
+          flexShrink: 0, padding: '7px 12px', borderRadius: 2, background: 'transparent',
+          border: '1px solid var(--m-outline-variant)', color: 'var(--m-text-secondary)',
+          fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>생성</button>
+        <button onClick={save} disabled={busy} style={{
+          flexShrink: 0, padding: '7px 14px', borderRadius: 2,
+          background: 'var(--m-text)', border: '1px solid var(--m-text)',
+          color: 'var(--m-surface)', fontSize: 12, fontWeight: 800,
+          cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1, fontFamily: 'inherit' }}>
+          {busy ? '저장 중…' : '저장'}</button>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700,
+        color: enabled ? 'var(--m-positive)' : 'var(--m-text-tertiary)' }}>
+        {enabled ? '● 게이트 ON — 코드 입력자만 가입' : '○ 게이트 OFF — 누구나 가입 신청 가능'}
+      </div>
+      {msg && (
+        <div className="ko-keep" style={{ marginTop: 4, fontSize: 11,
+          color: 'var(--m-text-secondary)' }}>{msg}</div>
+      )}
+    </div>
+  )
+}
+
 function AdminDashboard() {
   const qc = useQueryClient()
   const adminStatus = useStore(s => s.adminStatus)
@@ -195,6 +263,8 @@ function AdminDashboard() {
       <AnimatePresence mode="wait">
         {section === 'users' && (
           <motion.div key="users" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {/* 초대 코드 — 가입 게이트 (봇·낯선 가입 차단) */}
+            <InviteCodeCard />
             {/* 승인 대기 배너 — 클릭 시 대기 목록만 필터 (발견성) */}
             {pendingCount > 0 && (
               <button onClick={() => setFilter('pending')}

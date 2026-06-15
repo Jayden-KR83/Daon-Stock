@@ -214,6 +214,18 @@ def _init_db():
             created_at REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+        CREATE TABLE IF NOT EXISTS goals (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id              TEXT NOT NULL,
+            name                 TEXT NOT NULL DEFAULT '목표',
+            target_amount        REAL NOT NULL,          -- 목표 금액(KRW)
+            target_date          TEXT NOT NULL,          -- 'YYYY-MM-DD'
+            monthly_contribution REAL NOT NULL DEFAULT 0, -- 월 납입(KRW)
+            expected_return      REAL NOT NULL DEFAULT 0.06, -- 연 기대수익률
+            volatility           REAL NOT NULL DEFAULT 0.15, -- 연 변동성
+            created_at           REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
         CREATE TABLE IF NOT EXISTS ai_cache (
             cache_key    TEXT PRIMARY KEY,         -- 'stock_v2:{TICKER}:{name}'
             value_json   TEXT NOT NULL,
@@ -1023,6 +1035,7 @@ class RegisterReq(BaseModel):
     email: str
     password: str
     name: str = ''
+    invite_code: str = ''
 
 class LoginReq(BaseModel):
     email: str
@@ -1060,6 +1073,16 @@ def auth_register(req: RegisterReq):
     with _db() as conn:
         count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()['c']
     is_first = (count == 0)
+
+    # 초대 코드 게이트 (첫 사용자 제외) — settings에 코드가 설정돼 있으면 일치해야 가입.
+    # 코드 미설정(빈 값)이면 게이트 비활성(누구나 가입 → 기존 승인 게이트만 작동).
+    if not is_first:
+        with _db() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key='invite_code'").fetchone()
+        required = ((row['value'] if row else '') or '').strip()
+        if required and (req.invite_code or '').strip() != required:
+            _log_event('', 'register_blocked', {'email': email, 'reason': 'bad_invite_code'})
+            raise HTTPException(403, "초대 코드가 올바르지 않습니다 — 관리자에게 코드를 요청하세요.")
 
     try:
         with _db() as conn:
@@ -1362,6 +1385,27 @@ def list_users(cu: dict = Depends(require_admin)):
             } for r in rows
         ]
     }
+
+
+class InviteCodeReq(BaseModel):
+    code: str = ''
+
+@app.get("/api/admin/invite_code")
+def get_invite_code(cu: dict = Depends(require_admin)):
+    """현재 공통 초대 코드 조회 (admin). 빈 값이면 게이트 비활성."""
+    with _db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='invite_code'").fetchone()
+    code = ((row['value'] if row else '') or '').strip()
+    return {'code': code, 'enabled': bool(code)}
+
+@app.put("/api/admin/invite_code")
+def set_invite_code(req: InviteCodeReq, cu: dict = Depends(require_admin)):
+    """공통 초대 코드 설정/변경 (admin). 빈 값으로 저장하면 게이트 해제(누구나 가입)."""
+    code = (req.code or '').strip()
+    with _db() as conn:
+        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('invite_code',?)", (code,))
+    _log_event(cu['user_id'], 'admin_set_invite_code', {'enabled': bool(code)})
+    return {'ok': True, 'enabled': bool(code), 'code': code}
 
 
 class UserActionReq(BaseModel):
@@ -5314,23 +5358,27 @@ def _compute_rebalance_alerts(holdings: list, prices: dict, usd_krw: float,
         '에너지':     ['XLE'],
         '소비재':     ['XLY', 'XLP'],
     }
-    tickers_set = {e['ticker'] for e in enriched}
     by_sector = {}
     for e in enriched:
-        by_sector.setdefault(e['sector'], []).append(e['ticker'])
+        by_sector.setdefault(e['sector'], []).append(e)
     for sec, lst in by_sector.items():
         if sec not in sector_etfs: continue
-        etfs_in = [t for t in lst if t in sector_etfs[sec]]
-        non_etfs = [t for t in lst if t not in sector_etfs[sec]]
-        if etfs_in and len(non_etfs) >= 2:
+        etfs_in = [e['ticker'] for e in lst if e['ticker'] in sector_etfs[sec]]
+        non_etf_holds = [e for e in lst if e['ticker'] not in sector_etfs[sec]]
+        if etfs_in and len(non_etf_holds) >= 2:
+            overlaps = sorted(
+                [{'ticker': e['ticker'], 'name': e['name'],
+                  'value': round(e['val'] / total * 100, 1)} for e in non_etf_holds],
+                key=lambda x: -x['value'])
             alerts.append({
                 'rule':     'overlap_exposure',
                 'severity': 'med',
                 'title':    f"섹터 「{sec}」 중복 노출",
-                'detail':   f"{', '.join(etfs_in)} ETF 와 개별 종목 {len(non_etfs)}개 동시 보유. "
+                'detail':   f"{', '.join(etfs_in)} ETF 와 개별 종목 {len(non_etf_holds)}개 동시 보유. "
                            f"이미 ETF에 포함된 종목이라면 비중 중복 가능 — 점검 권장.",
                 'sector':   sec,
                 'etfs':     etfs_in,
+                'overlaps': overlaps,   # [{ticker,name,value(비중%)}] — 프론트 표시용
             })
 
     # 2-5) 종목 수 1-2개만 보유 (극단적 미분산)
@@ -5601,7 +5649,17 @@ _KOSPI_TOP30 = [
     '086790','000810','015760','033780','096770','003670','017670','316140',
     '011200','259960','010130','009150','011070','032830',
 ]
-_EARNINGS_REF_TICKERS = sorted(set(_NASDAQ_TOP30 + _SP500_TOP30 + _KOSPI_TOP30))
+# 캘린더 과밀 완화 — 각 지수 상위 20만 반영 (아이콘 너무 작아지는 문제)
+_EARNINGS_REF_TICKERS = sorted(set(_NASDAQ_TOP30[:20] + _SP500_TOP30[:20] + _KOSPI_TOP30[:20]))
+# KOSPI 상위 20 코드 → 한글명 (캘린더 툴팁용 — 사용자 보유 외 유니버스 종목명)
+_KOSPI_NAMES = {
+    '005930': '삼성전자', '000660': 'SK하이닉스', '373220': 'LG에너지솔루션',
+    '207940': '삼성바이오로직스', '005380': '현대차', '000270': '기아',
+    '068270': '셀트리온', '105560': 'KB금융', '035420': 'NAVER', '012330': '현대모비스',
+    '028260': '삼성물산', '005490': 'POSCO홀딩스', '055550': '신한지주', '035720': '카카오',
+    '051910': 'LG화학', '006400': '삼성SDI', '086790': '하나금융지주', '000810': '삼성화재',
+    '015760': '한국전력', '033780': 'KT&G',
+}
 _earnings_cache: Dict[str, tuple] = {}   # ticker -> (fetched_ts, [events])
 _EARNINGS_TTL = 43200  # 12h — 실적일은 자주 안 바뀜
 
@@ -5651,8 +5709,10 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
                         continue
                     if win_lo <= ts <= cutoff:
                         row = ed.loc[ts_idx]
+                        nm = _KOSPI_NAMES.get(tkr.lstrip('A')) if is_kr else tkr
                         out.append({
                             'ticker': tkr,
+                            'name':   nm,            # KR은 한글명(유니버스), US는 티커
                             'date':   ts.strftime('%Y-%m-%d'),
                             'eps_estimate': float(row.get('EPS Estimate')) if row.get('EPS Estimate') == row.get('EPS Estimate') else None,
                             'eps_actual':   float(row.get('Reported EPS')) if row.get('Reported EPS') == row.get('Reported EPS') else None,
@@ -6238,6 +6298,160 @@ def push_test(cu: dict = Depends(require_approved)):
     sent = _send_push(cu['user_id'], '다온 알림 테스트',
                       '푸시 알림이 정상 동작합니다. 🎉', '/')
     return {'ok': True, 'sent': sent}
+
+
+# ─── 목표 기반 포트폴리오 (Goal-Based Investing) ───────────────────
+# MVP: 결정론 모델(Kasten 2013 — 동일 입력이면 몬테카를로와 고도 상관).
+# 위험=변동성이 아니라 '목표 시점 미달 가능성'. ⚠️ 추정치·투자자문 아님(프론트 고지).
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+def _current_net_worth_krw(uid: str) -> float:
+    """현재 총 자산(KRW). 최신 Net Worth 스냅샷 우선(자산추이와 일치), 없으면 라이브 계산."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT total_krw FROM net_worth_snapshots WHERE user_id=? "
+            "ORDER BY snapshot_date DESC LIMIT 1", (uid,)
+        ).fetchone()
+    if row and row['total_krw']:
+        return float(row['total_krw'])
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ticker, avg_price, quantity FROM portfolios WHERE user_id=?", (uid,)
+        ).fetchall()
+    usd_krw, total = 1380.0, 0.0
+    for h in rows:
+        qty = float(h['quantity'] or 0); avg = float(h['avg_price'] or 0)
+        if qty <= 0:
+            continue
+        is_us = not is_kr(h['ticker'])
+        p = (_price_fast(h['ticker']) if is_us else _kr_price(h['ticker'])) or {}
+        cur = float(p.get('current_price') or avg)
+        total += qty * cur * (usd_krw if is_us else 1.0)
+    return total
+
+def _months_until(date_str: str) -> int:
+    try:
+        parts = [int(x) for x in str(date_str).split('-')[:2]]
+        now = datetime.now()
+        return max(1, (parts[0] - now.year) * 12 + (parts[1] - now.month))
+    except Exception:
+        return 1
+
+def _project_goal(current_value: float, monthly: float, months: int,
+                  annual_return: float, annual_vol: float, target: float) -> dict:
+    """결정론 월별 중앙값 경로 + 80% 밴드(lognormal 포락) + 상태 + 달성확률 추정."""
+    months = max(1, int(months))
+    r = (1.0 + annual_return) ** (1.0 / 12.0) - 1.0
+    sigma = max(0.0, annual_vol)
+    path, median_final = [], current_value
+    # 긴 horizon이면 다운샘플(차트 점 과다 방지) — 최대 ~120점
+    step = max(1, months // 120)
+    for t in range(1, months + 1):
+        if abs(r) < 1e-12:
+            med = current_value + monthly * t
+        else:
+            med = current_value * (1.0 + r) ** t + monthly * (((1.0 + r) ** t - 1.0) / r)
+        median_final = med
+        if t % step == 0 or t == months:
+            env = math.exp(1.2816 * sigma * math.sqrt(t / 12.0))   # 80%(10/90 백분위)
+            path.append({'month': t, 'median': round(med),
+                         'low': round(med / env), 'high': round(med * env)})
+    T = months / 12.0
+    sigT = sigma * math.sqrt(T) if T > 0 else sigma
+    prob = None
+    if median_final > 0 and target > 0:
+        if sigT > 1e-9:
+            prob = _norm_cdf((math.log(median_final) - math.log(target)) / sigT)
+        else:
+            prob = 1.0 if median_final >= target else 0.0
+    status = ('on_track' if median_final >= target
+              else 'at_risk' if median_final >= target * 0.9
+              else 'off_track')
+    return {
+        'months': months,
+        'current_value': round(current_value),
+        'median_final': round(median_final),
+        'target': round(target),
+        'shortfall': round(target - median_final),   # 양수=부족
+        'probability': round(prob, 3) if prob is not None else None,
+        'status': status,
+        'path': path,
+    }
+
+class GoalReq(BaseModel):
+    id: int | None = None
+    name: str = '목표'
+    target_amount: float
+    target_date: str                       # 'YYYY-MM-DD'
+    monthly_contribution: float = 0
+    expected_return: float = 0.06
+    volatility: float = 0.15
+
+class GoalProjectReq(BaseModel):
+    target_amount: float
+    target_date: str
+    monthly_contribution: float = 0
+    expected_return: float = 0.06
+    volatility: float = 0.15
+
+@app.get("/api/goals")
+def list_goals(cu: dict = Depends(require_approved)):
+    cur_val = _current_net_worth_krw(cu['user_id'])
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id, name, target_amount, target_date, monthly_contribution, "
+            "expected_return, volatility, created_at FROM goals WHERE user_id=? "
+            "ORDER BY created_at DESC", (cu['user_id'],)
+        ).fetchall()
+    goals = []
+    for r in rows:
+        g = dict(r)
+        g['projection'] = _project_goal(
+            cur_val, g['monthly_contribution'], _months_until(g['target_date']),
+            g['expected_return'], g['volatility'], g['target_amount'])
+        goals.append(g)
+    return {'goals': goals, 'current_value': round(cur_val)}
+
+@app.post("/api/goals")
+def upsert_goal(req: GoalReq, cu: dict = Depends(require_approved)):
+    if req.target_amount <= 0:
+        raise HTTPException(400, "목표 금액이 필요합니다")
+    if not req.target_date:
+        raise HTTPException(400, "목표 시점이 필요합니다")
+    now = time()
+    with _db() as conn:
+        if req.id:
+            conn.execute(
+                "UPDATE goals SET name=?, target_amount=?, target_date=?, "
+                "monthly_contribution=?, expected_return=?, volatility=? "
+                "WHERE id=? AND user_id=?",
+                (req.name, req.target_amount, req.target_date, req.monthly_contribution,
+                 req.expected_return, req.volatility, req.id, cu['user_id']))
+            return {'ok': True, 'id': req.id, 'updated': True}
+        cur = conn.execute(
+            "INSERT INTO goals (user_id, name, target_amount, target_date, "
+            "monthly_contribution, expected_return, volatility, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (cu['user_id'], req.name, req.target_amount, req.target_date,
+             req.monthly_contribution, req.expected_return, req.volatility, now))
+        return {'ok': True, 'id': cur.lastrowid, 'created': True}
+
+@app.delete("/api/goals/{goal_id}")
+def delete_goal(goal_id: int, cu: dict = Depends(require_approved)):
+    with _db() as conn:
+        conn.execute("DELETE FROM goals WHERE id=? AND user_id=?",
+                     (goal_id, cu['user_id']))
+    return {'ok': True}
+
+@app.post("/api/goals/project")
+def project_goal_preview(req: GoalProjectReq, cu: dict = Depends(require_approved)):
+    """저장 전 실시간 미리보기. 현재 Net Worth는 서버 계산."""
+    cur_val = _current_net_worth_krw(cu['user_id'])
+    return {'current_value': round(cur_val),
+            'projection': _project_goal(
+                cur_val, req.monthly_contribution, _months_until(req.target_date),
+                req.expected_return, req.volatility, req.target_amount)}
 
 
 # ─── 알림 트리거 cron (모든 활성 알림 가격 체크) ────────────────────

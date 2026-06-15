@@ -158,17 +158,19 @@ function SummaryItem({ label, n, klass, color }) {
   )
 }
 
-/* 룰별 그룹: 같은 종류 메시지를 한 헤더로 묶고 inline list로 압축 */
+/* 룰별 그룹: 헤더 + 정렬된 행(종목명 좌 / 값 우). 나열식 대신 표 형태. */
 function RuleGroup({ group, nameByTicker = {} }) {
-  const max = group.alerts.reduce((m, a) =>
-    Math.max(m, Math.abs(a.value || 0)), 0)
   const topSev = group.alerts[0]?.severity || 'med'
   const sevClass = `is-${topSev}`
+  // 큰 손실: 손실 큰 순(value 오름차순=가장 음수 먼저), 그 외: 값 내림차순
+  const rows = [...group.alerts].sort((a, b) =>
+    group.rule === 'large_loss' ? (a.value || 0) - (b.value || 0)
+                                : (b.value || 0) - (a.value || 0))
 
   return (
     <div style={{ padding: '10px 0', borderBottom: '1px solid var(--m-outline-variant)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline',
-        justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+        justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8,
           minWidth: 0, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--m-text)' }}>
@@ -180,62 +182,80 @@ function RuleGroup({ group, nameByTicker = {} }) {
         <span className={`sev-label ${sevClass}`}>{group.severityLabel}</span>
       </div>
 
-      {/* compact line — 종목/섹터 + 값 inline */}
-      <div className="ko-keep" style={{ fontSize: 11.5,
-        color: 'var(--m-text-secondary)', lineHeight: 1.65 }}>
-        {group.alerts.map((a, i) => (
-          <React.Fragment key={i}>
-            {i > 0 && <span style={{ color: 'var(--m-text-tertiary)', margin: '0 6px' }}>·</span>}
-            <CompactItem alert={a} ruleKind={group.rule} nameByTicker={nameByTicker} />
-          </React.Fragment>
-        ))}
+      {/* 정렬된 행 */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {group.rule === 'overlap_exposure'
+          ? rows.map((a, i) => <OverlapRows key={i} alert={a} nameByTicker={nameByTicker} />)
+          : rows.map((a, i) => <AlertRow key={i} alert={a} ruleKind={group.rule} nameByTicker={nameByTicker} />)}
       </div>
 
-      {/* group hint — 한 줄, 음영 없음 */}
       <div className="ko-keep" style={{ fontSize: 10.5,
-        color: 'var(--m-text-tertiary)', marginTop: 4, lineHeight: 1.55 }}>
+        color: 'var(--m-text-tertiary)', marginTop: 6, lineHeight: 1.55 }}>
         {group.hint}
       </div>
     </div>
   )
 }
 
-function CompactItem({ alert, ruleKind, nameByTicker = {} }) {
+/* 종목명 한 행 — 좌: 종목명(+KR코드), 우: 값(우정렬) */
+function AlertRow({ alert, ruleKind, nameByTicker = {} }) {
   const tkr = alert.ticker
-  // 한국 종목은 코드(005930) 대신 종목명 — 경고 메시지 가독성. 미국은 티커 그대로.
   const name = tkr
     ? displayName(tkr, alert.name || nameByTicker[String(tkr).toUpperCase()])
-    : (alert.sector
-       || alert.title?.split(/[—-]/)[0]?.trim()
-       || alert.title)
+    : (alert.sector || alert.title?.split(/[—-]/)[0]?.trim() || alert.title)
   const showCode = tkr && isKrTicker(tkr) && name !== tkr
   const v = alert.value
-  // value 표시 형식 (룰별)
-  let valueText = null
-  let chipClass = 'num-chip is-neutral'
-  if (ruleKind === 'ticker_concentration' || ruleKind === 'sector_concentration') {
-    valueText = v != null ? `${v.toFixed(1)}%` : null
-    chipClass = 'num-chip is-neutral'
-  } else if (ruleKind === 'large_loss') {
-    valueText = v != null ? `${v.toFixed(1)}%` : null
-    chipClass = 'num-chip is-neg'
-  } else if (ruleKind === 'too_few_holdings') {
-    valueText = v != null ? `${v}종` : null
-    chipClass = 'num-chip is-neg'
-  }
+  let valueText = null, neg = false
+  if (ruleKind === 'large_loss') { valueText = v != null ? `${v.toFixed(1)}%` : null; neg = true }
+  else if (ruleKind === 'too_few_holdings') { valueText = v != null ? `${v}종` : null; neg = true }
+  else if (v != null) valueText = `${v.toFixed(1)}%`
   return (
-    <span style={{ whiteSpace: 'nowrap' }}>
-      <span style={{ fontWeight: 700, color: 'var(--m-text)' }}>{name}</span>
-      {showCode && (
-        <span style={{ fontSize: 9.5, fontWeight: 600,
-          color: 'var(--m-text-tertiary)', marginLeft: 3 }}>{tkr}</span>
-      )}
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+      gap: 10, padding: '4px 0', borderTop: '1px dotted var(--m-outline-variant)' }}>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap', fontSize: 12, fontWeight: 700, color: 'var(--m-text)' }}>
+        {name}
+        {showCode && <span style={{ fontSize: 9.5, fontWeight: 600,
+          color: 'var(--m-text-tertiary)', marginLeft: 4 }}>{tkr}</span>}
+      </span>
       {valueText && (
-        <span className={chipClass} style={{ marginLeft: 4 }}>
-          {valueText}
-        </span>
+        <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 800,
+          color: neg ? 'var(--m-negative)' : 'var(--m-text)',
+          fontVariantNumeric: 'tabular-nums' }}>{valueText}</span>
       )}
-    </span>
+    </div>
+  )
+}
+
+/* 중복 노출 — 섹터/ETF + 겹치는 개별 종목(종목명 + 비중%) 행 */
+function OverlapRows({ alert, nameByTicker = {} }) {
+  const overlaps = alert.overlaps || []
+  return (
+    <div style={{ padding: '4px 0', borderTop: '1px dotted var(--m-outline-variant)' }}>
+      <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)', marginBottom: 2 }}>
+        섹터 <strong style={{ color: 'var(--m-text)' }}>{alert.sector}</strong>
+        {alert.etfs?.length > 0 && <span> · ETF {alert.etfs.join(', ')}</span>}
+      </div>
+      {overlaps.map((o, i) => {
+        const nm = displayName(o.ticker, o.name || nameByTicker[String(o.ticker).toUpperCase()])
+        const showCode = isKrTicker(o.ticker) && nm !== o.ticker
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'baseline',
+            justifyContent: 'space-between', gap: 10, padding: '2px 0 2px 10px' }}>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap', fontSize: 11.5, color: 'var(--m-text)' }}>
+              {nm}
+              {showCode && <span style={{ fontSize: 9.5, color: 'var(--m-text-tertiary)',
+                marginLeft: 4 }}>{o.ticker}</span>}
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700,
+              color: 'var(--m-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+              {o.value}%
+            </span>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
