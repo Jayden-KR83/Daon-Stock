@@ -1025,6 +1025,7 @@ class RegisterReq(BaseModel):
     email: str
     password: str
     name: str = ''
+    invite_code: str = ''
 
 class LoginReq(BaseModel):
     email: str
@@ -1062,6 +1063,16 @@ def auth_register(req: RegisterReq):
     with _db() as conn:
         count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()['c']
     is_first = (count == 0)
+
+    # 초대 코드 게이트 (첫 사용자 제외) — settings에 코드가 설정돼 있으면 일치해야 가입.
+    # 코드 미설정(빈 값)이면 게이트 비활성(누구나 가입 → 기존 승인 게이트만 작동).
+    if not is_first:
+        with _db() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key='invite_code'").fetchone()
+        required = ((row['value'] if row else '') or '').strip()
+        if required and (req.invite_code or '').strip() != required:
+            _log_event('', 'register_blocked', {'email': email, 'reason': 'bad_invite_code'})
+            raise HTTPException(403, "초대 코드가 올바르지 않습니다 — 관리자에게 코드를 요청하세요.")
 
     try:
         with _db() as conn:
@@ -1364,6 +1375,27 @@ def list_users(cu: dict = Depends(require_admin)):
             } for r in rows
         ]
     }
+
+
+class InviteCodeReq(BaseModel):
+    code: str = ''
+
+@app.get("/api/admin/invite_code")
+def get_invite_code(cu: dict = Depends(require_admin)):
+    """현재 공통 초대 코드 조회 (admin). 빈 값이면 게이트 비활성."""
+    with _db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='invite_code'").fetchone()
+    code = ((row['value'] if row else '') or '').strip()
+    return {'code': code, 'enabled': bool(code)}
+
+@app.put("/api/admin/invite_code")
+def set_invite_code(req: InviteCodeReq, cu: dict = Depends(require_admin)):
+    """공통 초대 코드 설정/변경 (admin). 빈 값으로 저장하면 게이트 해제(누구나 가입)."""
+    code = (req.code or '').strip()
+    with _db() as conn:
+        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('invite_code',?)", (code,))
+    _log_event(cu['user_id'], 'admin_set_invite_code', {'enabled': bool(code)})
+    return {'ok': True, 'enabled': bool(code), 'code': code}
 
 
 class UserActionReq(BaseModel):

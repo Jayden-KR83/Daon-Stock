@@ -95,6 +95,8 @@ export const adminPromoteUser  = (uid, is_admin)  => api.post(`/admin/users/${ui
 export const adminDeleteUser   = (uid)            => api.delete(`/admin/users/${uid}`).then(r => r.data)
 export const adminGetStats     = ()               => api.get('/admin/stats').then(r => r.data)
 export const adminGetAuditLog  = (params = {})    => api.get('/admin/audit-log', { params }).then(r => r.data)
+export const getInviteCode     = ()               => api.get('/admin/invite_code').then(r => r.data)
+export const setInviteCode     = (code)           => api.put('/admin/invite_code', { code }).then(r => r.data)
 
 // 동적 계좌
 export const getAccounts    = ()        => api.get('/accounts').then(r => r.data)
