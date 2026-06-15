@@ -88,6 +88,29 @@ class TestGarpScore:
         out = main._garp_score(rows)[0]
         assert out['gate_pass'] == 0 and out['gate_fail_reason'] == 'PEG>1.5'
 
+    def test_market_differentiated_weights(self):
+        # 한국은 모멘텀 가중이 미국보다 낮아야(reversal 연구 반영). 같은 지표라도
+        # KR 종합점수에서 모멘텀 기여가 작다.
+        assert main._weights_for('KR')['momentum'] < main._weights_for('US')['momentum']
+        assert abs(sum(main._weights_for('KR').values()) - 1.0) < 1e-9
+        # 2종목(최악 가치·최고 모멘텀 vs 반대), value·momentum 축만 → 가중 차이가 드러남
+        def grp(mkt):
+            return [{'market': mkt, 'peg': 2.0, 'near_52w_high': 0.99},
+                    {'market': mkt, 'peg': 1.0, 'near_52w_high': 0.50}]
+        us = main._garp_score(grp('US'))[0]   # value pct 0, momentum pct 100
+        kr = main._garp_score(grp('KR'))[0]
+        assert round(us['composite_score'], 1) == 33.3   # (.30*0+.15*100)/.45
+        assert round(kr['composite_score'], 1) == 12.5   # (.35*0+.05*100)/.40
+        assert kr['composite_score'] < us['composite_score']
+
+    def test_estimate_revision_feeds_sentiment(self):
+        # 3-B: 추정치 상향 신호(magnitude·breadth)가 센티먼트 축에 반영(목표가 없어도)
+        rows = [{'market': 'US', 'est_rev_mag': 12.0, 'est_rev_breadth': 0.8},
+                {'market': 'US', 'est_rev_mag': -5.0, 'est_rev_breadth': -0.2}]
+        out = main._garp_score(rows)
+        assert out[0]['pct_sentiment'] is not None     # 신호가 센티먼트로 들어감
+        assert out[0]['pct_sentiment'] > out[1]['pct_sentiment']  # 상향 종목이 더 높음
+
     def test_sector_relative_value(self):
         # 2-B: rel_per은 '같은 섹터' median 대비 — 고PER 섹터 종목도 불이익 없음.
         # 섹터A PER[10,14] median12, 섹터B PER[30,42] median36.

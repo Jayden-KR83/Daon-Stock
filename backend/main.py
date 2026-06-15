@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from functools import wraps
 from threading import Lock
-from time import time, sleep
+from time import time, sleep, strftime, gmtime
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -250,6 +250,16 @@ def _init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_discovery_score ON discovery_scores(gate_pass DESC, composite_score DESC);
         CREATE INDEX IF NOT EXISTS idx_discovery_market ON discovery_scores(market, composite_score DESC);
+        CREATE TABLE IF NOT EXISTS discovery_history (
+            snapshot_date   TEXT NOT NULL,           -- KST 날짜 'YYYY-MM-DD'
+            ticker          TEXT NOT NULL,
+            market          TEXT NOT NULL,
+            sector          TEXT NOT NULL DEFAULT '',
+            composite_score REAL NOT NULL DEFAULT 0,
+            gate_pass       INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(snapshot_date, ticker)        -- 일자별 랭킹 스냅샷 → 포워드테스트 토대
+        );
+        CREATE INDEX IF NOT EXISTS idx_dischist_date ON discovery_history(snapshot_date, composite_score DESC);
         """)
 
 _init_db()
@@ -2666,6 +2676,13 @@ def _stock_fundamentals(ticker: str) -> dict:
 
 GARP_WEIGHTS = {'value': 0.30, 'growth': 0.25, 'quality': 0.20,
                 'momentum': 0.15, 'sentiment': 0.10}
+# 한국은 개별주 중기 모멘텀이 reversal(역전)이 지배적(IAJ 2024, 1983-2023) →
+# 모멘텀 가중을 0.15→0.05로 낮추고 펀더멘털(가치·체력)로 재배분. 미국은 모멘텀 유지.
+GARP_WEIGHTS_KR = {'value': 0.35, 'growth': 0.25, 'quality': 0.25,
+                   'momentum': 0.05, 'sentiment': 0.10}
+
+def _weights_for(market: str) -> dict:
+    return GARP_WEIGHTS_KR if market == 'KR' else GARP_WEIGHTS
 
 # 경기민감주 함정 방지: PEG 계산 시 성장률 상한(winsorize). 저점 회복으로
 # 성장률 497% 같은 값이 찍히면 PEG가 0에 수렴해 밸류가 과대평가됨 → 50%로 캡.
@@ -2682,6 +2699,8 @@ _GARP_SIGNALS = {
     'debt_to_equity': ('debt_to_equity', False),
     'near_52w_high':  ('near_52w_high', True),
     'analyst_upside': ('analyst_upside', True),
+    'est_rev_mag':    ('est_rev_mag', True),     # 90일 +1y EPS 추정치 변화% (revision drift)
+    'est_rev_breadth':('est_rev_breadth', True), # 상향-하향 애널리스트 비율 (breadth)
 }
 # 축 = 소속 신호 백분위 평균(가용분만)
 _GARP_AXIS_SIGNALS = {
@@ -2689,7 +2708,9 @@ _GARP_AXIS_SIGNALS = {
     'growth':    ['eps_growth', 'rev_growth'],
     'quality':   ['roe', 'debt_to_equity'],
     'momentum':  ['near_52w_high'],
-    'sentiment': ['analyst_upside'],
+    # 센티먼트 = 목표가 + 추정치 상향(magnitude·breadth) 합성. raw revision 단독은
+    # 사후 감쇠하나 합성은 GFC 이후도 유의(Guerard CTEF) — 가장 검증된 단기 알파.
+    'sentiment': ['analyst_upside', 'est_rev_mag', 'est_rev_breadth'],
 }
 
 
@@ -2780,9 +2801,10 @@ def _garp_score(rows: list) -> list:
             r['gate_pass'] = 1 if passed else 0
             r['gate_fail_reason'] = reason
 
-            # 가용 축만 가중치 재정규화 후 가중합 → 0~100
+            # 가용 축만 가중치 재정규화 후 가중합 → 0~100 (시장별 차등 가중)
+            weights = _weights_for(r.get('market', 'US'))
             num = den = 0.0
-            for axis, w in GARP_WEIGHTS.items():
+            for axis, w in weights.items():
                 ap = axis_pct[axis]
                 if ap is not None:
                     num += w * ap; den += w
@@ -2831,12 +2853,46 @@ def _eps_yoy_from_trend(trend: dict):
     return round((latest - prior) / prior * 100, 2)
 
 
+def _est_revision(ticker: str):
+    """US 애널리스트 추정치 상향 — (90일 +1y EPS 변화%, breadth -1~1) 또는 (None, None).
+    forecast-revision drift = 가장 검증된 단기 알파(Huang 2022·PEAD). yfinance eps_trend/eps_revisions."""
+    def _work():
+        import yfinance as yf
+        tk = yf.Ticker(ticker.upper())
+        mag = brd = None
+        try:
+            tr = tk.eps_trend
+            if tr is not None and '+1y' in tr.index:
+                cur, ago = tr.loc['+1y', 'current'], tr.loc['+1y', '90daysAgo']
+                if cur and ago and float(ago) != 0 and not _nan(cur) and not _nan(ago):
+                    mag = round((float(cur) - float(ago)) / abs(float(ago)) * 100, 2)
+        except Exception:
+            pass
+        try:
+            rv = tk.eps_revisions
+            if rv is not None and '+1y' in rv.index:
+                up = rv.loc['+1y', 'upLast30days']; dn = rv.loc['+1y', 'downLast30days']
+                up = float(up) if up and not _nan(up) else 0.0
+                dn = float(dn) if dn and not _nan(dn) else 0.0
+                if up + dn > 0:
+                    brd = round((up - dn) / (up + dn), 3)
+        except Exception:
+            pass
+        return mag, brd
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(_work).result(timeout=8)
+    except Exception:
+        return None, None
+
+
 def _discovery_raw_metrics(ticker: str, market: str) -> dict:
     """1종목 raw 지표 수집. 실패·미제공 축은 None(가짜값 금지). 종목당 격리(예외 흡수)."""
     m: dict = {
         'peg': None, 'trailing_pe': None, 'forward_pe': None, 'eps_growth': None,
         'rev_growth': None, 'roe': None, 'debt_to_equity': None,
         'near_52w_high': None, 'analyst_upside': None,
+        'est_rev_mag': None, 'est_rev_breadth': None,
     }
     try:
         f = _stock_fundamentals(ticker) or {}
@@ -2864,6 +2920,7 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
             tgt = full.get('target_mean'); na = full.get('num_analysts') or 0
             if cur and tgt and na >= 3:
                 m['analyst_upside'] = round((tgt - cur) / cur * 100, 2)
+            m['est_rev_mag'], m['est_rev_breadth'] = _est_revision(ticker)  # 추정치 상향(3-B)
         else:  # KR — PEG 계산, debt·analyst N/A (Naver 미제공)
             # rev_growth: Naver엔 없으나 yfinance .KS/.KQ info의 revenueGrowth는 잡힘
             if m['rev_growth'] is None:
@@ -5990,6 +6047,15 @@ def _do_discover_scan() -> dict:
                      r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
                      r.get('composite_score', 0), r.get('gate_pass', 0),
                      r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now))
+            # 포워드테스트 아카이빙: 일자별(KST) 랭킹 스냅샷 누적 (같은 날 재스캔은 덮어씀)
+            snap_date = strftime('%Y-%m-%d', gmtime(now + 9 * 3600))
+            for r in scored:
+                conn.execute(
+                    "INSERT OR REPLACE INTO discovery_history "
+                    "(snapshot_date, ticker, market, sector, composite_score, gate_pass) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (snap_date, r['ticker'], r['market'], r.get('sector', ''),
+                     r.get('composite_score', 0), r.get('gate_pass', 0)))
 
         return {'scanned': len(universe), 'scored': len(scored),
                 'gate_passed': sum(1 for r in scored if r.get('gate_pass')),
