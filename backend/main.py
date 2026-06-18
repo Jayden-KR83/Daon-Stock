@@ -247,6 +247,14 @@ def _init_db():
             debt_to_equity    REAL,                     -- KR=NULL (Naver 미제공)
             near_52w_high     REAL,                     -- 현재가/52주고가 (0~1)
             analyst_upside    REAL,                     -- (target_mean-cur)/cur %, KR=NULL
+            -- 투자판단용 표시 지표
+            current_price     REAL,
+            target_price      REAL,                     -- 애널리스트 평균 목표가 (US)
+            trailing_pe       REAL,                     -- 후행 PER
+            forward_pe        REAL,                     -- 선행(추정) PER
+            profit_margin     REAL,                     -- 순이익률 % (US)
+            exchange          TEXT NOT NULL DEFAULT '', -- NMS/NYQ/KSC/KOE 등
+            quote_type        TEXT NOT NULL DEFAULT '', -- EQUITY/ETF
             -- 축별 백분위 (0~100, 시장 내 정규화). N/A 축은 NULL
             pct_value         REAL,
             pct_growth        REAL,
@@ -304,6 +312,14 @@ def _migrate_schema():
         wl_cols = {row['name'] for row in conn.execute("PRAGMA table_info(watchlist)").fetchall()}
         if 'group_name' not in wl_cols:
             conn.execute("ALTER TABLE watchlist ADD COLUMN group_name TEXT NOT NULL DEFAULT '기본'")
+        # 발굴: 투자판단용 추가 지표 (현재가·목표가·밸류·거래소·유형)
+        ds_cols = {row['name'] for row in conn.execute("PRAGMA table_info(discovery_scores)").fetchall()}
+        for col, decl in (('current_price', 'REAL'), ('target_price', 'REAL'),
+                          ('trailing_pe', 'REAL'), ('forward_pe', 'REAL'),
+                          ('profit_margin', 'REAL'), ('exchange', "TEXT NOT NULL DEFAULT ''"),
+                          ('quote_type', "TEXT NOT NULL DEFAULT ''")):
+            if ds_cols and col not in ds_cols:
+                conn.execute(f"ALTER TABLE discovery_scores ADD COLUMN {col} {decl}")
         # 마이그레이션 직후, 기존 사용자(이미 가입된 자)는 자동 approved + ai_enabled (legacy compat)
         if added_status:
             conn.execute(
@@ -2084,6 +2100,11 @@ def _stock_full(ticker: str) -> dict | None:
             data['target_low']    = info.get('targetLowPrice')
             data['recommendation']= info.get('recommendationKey', 'N/A')
             data['num_analysts']  = int(info.get('numberOfAnalystOpinions') or 0)
+            data['exchange']      = info.get('exchange', '')          # NMS/NYQ 등
+            data['quote_type']    = info.get('quoteType', '')         # EQUITY/ETF
+            data['profit_margin'] = (round(float(info['profitMargins']) * 100, 2)
+                                     if info.get('profitMargins') is not None
+                                     and not _nan(info.get('profitMargins')) else None)
     except Exception:
         pass  # meta 실패해도 chart는 표시
     return data
@@ -2937,6 +2958,8 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
         'rev_growth': None, 'roe': None, 'debt_to_equity': None,
         'near_52w_high': None, 'analyst_upside': None,
         'est_rev_mag': None, 'est_rev_breadth': None,
+        'current_price': None, 'target_price': None, 'profit_margin': None,
+        'exchange': '', 'quote_type': '',
     }
     try:
         f = _stock_fundamentals(ticker) or {}
@@ -2957,31 +2980,43 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
                 m['rev_growth'] = f.get('revenue_growth')
             m['peg'] = f.get('peg_ratio')
             m['debt_to_equity'] = f.get('debt_to_equity')
+            m['profit_margin'] = f.get('profit_margin')
             full = _stock_full(ticker) or {}
             cur = full.get('current_price'); hi = full.get('week_52_high')
+            m['current_price'] = cur
+            m['exchange'] = full.get('exchange', '') or ''
+            m['quote_type'] = full.get('quote_type', '') or ''
             if cur and hi and hi > 0:
                 m['near_52w_high'] = round(cur / hi, 4)
             tgt = full.get('target_mean'); na = full.get('num_analysts') or 0
             if cur and tgt and na >= 3:
+                m['target_price'] = round(float(tgt), 2)
                 m['analyst_upside'] = round((tgt - cur) / cur * 100, 2)
             m['est_rev_mag'], m['est_rev_breadth'] = _est_revision(ticker)  # 추정치 상향(3-B)
         else:  # KR — PEG 계산, debt·analyst N/A (Naver 미제공)
-            # rev_growth: Naver엔 없으나 yfinance .KS/.KQ info의 revenueGrowth는 잡힘
-            if m['rev_growth'] is None:
-                for sfx in ('.KS', '.KQ'):
-                    info_kr = _yf_info_safe(kr_code(ticker) + sfx, timeout=6)
-                    rg = info_kr.get('revenueGrowth') if info_kr else None
-                    if rg is not None:
-                        m['rev_growth'] = round(rg * 100, 2); break
+            # yfinance .KS/.KQ info 1회 조회: revenueGrowth + 거래소 + 유형
+            info_kr, used_sfx = {}, ''
+            for sfx in ('.KS', '.KQ'):
+                ik = _yf_info_safe(kr_code(ticker) + sfx, timeout=6)
+                if ik and (ik.get('regularMarketPrice') or ik.get('revenueGrowth') is not None
+                           or ik.get('exchange')):
+                    info_kr, used_sfx = ik, sfx; break
+            if m['rev_growth'] is None and info_kr.get('revenueGrowth') is not None:
+                m['rev_growth'] = round(info_kr['revenueGrowth'] * 100, 2)
+            m['exchange'] = info_kr.get('exchange') or (
+                'KSC' if used_sfx == '.KS' else 'KOE' if used_sfx == '.KQ' else '')
+            m['quote_type'] = info_kr.get('quoteType') or 'EQUITY'
             pe, eg = m['trailing_pe'], m['eps_growth']
             if pe and pe > 0 and eg and eg > 0:
                 m['peg'] = round(pe / min(eg, _GROWTH_CAP_FOR_PEG), 3)  # 성장률 캡(경기민감주 함정)
-            # near_52w_high: KR 차트(_kr_history) 마지막 종가 / 1년 최고가
+            # current_price + near_52w_high: KR 차트(_kr_history)
             try:
                 hist = _kr_history(ticker) or []
                 bars = hist[-252:]
                 highs = [b['high'] for b in bars if b.get('high')]
                 last = bars[-1]['close'] if bars and bars[-1].get('close') else None
+                if last:
+                    m['current_price'] = last
                 if highs and last:
                     mx = max(highs)
                     if mx > 0:
@@ -6098,15 +6133,20 @@ def _do_discover_scan() -> dict:
                     "ticker, market, name, sector, peg, rel_per, eps_growth, rev_growth, "
                     "roe, debt_to_equity, near_52w_high, analyst_upside, pct_value, pct_growth, "
                     "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
-                    "gate_fail_reason, data_completeness, computed_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "gate_fail_reason, data_completeness, computed_at, "
+                    "current_price, target_price, trailing_pe, forward_pe, profit_margin, "
+                    "exchange, quote_type) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (r['ticker'], r['market'], r.get('name', ''), r.get('sector', ''),
                      r.get('peg'), r.get('rel_per'), r.get('eps_growth'), r.get('rev_growth'),
                      r.get('roe'), r.get('debt_to_equity'), r.get('near_52w_high'),
                      r.get('analyst_upside'), r.get('pct_value'), r.get('pct_growth'),
                      r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
                      r.get('composite_score', 0), r.get('gate_pass', 0),
-                     r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now))
+                     r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now,
+                     r.get('current_price'), r.get('target_price'), r.get('trailing_pe'),
+                     r.get('forward_pe'), r.get('profit_margin'),
+                     r.get('exchange', ''), r.get('quote_type', '')))
             # 포워드테스트 아카이빙: 일자별(KST) 랭킹 스냅샷 누적 (같은 날 재스캔은 덮어씀)
             snap_date = strftime('%Y-%m-%d', gmtime(now + 9 * 3600))
             for r in scored:
