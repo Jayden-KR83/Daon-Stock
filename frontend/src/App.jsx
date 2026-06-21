@@ -199,7 +199,8 @@ export default function App() {
   // 앱/모바일 좌우 스와이프 탭 전환 — BottomNav 순서 미러링 (admin은 여정·관리자 포함)
   const appMainRef = useRef(null)
   const isAdminUser = !!currentUser?.is_admin
-  const swipeOrder = isAdminUser ? [0,1,2,3,4,5,6,7,8,9,10] : [0,1,2,3,4,5,6,7,10]
+  // BottomNav 순서와 동일하게 (포트폴리오·분석·종목·관심·발굴·시장·등록·설정·가이드·여정·관리자)
+  const swipeOrder = isAdminUser ? [0,2,3,1,10,4,5,6,7,8,9] : [0,2,3,1,10,4,5,6,7]
   useSwipeNav(appMainRef, {
     order: swipeOrder, active: activeTab, onChange: setActiveTab, enabled: isApp,
   })
