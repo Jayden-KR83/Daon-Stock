@@ -1074,69 +1074,50 @@ function AiStockResult({ data, isUs, cur }) {
         </motion.p>
       )}
 
-      {/* 회사 동향 · 신사업 · 미래 전략 */}
-      {data.company_overview && (
-        <Section title="회사 동향 · 신사업 · 미래 전략">
-          <p style={proseStyle}>{breakSentences(data.company_overview)}</p>
-        </Section>
-      )}
-
-      {/* 분기 실적 · CEO 발언 · 가이던스 */}
-      {data.earnings_ir && (
-        <Section title="분기 실적 · CEO 발언 · 가이던스">
-          <p style={proseStyle}>{breakSentences(data.earnings_ir)}</p>
-        </Section>
-      )}
-
-      {/* 투자 촉매 (단기·중기) */}
-      {((data.catalysts_short?.length || 0) + (data.catalysts_medium?.length || 0)) > 0 && (
-        <Section title="투자 촉매 (정량 기반)">
-          {data.catalysts_short?.length > 0 && (
-            <div style={{ marginBottom: data.catalysts_medium?.length ? 11 : 0 }}>
-              <GroupLabel>단기 · 1–3개월</GroupLabel>
-              {data.catalysts_short.map((c, i) => <Bullet key={i}>{c}</Bullet>)}
-            </div>
-          )}
-          {data.catalysts_medium?.length > 0 && (
-            <div>
-              <GroupLabel>중기 · 3–12개월</GroupLabel>
-              {data.catalysts_medium.map((c, i) => <Bullet key={i}>{c}</Bullet>)}
-            </div>
-          )}
-        </Section>
-      )}
-
-      {/* 수주 잔고 · 백로그 */}
-      {data.backlog && data.backlog !== '확인 필요' && data.backlog.trim().length > 0 && (
-        <Section title="수주 잔고 · 백로그">
-          <p style={proseStyle}>{breakSentences(data.backlog)}</p>
-        </Section>
-      )}
-
-      {/* 애널리스트 컨센서스 */}
-      {data.analyst_views && (
-        <Section title="애널리스트 컨센서스">
-          <p style={proseStyle}>{breakSentences(data.analyst_views)}</p>
-        </Section>
-      )}
-
-      {/* 강세 포인트 */}
-      {data.bull?.length > 0 && (
-        <Section title="강세 포인트" barColor="var(--clr-pos-dark)">
-          {data.bull.map((b, i) => (
-            <Bullet key={i} markerColor="var(--clr-pos-dark)">{b}</Bullet>
-          ))}
-        </Section>
-      )}
-
-      {/* 리스크 */}
-      {data.bear?.length > 0 && (
-        <Section title="리스크" barColor="var(--clr-neg-dark)">
-          {data.bear.map((b, i) => (
-            <Bullet key={i} markerColor="var(--clr-neg-dark)">{b}</Bullet>
-          ))}
-        </Section>
-      )}
+      {/* ── 본문: 번호 매긴 보고서 섹션 (존재하는 것만 01·02… 순번 통일) ── */}
+      {(() => {
+        const secs = []
+        if (data.company_overview)
+          secs.push({ title: '기업 개요 · 전략',
+            body: <p style={proseStyle}>{breakSentences(data.company_overview)}</p> })
+        if (data.earnings_ir)
+          secs.push({ title: '실적 · 가이던스',
+            body: <p style={proseStyle}>{breakSentences(data.earnings_ir)}</p> })
+        if (((data.catalysts_short?.length || 0) + (data.catalysts_medium?.length || 0)) > 0)
+          secs.push({ title: '투자 촉매', body: (
+            <>
+              {data.catalysts_short?.length > 0 && (
+                <div style={{ marginBottom: data.catalysts_medium?.length ? 11 : 0 }}>
+                  <GroupLabel>단기 · 1–3개월</GroupLabel>
+                  {data.catalysts_short.map((c, i) => <Bullet key={i}>{c}</Bullet>)}
+                </div>
+              )}
+              {data.catalysts_medium?.length > 0 && (
+                <div>
+                  <GroupLabel>중기 · 3–12개월</GroupLabel>
+                  {data.catalysts_medium.map((c, i) => <Bullet key={i}>{c}</Bullet>)}
+                </div>
+              )}
+            </>
+          ) })
+        if (data.backlog && data.backlog !== '확인 필요' && data.backlog.trim().length > 0)
+          secs.push({ title: '수주 잔고 · 백로그',
+            body: <p style={proseStyle}>{breakSentences(data.backlog)}</p> })
+        if (data.analyst_views)
+          secs.push({ title: '애널리스트 컨센서스',
+            body: <p style={proseStyle}>{breakSentences(data.analyst_views)}</p> })
+        if (data.bull?.length > 0)
+          secs.push({ title: '강세 요인', barColor: 'var(--clr-pos-dark)',
+            body: data.bull.map((b, i) => <Bullet key={i} markerColor="var(--clr-pos-dark)">{b}</Bullet>) })
+        if (data.bear?.length > 0)
+          secs.push({ title: '리스크 요인', barColor: 'var(--clr-neg-dark)',
+            body: data.bear.map((b, i) => <Bullet key={i} markerColor="var(--clr-neg-dark)">{b}</Bullet>) })
+        return secs.map((s, i) => (
+          <Section key={s.title} num={i + 1} title={s.title} barColor={s.barColor}>
+            {s.body}
+          </Section>
+        ))
+      })()}
 
       {/* 최종 의견 — Insight Banner (좌측 색띠 = 추천 색) */}
       {data.verdict && (
@@ -1186,7 +1167,7 @@ function AiStockResult({ data, isUs, cur }) {
 /* AI 분석 결과 — 접고 펼치는 섹션 카드. 부모 stagger 변형을 따른다. */
 /* 리서치 섹션 — 좌측 3px 색띠 + 타이틀 + 접기. 이모지 없음(디자인 시스템 준수).
    색띠 색은 의미만 전달(정보=중립, 강세=pos, 리스크=neg). */
-function Section({ title, barColor = 'var(--clr-text-sub)', children, defaultOpen = true }) {
+function Section({ title, num, barColor = 'var(--clr-text-sub)', children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
     <motion.div
@@ -1195,6 +1176,7 @@ function Section({ title, barColor = 'var(--clr-text-sub)', children, defaultOpe
       style={{
       background: 'var(--clr-surface)', borderRadius: 4, padding: '11px 14px',
       marginBottom: 8, border: '1px solid var(--m-outline-variant)',
+      borderLeft: `3px solid ${barColor}`,   // 좌측 색띠 — 보고서 섹션 구분
     }}>
       <button onClick={() => setOpen(o => !o)}
         style={{
@@ -1202,8 +1184,15 @@ function Section({ title, barColor = 'var(--clr-text-sub)', children, defaultOpe
           background: 'none', border: 'none', cursor: 'pointer', padding: 0,
           fontFamily: 'inherit', textAlign: 'left',
         }}>
+        {num != null && (
+          <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 900,
+            color: 'var(--clr-text-muted)', fontVariantNumeric: 'tabular-nums',
+            letterSpacing: '.04em', minWidth: 18 }}>
+            {String(num).padStart(2, '0')}
+          </span>
+        )}
         <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--clr-text)',
-          letterSpacing: '.02em' }}>{title}</span>
+          letterSpacing: '.02em', textTransform: 'uppercase' }}>{title}</span>
         <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--clr-text-muted)',
           transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▼</span>
       </button>
