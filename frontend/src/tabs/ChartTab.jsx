@@ -1107,11 +1107,11 @@ function AiStockResult({ data, isUs, cur }) {
           secs.push({ title: '애널리스트 컨센서스',
             body: <p style={proseStyle}>{breakSentences(data.analyst_views)}</p> })
         if (data.bull?.length > 0)
-          secs.push({ title: '강세 요인', barColor: 'var(--clr-pos-dark)',
-            body: data.bull.map((b, i) => <Bullet key={i} markerColor="var(--clr-pos-dark)">{b}</Bullet>) })
+          secs.push({ title: '강세 요인',
+            body: data.bull.map((b, i) => <Bullet key={i}>{b}</Bullet>) })
         if (data.bear?.length > 0)
-          secs.push({ title: '리스크 요인', barColor: 'var(--clr-neg-dark)',
-            body: data.bear.map((b, i) => <Bullet key={i} markerColor="var(--clr-neg-dark)">{b}</Bullet>) })
+          secs.push({ title: '리스크 요인',
+            body: data.bear.map((b, i) => <Bullet key={i}>{b}</Bullet>) })
         return secs.map((s, i) => (
           <Section key={s.title} num={i + 1} title={s.title} barColor={s.barColor}>
             {s.body}
@@ -1176,7 +1176,6 @@ function Section({ title, num, barColor = 'var(--clr-text-sub)', children, defau
       style={{
       background: 'var(--clr-surface)', borderRadius: 4, padding: '11px 14px',
       marginBottom: 8, border: '1px solid var(--m-outline-variant)',
-      borderLeft: `3px solid ${barColor}`,   // 좌측 색띠 — 보고서 섹션 구분
     }}>
       <button onClick={() => setOpen(o => !o)}
         style={{
