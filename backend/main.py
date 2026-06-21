@@ -2993,8 +2993,13 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
                 m['target_price'] = round(float(tgt), 2)
                 m['analyst_upside'] = round((tgt - cur) / cur * 100, 2)
             m['est_rev_mag'], m['est_rev_breadth'] = _est_revision(ticker)  # 추정치 상향(3-B)
-        else:  # KR — PEG 계산, debt·analyst N/A (Naver 미제공)
-            # yfinance .KS/.KQ info 1회 조회: revenueGrowth + 거래소 + 유형
+        else:  # KR — PEG는 Naver PER로 계산, 그 외(부채·마진·목표가)는 yfinance .KS info
+            def _f2(v):
+                try:
+                    x = float(v); return None if _nan(x) else x
+                except Exception:
+                    return None
+            # yfinance .KS/.KQ info 1회 조회: 한국 대형주는 부채·마진·애널리스트 목표가까지 제공
             info_kr, used_sfx = {}, ''
             for sfx in ('.KS', '.KQ'):
                 ik = _yf_info_safe(kr_code(ticker) + sfx, timeout=6)
@@ -3006,23 +3011,31 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
             m['exchange'] = info_kr.get('exchange') or (
                 'KSC' if used_sfx == '.KS' else 'KOE' if used_sfx == '.KQ' else '')
             m['quote_type'] = info_kr.get('quoteType') or 'EQUITY'
+            m['debt_to_equity'] = _f2(info_kr.get('debtToEquity'))      # 안정성 축 보강
+            pm = _f2(info_kr.get('profitMargins'))
+            m['profit_margin'] = round(pm * 100, 2) if pm is not None else None
+            cur = _f2(info_kr.get('currentPrice')) or _f2(info_kr.get('regularMarketPrice'))
+            tgt = _f2(info_kr.get('targetMeanPrice'))
+            na = info_kr.get('numberOfAnalystOpinions') or 0
+            if cur and tgt and na >= 3:                                 # 기대(전문가) 축 보강
+                m['target_price'] = round(tgt, 2)
+                m['analyst_upside'] = round((tgt - cur) / cur * 100, 2)
             pe, eg = m['trailing_pe'], m['eps_growth']
             if pe and pe > 0 and eg and eg > 0:
                 m['peg'] = round(pe / min(eg, _GROWTH_CAP_FOR_PEG), 3)  # 성장률 캡(경기민감주 함정)
-            # current_price + near_52w_high: KR 차트(_kr_history)
+            # current_price + near_52w_high: KR 차트(_kr_history), 없으면 info 현재가
             try:
                 hist = _kr_history(ticker) or []
                 bars = hist[-252:]
                 highs = [b['high'] for b in bars if b.get('high')]
                 last = bars[-1]['close'] if bars and bars[-1].get('close') else None
-                if last:
-                    m['current_price'] = last
+                m['current_price'] = last or cur
                 if highs and last:
                     mx = max(highs)
                     if mx > 0:
                         m['near_52w_high'] = round(last / mx, 4)
             except Exception:
-                pass
+                m['current_price'] = m['current_price'] or cur
     except Exception:
         pass
     return m

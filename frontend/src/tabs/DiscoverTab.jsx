@@ -62,7 +62,8 @@ function DetailPanel({ row, onPick }) {
           <RadarChart data={radarData} outerRadius="68%">
             <PolarGrid stroke="var(--m-outline-variant)" />
             <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: 'var(--m-text-secondary)' }} />
-            <Radar dataKey="v" stroke="#1F4FD3" fill="#1F4FD3" fillOpacity={0.22} isAnimationActive={false} />
+            <Radar dataKey="v" stroke="#1F4FD3" fill="#1F4FD3" fillOpacity={0.22}
+              connectNulls isAnimationActive={false} />
           </RadarChart>
         </ResponsiveContainer>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', justifyContent: 'center', fontSize: 10 }}>
@@ -229,7 +230,7 @@ export default function DiscoverTab() {
       )}
 
       <div className="ko-keep" style={{ fontSize: 10, color: 'var(--m-text-tertiary)', marginTop: 9, lineHeight: 1.5 }}>
-        「종합」 옆 N/5 = 평가에 쓰인 요소 수 (한국은 부채·전문가 미공개로 보통 4/5). 투자 권유 아님 · 데이터 매일 자동 갱신.
+        「종합」 옆 N/5 = 평가에 쓰인 요소 수 (애널리스트 커버리지가 없는 일부 종목은 4/5). 레이더에서 빈 축은 '0점'이 아니라 '데이터 없음'입니다. 투자 권유 아님 · 데이터 매일 자동 갱신.
       </div>
     </div>
   )
