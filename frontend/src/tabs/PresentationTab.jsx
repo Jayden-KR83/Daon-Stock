@@ -136,7 +136,7 @@ const UI_PHASES = [
       { label: '단축키 · 관심그룹 · 최근검색 · auto theme', h: 22 },
       { label: 'swap 1GB + systemd memory limits · 회귀 PASS', h: 20 },
     ]},
-  { version: 'v4.0', label: '디자인 시스템 정비 (현재)',
+  { version: 'v4.0', label: '디자인 시스템 정비',
     stack: 'design.md · 무채색 + 단일 액센트', lines: '13,000+', tabs: 10, features: 105,
     keyChange: '직사각형 + 글자색 강조만 + 인포그래픽',
     desc: 'AI 티 나는 박스 디자인 완전 제거. mono-card + 좌측 머리글 + 그룹핑된 경고 + Top 비중 stacked bar 인포그래픽.',
@@ -144,6 +144,15 @@ const UI_PHASES = [
       { label: 'PortfolioSummaryBanner — Top 5 stacked bar', h: 28 },
       { label: 'AlertsCard 그룹핑 + compact + sev-dot 제거', h: 22 },
       { label: '탭 명: 포트폴리오·분석·종목·시장·등록·설정·가이드', h: 20 },
+    ]},
+  { version: 'v4.5', label: '신규 종목 발굴 + 목표기반 (현재)',
+    stack: 'GARP 멀티팩터 · 레이더 인포그래픽', lines: '13,900+', tabs: 11, features: 113,
+    keyChange: '5요소 정량 스크리너 + 학술 검증(deep-research) 반영',
+    desc: 'GARP 발굴 탭 — 저평가·성장성·안정성·상승세·기대 5요소 점수화, 매일 자동 스캔, 행 클릭 시 레이더+밸류(목표가·상승여력·PER·순이익률) 상세. 목표 기반 포트폴리오 통합.',
+    ui: [
+      { label: '발굴: 5요소 레이더 + 목표가·상승여력·PER 상세', h: 28 },
+      { label: '시장별 차등가중(한국 모멘텀↓)·섹터중립·포워드테스트 아카이빙', h: 22 },
+      { label: '탭 11개(발굴 추가) · 일배치 공용 캐시(AI 비용 0)', h: 20 },
     ]},
 ]
 

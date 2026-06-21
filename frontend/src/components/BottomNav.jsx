@@ -72,16 +72,17 @@ const icons = {
 }
 
 /* 전체 탭 — 한 줄 가로 스크롤 (더보기 시트 폐지). adminOnly 는 관리자만 노출 */
+// 순서: 포트폴리오·분석·종목·관심·발굴 | 시장·등록·설정·가이드·여정·관리자 (웹 SideNavBar와 통일)
 const ALL_TABS = [
   { label: '포트폴리오', idx: 0, iconKey: 'holdings'   },
-  { label: '관심',       idx: 1, iconKey: 'watchlist'  },
   { label: '분석',       idx: 2, iconKey: 'allocation' },
   { label: '종목',       idx: 3, iconKey: 'chart'      },
+  { label: '관심',       idx: 1, iconKey: 'watchlist'  },
+  { label: '발굴',       idx: 10, iconKey: 'discover'  },
   { label: '시장',       idx: 4, iconKey: 'market'     },
   { label: '등록',       idx: 5, iconKey: 'register'   },
   { label: '설정',       idx: 6, iconKey: 'settings'   },
   { label: '가이드',     idx: 7, iconKey: 'guide'      },
-  { label: '발굴',       idx: 10, iconKey: 'discover'  },
   { label: '여정',       idx: 8, iconKey: 'journey', adminOnly: true },
   { label: '관리자',     idx: 9, iconKey: 'admin',   adminOnly: true },
 ]
