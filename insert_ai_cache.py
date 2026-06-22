@@ -166,9 +166,15 @@ def main():
         sys.exit("--base-url 필요 (또는 --dry-run)")
     token = args.token
     if not token:
-        if not (args.email and args.password):
-            sys.exit("--token 또는 (--email + --password) 필요")
-        token = _login(args.base_url, args.email, args.password)
+        if not args.email:
+            sys.exit("--token 또는 --email 필요")
+        pw = args.password
+        if not pw:
+            # 보안: --password를 명령어에 넣지 않으면 숨김 입력으로 받음
+            # (셸 기록·프로세스 인자에 비밀번호가 남지 않음)
+            import getpass
+            pw = getpass.getpass(f"{args.email} 비밀번호 (입력 숨김): ")
+        token = _login(args.base_url, args.email, pw)
 
     # ── 5) 배치별 전송 ──
     tot_imp = tot_skip = tot_fail = 0
