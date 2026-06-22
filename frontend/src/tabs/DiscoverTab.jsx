@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { useStore } from '../store'
@@ -110,18 +110,59 @@ export default function DiscoverTab() {
   const isAdmin = !!currentUser?.is_admin
 
   const [market, setMarket] = useState('ALL')
-  const [sort, setSort] = useState('score')
   const [includeFailed, setIncludeFailed] = useState(false)
   const [expanded, setExpanded] = useState(null)
   const [rescanMsg, setRescanMsg] = useState('')
+  // 검색·필터·정렬 (클라이언트)
+  const [q, setQ] = useState('')
+  const [secFilter, setSecFilter] = useState(() => new Set())   // 빈 set = 전체 섹터
+  const [sortKey, setSortKey] = useState('composite_score')
+  const [sortDir, setSortDir] = useState('desc')
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['discover', market, sort, includeFailed],
-    queryFn: () => getDiscover({ market, sort, include_failed: includeFailed, limit: 80 }),
+    queryKey: ['discover', market, includeFailed],
+    queryFn: () => getDiscover({ market, sort: 'score', include_failed: includeFailed, limit: 200 }),
     staleTime: 10 * 60_000,
   })
   const items = data?.items || []
   const ago = agoLabel(data?.computed_at)
+
+  const sectors = useMemo(
+    () => [...new Set(items.map(r => r.sector).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko')),
+    [items])
+
+  const view = useMemo(() => {
+    let arr = items
+    const qq = q.trim().toLowerCase()
+    if (qq) arr = arr.filter(r =>
+      (r.name || '').toLowerCase().includes(qq) || (r.ticker || '').toLowerCase().includes(qq) ||
+      (r.sector || '').toLowerCase().includes(qq) || mktKo(r.market).includes(qq))
+    if (secFilter.size) arr = arr.filter(r => secFilter.has(r.sector))
+    const dir = sortDir === 'asc' ? 1 : -1
+    const numKey = sortKey === 'analyst_upside' || sortKey === 'composite_score'
+    const val = (r) => sortKey === 'name' ? (r.name || r.ticker) : sortKey === 'market'
+      ? mktKo(r.market) : sortKey === 'sector' ? (r.sector || '') : r[sortKey]
+    return [...arr].sort((a, b) => {
+      const va = val(a), vb = val(b)
+      if (numKey) {
+        if (va == null && vb == null) return 0
+        if (va == null) return 1                 // 값 없음은 항상 뒤로
+        if (vb == null) return -1
+        return (va - vb) * dir
+      }
+      return String(va).localeCompare(String(vb), 'ko') * dir
+    })
+  }, [items, q, secFilter, sortKey, sortDir])
+
+  function sortBy(key) {
+    if (sortKey === key) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return }
+    setSortKey(key)
+    setSortDir(['name', 'ticker', 'market', 'sector'].includes(key) ? 'asc' : 'desc')
+  }
+  const arrow = (key) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  function toggleSector(s) {
+    setSecFilter(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n })
+  }
 
   async function onRescan() {
     setRescanMsg('갱신 요청 중…')
@@ -152,10 +193,27 @@ export default function DiscoverTab() {
             {[['ALL', '전체'], ['US', '미국'], ['KR', '한국']].map(([v, l]) => (
               <button key={v} onClick={() => setMarket(v)} className={`seg-btn ${market === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
           </div>
-          <div className="seg-ctrl">
-            {[['score', '종합순'], ['completeness', '데이터순'], ['roe', '수익성순']].map(([v, l]) => (
-              <button key={v} onClick={() => setSort(v)} className={`seg-btn ${sort === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
-          </div>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 종목·티커·섹터 검색"
+            style={{ fontSize: 11.5, padding: '5px 9px', borderRadius: 4, border: '1px solid var(--m-outline-variant)',
+              background: 'var(--m-surface)', color: 'var(--m-text)', width: 170, fontFamily: 'inherit' }} />
+          <details style={{ position: 'relative' }}>
+            <summary style={{ fontSize: 11, fontWeight: 600, color: 'var(--m-text-secondary)', cursor: 'pointer',
+              listStyle: 'none', padding: '5px 9px', border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
+              섹터{secFilter.size ? ` (${secFilter.size})` : ' ▾'}
+            </summary>
+            <div style={{ position: 'absolute', zIndex: 20, marginTop: 4, maxHeight: 240, overflowY: 'auto',
+              background: 'var(--m-surface)', border: '1px solid var(--m-outline-variant)', borderRadius: 4,
+              padding: 8, minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,.12)' }}>
+              {secFilter.size > 0 && (
+                <button onClick={() => setSecFilter(new Set())} className="btn-secondary"
+                  style={{ fontSize: 10, padding: '3px 7px', marginBottom: 6, width: '100%' }}>전체 해제</button>)}
+              {sectors.map(s => (
+                <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
+                  color: 'var(--m-text)', padding: '3px 0', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={secFilter.has(s)} onChange={() => toggleSector(s)} /> {s}
+                </label>))}
+            </div>
+          </details>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, color: 'var(--m-text-secondary)', fontWeight: 600 }}
             title="PEG·성장·부채 최소 기준 미달 종목 (참고용)">
             <input type="checkbox" checked={includeFailed} onChange={e => setIncludeFailed(e.target.checked)} /> 기준 미달도
@@ -182,16 +240,20 @@ export default function DiscoverTab() {
           <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', borderSpacing: 0 }}>
             <thead>
               <tr>
-                <th style={{ ...th, textAlign: 'left' }}>종목</th>
-                <th style={{ ...th, textAlign: 'left' }}>티커</th>
-                <th style={{ ...th, textAlign: 'left' }}>국가</th>
-                <th style={{ ...th, textAlign: 'left' }}>섹터</th>
-                <th style={{ ...th, textAlign: 'right', cursor: 'help' }} title="목표가 대비 현재가 상승여력(애널리스트, 미국)">상승여력</th>
-                <th style={{ ...th, textAlign: 'right', color: 'var(--m-text)' }} title="5요소 가중 평균 매력도 (같은 시장 내 상대 순위)">종합</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('name')} title="클릭: 오름/내림 정렬">종목{arrow('name')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('ticker')} title="클릭: 정렬">티커{arrow('ticker')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('market')} title="클릭: 정렬">국가{arrow('market')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('sector')} title="클릭: 정렬">섹터{arrow('sector')}</th>
+                <th style={{ ...th, textAlign: 'right', cursor: 'pointer' }} onClick={() => sortBy('analyst_upside')} title="목표가 대비 상승여력(미국) · 클릭: 정렬">상승여력{arrow('analyst_upside')}</th>
+                <th style={{ ...th, textAlign: 'right', color: 'var(--m-text)', cursor: 'pointer' }} onClick={() => sortBy('composite_score')} title="5요소 가중 평균 · 클릭: 정렬">종합{arrow('composite_score')}</th>
               </tr>
             </thead>
             <tbody>
-              {items.map(row => {
+              {view.length === 0 && (
+                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: 'var(--m-text-tertiary)', padding: '24px' }}>
+                  검색·필터 결과가 없습니다.</td></tr>
+              )}
+              {view.map(row => {
                 const open = expanded === row.ticker
                 const failed = !row.gate_pass
                 return (
