@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { useStore } from '../store'
@@ -103,25 +103,106 @@ function DetailPanel({ row, onPick }) {
   )
 }
 
+function fmtAum(v) {
+  if (v == null) return '—'
+  if (v >= 1e12) return '$' + (v / 1e12).toFixed(1) + 'T'
+  if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B'
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(0) + 'M'
+  return '$' + Math.round(v).toLocaleString()
+}
+
+function EtfDetail({ row, onPick }) {
+  const kv = (label, value, hint) => (
+    <div title={hint || ''} style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 9.5, color: 'var(--m-text-tertiary)', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--m-text)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+    </div>)
+  const exch = EXCH[row.exchange] || row.exchange || mktKo(row.market)
+  const fac = (label, v) => (
+    <span style={{ color: 'var(--m-text-secondary)' }}>{label} <b style={{ color: v == null ? 'var(--m-text-tertiary)' : 'var(--m-text)' }}>{v == null ? '—' : Math.round(v)}</b></span>)
+  return (
+    <div style={{ padding: '10px 8px 6px' }}>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11.5, marginBottom: 9 }}>
+        {fac('추세', row.pct_momentum)} {fac('저비용', row.pct_value)} {fac('규모', row.pct_quality)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '9px 10px' }}>
+        {kv('현재가', fmtPrice(row.current_price, row.market))}
+        {kv('6개월 수익률', <span className={row.ret_6m > 0 ? 'num-pos' : row.ret_6m < 0 ? 'num-neg' : ''}>{fmtPct(row.ret_6m)}</span>, '최근 6개월 가격 수익률')}
+        {kv('보수율', row.expense_ratio == null ? '—' : row.expense_ratio + '%', 'ETF 연간 운용보수')}
+        {kv('순자산(AUM)', fmtAum(row.aum), '운용 규모')}
+      </div>
+      <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)', marginTop: 9, lineHeight: 1.5 }}>
+        {mktKo(row.market)} · {exch} · ETF · {row.sector} · 추세 50%·저비용 25%·규모 25%로 평가
+        {row.market === 'KR' && ' · 한국 ETF는 보수율·AUM 미제공(추세·거래량 기준)'}
+      </div>
+      <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(row.ticker) }}
+        style={{ marginTop: 10, fontSize: 12, padding: '7px 14px' }}>차트·분석 보기 →</button>
+    </div>
+  )
+}
+
 export default function DiscoverTab() {
   const qc = useQueryClient()
   const setChartTicker = useStore(s => s.setChartTicker)
   const currentUser = useStore(s => s.currentUser)
   const isAdmin = !!currentUser?.is_admin
 
+  const [qtype, setQtype] = useState('stock')   // 'stock'(개별종목) | 'etf'
   const [market, setMarket] = useState('ALL')
-  const [sort, setSort] = useState('score')
   const [includeFailed, setIncludeFailed] = useState(false)
   const [expanded, setExpanded] = useState(null)
   const [rescanMsg, setRescanMsg] = useState('')
+  // 검색·필터·정렬 (클라이언트)
+  const [q, setQ] = useState('')
+  const [secFilter, setSecFilter] = useState(() => new Set())   // 빈 set = 전체 섹터
+  const [sortKey, setSortKey] = useState('composite_score')
+  const [sortDir, setSortDir] = useState('desc')
+  const isEtf = qtype === 'etf'
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['discover', market, sort, includeFailed],
-    queryFn: () => getDiscover({ market, sort, include_failed: includeFailed, limit: 80 }),
+    queryKey: ['discover', market, includeFailed, qtype],
+    queryFn: () => getDiscover({ market, sort: 'score', include_failed: includeFailed, limit: 200, qtype }),
     staleTime: 10 * 60_000,
   })
   const items = data?.items || []
   const ago = agoLabel(data?.computed_at)
+
+  const sectors = useMemo(
+    () => [...new Set(items.map(r => r.sector).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko')),
+    [items])
+
+  const view = useMemo(() => {
+    let arr = items
+    const qq = q.trim().toLowerCase()
+    if (qq) arr = arr.filter(r =>
+      (r.name || '').toLowerCase().includes(qq) || (r.ticker || '').toLowerCase().includes(qq) ||
+      (r.sector || '').toLowerCase().includes(qq) || mktKo(r.market).includes(qq))
+    if (secFilter.size) arr = arr.filter(r => secFilter.has(r.sector))
+    const dir = sortDir === 'asc' ? 1 : -1
+    const numKey = ['analyst_upside', 'composite_score', 'ret_6m'].includes(sortKey)
+    const val = (r) => sortKey === 'name' ? (r.name || r.ticker) : sortKey === 'market'
+      ? mktKo(r.market) : sortKey === 'sector' ? (r.sector || '') : r[sortKey]
+    return [...arr].sort((a, b) => {
+      const va = val(a), vb = val(b)
+      if (numKey) {
+        if (va == null && vb == null) return 0
+        if (va == null) return 1                 // 값 없음은 항상 뒤로
+        if (vb == null) return -1
+        return (va - vb) * dir
+      }
+      return String(va).localeCompare(String(vb), 'ko') * dir
+    })
+  }, [items, q, secFilter, sortKey, sortDir])
+
+  function sortBy(key) {
+    if (sortKey === key) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return }
+    setSortKey(key)
+    setSortDir(['name', 'ticker', 'market', 'sector'].includes(key) ? 'asc' : 'desc')
+  }
+  const arrow = (key) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  function toggleSector(s) {
+    setSecFilter(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n })
+  }
 
   async function onRescan() {
     setRescanMsg('갱신 요청 중…')
@@ -142,20 +223,44 @@ export default function DiscoverTab() {
           <div>
             <div className="mono-section-title is-accent">신규 종목 발굴</div>
             <div className="mono-section-sub ko-keep">
-              성장하면서도 저평가된 종목을 5요소로 점수화. <b>행을 누르면</b> 5요소 레이더와
-              목표가·상승여력·PER 등 상세가 펼쳐집니다. 점수는 상승 확률이 아니라 같은 시장 내 상대 순위예요.
+              {isEtf
+                ? <>ETF를 <b>추세 50% · 저비용 25% · 규모 25%</b>로 점수화. 행을 누르면 6개월 수익률·보수율·순자산 상세가 펼쳐집니다. 한국 ETF는 보수율·AUM 미제공이라 추세·거래량 위주예요.</>
+                : <>성장하면서도 저평가된 종목을 5요소로 점수화. <b>행을 누르면</b> 5요소 레이더와 목표가·상승여력·PER 등 상세가 펼쳐집니다.</>}
+              {' '}점수는 상승 확률이 아니라 같은 시장 내 상대 순위예요.
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
           <div className="seg-ctrl">
+            {[['stock', '개별종목'], ['etf', 'ETF']].map(([v, l]) => (
+              <button key={v} onClick={() => { setQtype(v); setExpanded(null); setSecFilter(new Set()) }}
+                className={`seg-btn ${qtype === v ? 'active' : ''}`} style={{ fontSize: 11, fontWeight: 700 }}>{l}</button>))}
+          </div>
+          <div className="seg-ctrl">
             {[['ALL', '전체'], ['US', '미국'], ['KR', '한국']].map(([v, l]) => (
               <button key={v} onClick={() => setMarket(v)} className={`seg-btn ${market === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
           </div>
-          <div className="seg-ctrl">
-            {[['score', '종합순'], ['completeness', '데이터순'], ['roe', '수익성순']].map(([v, l]) => (
-              <button key={v} onClick={() => setSort(v)} className={`seg-btn ${sort === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
-          </div>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 종목·티커·섹터 검색"
+            style={{ fontSize: 11.5, padding: '5px 9px', borderRadius: 4, border: '1px solid var(--m-outline-variant)',
+              background: 'var(--m-surface)', color: 'var(--m-text)', width: 170, fontFamily: 'inherit' }} />
+          <details style={{ position: 'relative' }}>
+            <summary style={{ fontSize: 11, fontWeight: 600, color: 'var(--m-text-secondary)', cursor: 'pointer',
+              listStyle: 'none', padding: '5px 9px', border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
+              섹터{secFilter.size ? ` (${secFilter.size})` : ' ▾'}
+            </summary>
+            <div style={{ position: 'absolute', zIndex: 20, marginTop: 4, maxHeight: 240, overflowY: 'auto',
+              background: 'var(--m-surface)', border: '1px solid var(--m-outline-variant)', borderRadius: 4,
+              padding: 8, minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,.12)' }}>
+              {secFilter.size > 0 && (
+                <button onClick={() => setSecFilter(new Set())} className="btn-secondary"
+                  style={{ fontSize: 10, padding: '3px 7px', marginBottom: 6, width: '100%' }}>전체 해제</button>)}
+              {sectors.map(s => (
+                <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
+                  color: 'var(--m-text)', padding: '3px 0', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={secFilter.has(s)} onChange={() => toggleSector(s)} /> {s}
+                </label>))}
+            </div>
+          </details>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, color: 'var(--m-text-secondary)', fontWeight: 600 }}
             title="PEG·성장·부채 최소 기준 미달 종목 (참고용)">
             <input type="checkbox" checked={includeFailed} onChange={e => setIncludeFailed(e.target.checked)} /> 기준 미달도
@@ -182,16 +287,24 @@ export default function DiscoverTab() {
           <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', borderSpacing: 0 }}>
             <thead>
               <tr>
-                <th style={{ ...th, textAlign: 'left' }}>종목</th>
-                <th style={{ ...th, textAlign: 'left' }}>티커</th>
-                <th style={{ ...th, textAlign: 'left' }}>국가</th>
-                <th style={{ ...th, textAlign: 'left' }}>섹터</th>
-                <th style={{ ...th, textAlign: 'right', cursor: 'help' }} title="목표가 대비 현재가 상승여력(애널리스트, 미국)">상승여력</th>
-                <th style={{ ...th, textAlign: 'right', color: 'var(--m-text)' }} title="5요소 가중 평균 매력도 (같은 시장 내 상대 순위)">종합</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('name')} title="클릭: 오름/내림 정렬">종목{arrow('name')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('ticker')} title="클릭: 정렬">티커{arrow('ticker')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('market')} title="클릭: 정렬">국가{arrow('market')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('sector')} title="클릭: 정렬">{isEtf ? '테마' : '섹터'}{arrow('sector')}</th>
+                {isEtf ? (
+                  <th style={{ ...th, textAlign: 'right', cursor: 'pointer' }} onClick={() => sortBy('ret_6m')} title="최근 6개월 수익률 · 클릭: 정렬">6개월{arrow('ret_6m')}</th>
+                ) : (
+                  <th style={{ ...th, textAlign: 'right', cursor: 'pointer' }} onClick={() => sortBy('analyst_upside')} title="목표가 대비 상승여력(미국) · 클릭: 정렬">상승여력{arrow('analyst_upside')}</th>
+                )}
+                <th style={{ ...th, textAlign: 'right', color: 'var(--m-text)', cursor: 'pointer' }} onClick={() => sortBy('composite_score')} title="5요소 가중 평균 · 클릭: 정렬">종합{arrow('composite_score')}</th>
               </tr>
             </thead>
             <tbody>
-              {items.map(row => {
+              {view.length === 0 && (
+                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: 'var(--m-text-tertiary)', padding: '24px' }}>
+                  검색·필터 결과가 없습니다.</td></tr>
+              )}
+              {view.map(row => {
                 const open = expanded === row.ticker
                 const failed = !row.gate_pass
                 return (
@@ -206,18 +319,19 @@ export default function DiscoverTab() {
                       <td style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)' }}>{mktKo(row.market)}</td>
                       <td style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sector}</td>
                       <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        <span className={row.analyst_upside > 0 ? 'num-pos' : row.analyst_upside < 0 ? 'num-neg' : ''}
-                          style={row.analyst_upside == null ? { color: 'var(--m-text-tertiary)' } : {}}>{fmtPct(row.analyst_upside)}</span>
+                        {(() => { const v = isEtf ? row.ret_6m : row.analyst_upside
+                          return <span className={v > 0 ? 'num-pos' : v < 0 ? 'num-neg' : ''}
+                            style={v == null ? { color: 'var(--m-text-tertiary)' } : {}}>{fmtPct(v)}</span> })()}
                       </td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 900, fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
                         {Math.round(row.composite_score)}
-                        <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--m-text-tertiary)', marginLeft: 2 }}>·{row.data_completeness}/5</span>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--m-text-tertiary)', marginLeft: 2 }}>·{row.data_completeness}/{isEtf ? 3 : 5}</span>
                       </td>
                     </tr>
                     {open && (
                       <tr>
                         <td colSpan={6} style={{ background: 'var(--m-surface-variant)', borderRadius: 4 }}>
-                          <DetailPanel row={row} onPick={setChartTicker} />
+                          {isEtf ? <EtfDetail row={row} onPick={setChartTicker} /> : <DetailPanel row={row} onPick={setChartTicker} />}
                         </td>
                       </tr>
                     )}

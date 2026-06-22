@@ -84,9 +84,25 @@ class TestGarpScore:
         assert 0 <= out['composite_score'] <= 100
 
     def test_gate_applied_in_score(self):
-        rows = [{'market': 'US', 'peg': 3.0, 'eps_growth': 10}]
+        # 현재가+3축 있는 정상 데이터에서 PEG 초과로 탈락 (데이터부족 아님)
+        rows = [{'market': 'US', 'peg': 3.0, 'eps_growth': 10, 'roe': 12, 'current_price': 100}]
         out = main._garp_score(rows)[0]
         assert out['gate_pass'] == 0 and out['gate_fail_reason'] == 'PEG>1.5'
+
+    def test_gate_excludes_dead_ticker(self):
+        # 현재가 없음(상폐/죽은 티커) → 평가 불가 → 데이터 부족으로 제외
+        out = main._garp_score([{'market': 'US', 'peg': 1.0, 'eps_growth': 10, 'roe': 12}])[0]
+        assert out['gate_pass'] == 0 and out['gate_fail_reason'] == '데이터 부족'
+
+    def test_gate_excludes_sparse_data(self):
+        # 현재가 있어도 2축(<3)뿐 → 제외
+        out = main._garp_score([{'market': 'KR', 'peg': 1.0, 'eps_growth': 10, 'current_price': 1000}])[0]
+        assert out['gate_pass'] == 0 and out['gate_fail_reason'] == '데이터 부족'
+
+    def test_gate_pass_with_enough_data(self):
+        # 현재가 + 3축(가치·성장·안정) → 통과
+        out = main._garp_score([{'market': 'KR', 'peg': 1.0, 'eps_growth': 10, 'roe': 12, 'current_price': 1000}])[0]
+        assert out['gate_pass'] == 1
 
     def test_market_differentiated_weights(self):
         # 한국은 모멘텀 가중이 미국보다 낮아야(reversal 연구 반영). 같은 지표라도
