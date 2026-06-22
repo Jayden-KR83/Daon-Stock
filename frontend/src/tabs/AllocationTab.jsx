@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'motion/react'
-import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached } from '../api'
+import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
 import { useStore } from '../store'
 import LogoCircle from '../components/LogoCircle'
 import BorderBeam from '../components/BorderBeam'
@@ -73,6 +73,68 @@ function iconFor(name, type) {
     if (name.includes(k) || k.includes(name)) return SECTOR_ICONS[k]
   }
   return '📊'
+}
+
+/* ── 분석 리포트 MD 빌더 (타 LLM 교차검증용) ── */
+function _won(n) { return '₩' + Math.round(n || 0).toLocaleString() }
+function _pct(v, t) { return t > 0 ? (v / t * 100) : 0 }
+function _strategyToMd(s) {
+  if (!s || typeof s !== 'object')
+    return '_AI 전략 리포트가 아직 생성되지 않았습니다 — 분석 탭에서 "다온 AI 전략 리포트"를 생성한 뒤 다시 내보내면 포함됩니다._'
+  const skip = new Set(['_cached', '_computed_at', 'cached', 'computed_at', 'fingerprint', 'scope', 'model'])
+  const out = []
+  for (const [k, v] of Object.entries(s)) {
+    if (skip.has(k) || v == null) continue
+    if (typeof v === 'string' && v.trim()) out.push(`**${k}**\n\n${v}\n`)
+    else if (Array.isArray(v) && v.length) out.push(`**${k}**\n` + v.map(x => typeof x === 'string' ? `- ${x}` : `- ${JSON.stringify(x)}`).join('\n') + '\n')
+    else if (typeof v === 'object') out.push(`**${k}**\n\n\`\`\`json\n${JSON.stringify(v, null, 2)}\n\`\`\`\n`)
+  }
+  return out.join('\n') || '_(전략 내용 없음)_'
+}
+function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy }) {
+  const totalVal = rows.reduce((s, r) => s + r.value, 0)
+  const acc = {}, sec = {}
+  for (const r of rows) { acc[r.account] = (acc[r.account] || 0) + r.value; sec[r.sector] = (sec[r.sector] || 0) + r.value }
+  const L = []
+  L.push(`# 다온 포트폴리오 분석 리포트`, ``)
+  L.push(`- **생성일**: ${dateStr}`)
+  L.push(`- **출처**: 다온(daonwealth.com) 분석 탭 내보내기`)
+  L.push(`- **용도**: 타 LLM 교차검증 — 분석 정합성·오류·품질 향상`)
+  L.push(`- ⚠️ 본 문서는 **개인 보유 데이터**를 포함합니다. 공유 시 주의.`, ``)
+  L.push(`## 1. 보유 구성`)
+  L.push(`- 총 평가액(KRW 환산): **${_won(totalVal)}** · 보유 **${rows.length}종**`, ``)
+  L.push(`### 계좌별`, `| 계좌 | 평가액 | 비중 |`, `|---|--:|--:|`)
+  for (const [k, v] of Object.entries(acc).sort((a, b) => b[1] - a[1])) L.push(`| ${k} | ${_won(v)} | ${_pct(v, totalVal).toFixed(1)}% |`)
+  L.push(``, `### 섹터별`, `| 섹터 | 평가액 | 비중 |`, `|---|--:|--:|`)
+  for (const [k, v] of Object.entries(sec).sort((a, b) => b[1] - a[1])) L.push(`| ${k} | ${_won(v)} | ${_pct(v, totalVal).toFixed(1)}% |`)
+  L.push(``, `### 종목별`, `| 종목 | 티커 | 계좌 | 섹터 | 수량 | 평가액 | 비중 | 평가손익% |`, `|---|---|---|---|--:|--:|--:|--:|`)
+  for (const r of [...rows].sort((a, b) => b.value - a.value))
+    L.push(`| ${r.name} | ${r.ticker} | ${r.account} | ${r.sector} | ${r.qty} | ${_won(r.value)} | ${_pct(r.value, totalVal).toFixed(1)}% | ${r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(1)}% |`)
+  L.push(``, `## 2. Portfolio Health Score`)
+  if (health) {
+    L.push(`- 종합: **${health.overall}/100 (${health.grade}등급)**`)
+    if (health.sub_scores) L.push(`- 하위지표: ` + Object.entries(health.sub_scores).map(([k, v]) => `${k} ${v}`).join(' · '))
+    if (health.stats) L.push(`- 통계: ${health.stats.holdings_count}종 · 최대섹터 ${health.stats.max_sector_pct}% · 평균MDD -${health.stats.avg_mdd}% · 샤프 ${health.stats.avg_sharpe}`)
+    if (health.comment) L.push(`- 종합평가: ${health.comment}`)
+  } else L.push(`_계산 실패 또는 데이터 부족_`)
+  L.push(``, `## 3. 자동 리밸런싱 경고`)
+  const al = alerts?.alerts || []
+  if (!al.length) L.push(`- 현재 임계값 기준 경고 없음`)
+  else for (const a of al) L.push(`- [${a.severity}] ${a.title}${a.detail ? ` — ${a.detail}` : ''}`)
+  if (div && (div.annual_estimate_krw || div.ttm_received_krw)) {
+    L.push(``, `## 4. 배당`)
+    if (div.annual_estimate_krw) L.push(`- 연간 예상 배당: ${_won(div.annual_estimate_krw)}`)
+    if (div.ttm_received_krw) L.push(`- 최근 12개월 수령: ${_won(div.ttm_received_krw)}`)
+  }
+  L.push(``, `## 5. AI 전략 리포트 (Claude Haiku)`, _strategyToMd(strategy))
+  L.push(``, `## 6. 교차검증 요청 (다른 LLM에게)`, `아래 관점에서 검토해 주세요:`)
+  L.push(`1. **수치 정합성** — 비중 합계·평가액·손익 계산 오류`)
+  L.push(`2. **진단 타당성** — Health Score·집중도 경고가 보유 구성과 부합하는지`)
+  L.push(`3. **누락 리스크** — 놓친 집중·상관·거시 리스크`)
+  L.push(`4. **개선 제안** — 분산·리밸런싱·헷지 관점의 구체적 액션`)
+  L.push(`5. **AI 전략 품질** — 근거·실행가능성·과신 여부`)
+  L.push(``, `> 가정: 미국 종목은 USD→KRW 환율 환산, 가격은 조회 시점 기준. 참고용이며 투자 자문 아님.`)
+  return L.join('\n')
 }
 
 export default function AllocationTab() {
@@ -156,6 +218,49 @@ export default function AllocationTab() {
   const total = pieData.reduce((s, d) => s + d.value, 0)
 
   // 다온 AI 전략 리포트
+  const [exporting, setExporting] = useState(false)
+  async function exportReport() {
+    if (exporting || allHoldings.length === 0) return
+    setExporting(true)
+    try {
+      const rows = allHoldings.map(h => {
+        const cur = prices[h.ticker]?.current_price ?? h.avg_price
+        return {
+          ticker: h.ticker, name: h.name || h.ticker,
+          account: ACC_LABELS[h.account] || h.account, sector: h.sector || '기타',
+          qty: h.quantity, value: Math.round(val(h)),
+          pnl: h.avg_price > 0 ? (cur - h.avg_price) / h.avg_price * 100 : 0,
+        }
+      })
+      const payload = {
+        holdings: allHoldings.map(h => ({ ticker: h.ticker, quantity: h.quantity,
+          avg_price: h.avg_price, account: h.account, sector: h.sector, name: h.name })),
+        prices, usd_krw: usdKrw,
+      }
+      const [hR, aR, dR] = await Promise.allSettled([
+        getPortfolioHealth(payload),
+        getPortfolioAlerts({ ...payload, target_max_ticker_pct: 30, target_max_sector_pct: 50, target_max_loss_pct: -20 }),
+        getPortfolioDividends(payload),
+      ])
+      const dateStr = new Date().toISOString().slice(0, 10)
+      const md = _buildAnalysisMd({
+        dateStr, rows,
+        health: hR.status === 'fulfilled' ? hR.value : null,
+        alerts: aR.status === 'fulfilled' ? aR.value : null,
+        div:    dR.status === 'fulfilled' ? dR.value : null,
+        strategy: strategyReport,
+      })
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `daon-portfolio-analysis-${dateStr}.md`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      alert('리포트 생성 실패: ' + (e?.response?.data?.detail || e?.message || e))
+    } finally { setExporting(false) }
+  }
+
   const [strategyReport, setStrategyReport] = useState(null)
   const [strategyLoading, setStrategyLoading] = useState(false)
   const [strategyErr, setStrategyErr] = useState('')
@@ -275,6 +380,20 @@ export default function AllocationTab() {
       {/* 한눈에 보이는 포트폴리오 요약 (M3 banner) — 항상 최상단 */}
       {allHoldings.length > 0 && (
         <PortfolioSummaryBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
+      )}
+
+      {/* 분석 리포트 MD 내보내기 — 타 LLM 교차검증용 */}
+      {allHoldings.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <button onClick={exportReport} disabled={exporting} style={{
+            padding: '7px 14px', borderRadius: 2, background: 'transparent',
+            border: '1px solid var(--m-outline-variant)', color: 'var(--m-text-secondary)',
+            fontSize: 12, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+            opacity: exporting ? 0.5 : 1, fontFamily: 'inherit' }}
+            title="현재 분석 결과(보유구성·Health·경고·배당·AI전략)를 마크다운으로 내려받아 다른 LLM에 교차검증 의뢰">
+            {exporting ? '리포트 생성 중… (최대 20초)' : '분석 리포트 MD 내보내기'}
+          </button>
+        </div>
       )}
 
       {/* Net Worth 추이 — 항상 펼침 (시계열은 한번에 봐야 의미) */}
