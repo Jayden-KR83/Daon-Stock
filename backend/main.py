@@ -543,7 +543,7 @@ US_SECTOR_TOP = {
                   ('LMT','Lockheed'),('DE','Deere'),('UNP','Union Pacific'),('MMM','3M')],
     '에너지':    [('XOM','ExxonMobil'),('CVX','Chevron'),('COP','ConocoPhillips'),
                   ('SLB','SLB'),('EOG','EOG Resources'),('MPC','Marathon Petro.'),
-                  ('PSX','Phillips 66'),('PXD','Pioneer'),('VLO','Valero'),('OXY','Occidental')],
+                  ('PSX','Phillips 66'),('FANG','Diamondback'),('VLO','Valero'),('OXY','Occidental')],
     '필수소비재': [('WMT','Walmart'),('PG','Procter & Gamble'),('COST','Costco'),
                   ('KO','Coca-Cola'),('PEP','PepsiCo'),('PM','Philip Morris'),
                   ('MO','Altria'),('CL','Colgate'),('MDLZ','Mondelez'),('GIS','General Mills')],
@@ -2863,6 +2863,10 @@ def _garp_score(rows: list) -> list:
             r['data_completeness'] = sum(1 for a in axis_pct.values() if a is not None)
 
             passed, reason = _garp_gate(r)
+            # 평가 불가 종목 제외: 현재가 없음(상폐/죽은 티커) 또는 5요소 중 3개 미만.
+            # → 데이터 없어서 게이트를 '면제로 통과'하던 깡통/상폐 종목이 추천에 끼는 것 차단.
+            if r.get('current_price') is None or r['data_completeness'] < 3:
+                passed, reason = False, '데이터 부족'
             r['gate_pass'] = 1 if passed else 0
             r['gate_fail_reason'] = reason
 
