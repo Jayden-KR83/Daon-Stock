@@ -255,6 +255,9 @@ def _init_db():
             profit_margin     REAL,                     -- 순이익률 % (US)
             exchange          TEXT NOT NULL DEFAULT '', -- NMS/NYQ/KSC/KOE 등
             quote_type        TEXT NOT NULL DEFAULT '', -- EQUITY/ETF
+            expense_ratio     REAL,                     -- ETF 보수율 % (US)
+            aum               REAL,                     -- ETF 순자산 (US)
+            ret_6m            REAL,                     -- 6개월 수익률 % (ETF)
             -- 축별 백분위 (0~100, 시장 내 정규화). N/A 축은 NULL
             pct_value         REAL,
             pct_growth        REAL,
@@ -317,7 +320,8 @@ def _migrate_schema():
         for col, decl in (('current_price', 'REAL'), ('target_price', 'REAL'),
                           ('trailing_pe', 'REAL'), ('forward_pe', 'REAL'),
                           ('profit_margin', 'REAL'), ('exchange', "TEXT NOT NULL DEFAULT ''"),
-                          ('quote_type', "TEXT NOT NULL DEFAULT ''")):
+                          ('quote_type', "TEXT NOT NULL DEFAULT ''"),
+                          ('expense_ratio', 'REAL'), ('aum', 'REAL'), ('ret_6m', 'REAL')):
             if ds_cols and col not in ds_cols:
                 conn.execute(f"ALTER TABLE discovery_scores ADD COLUMN {col} {decl}")
         # 마이그레이션 직후, 기존 사용자(이미 가입된 자)는 자동 approved + ai_enabled (legacy compat)
@@ -3040,6 +3044,113 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
                         m['near_52w_high'] = round(last / mx, 4)
             except Exception:
                 m['current_price'] = m['current_price'] or cur
+    except Exception:
+        pass
+    return m
+
+
+# ─── ETF 발굴 (개별종목과 별도 모델: 추세 50% · 저비용 25% · 규모 25%) ──────
+# ETF는 PEG·EPS·ROE가 없어(바스켓) GARP 부적합 → 전용 점수. US는 보수율·AUM 제공,
+# KR ETF는 yfinance에 보수율·AUM 없어 추세·거래량 위주(정직 N/A).
+US_ETFS = {
+    'SPY': ('SPDR S&P 500', '미국 대표'), 'QQQ': ('Invesco QQQ', '미국 나스닥100'),
+    'VOO': ('Vanguard S&P 500', '미국 대표'), 'VTI': ('Vanguard 전체시장', '미국 전체'),
+    'IWM': ('iShares 러셀2000', '미국 중소형'), 'DIA': ('SPDR 다우30', '미국 대표'),
+    'XLK': ('Tech Select', '미국 기술'), 'XLF': ('Financial Select', '미국 금융'),
+    'XLE': ('Energy Select', '미국 에너지'), 'XLV': ('Health Select', '미국 헬스케어'),
+    'SMH': ('VanEck 반도체', '반도체'), 'SCHD': ('Schwab 배당', '미국 배당'),
+    'VUG': ('Vanguard 성장', '미국 성장'), 'VTV': ('Vanguard 가치', '미국 가치'),
+    'ARKK': ('ARK 이노베이션', '혁신성장'), 'TLT': ('iShares 20년채', '미국 장기채'),
+    'GLD': ('SPDR 금', '금'), 'EFA': ('iShares 선진국', '해외 선진국'),
+}
+KR_ETFS = {
+    '069500': ('KODEX 200', '한국 대표'), '102110': ('TIGER 200', '한국 대표'),
+    '229200': ('KODEX 코스닥150', '코스닥'), '091160': ('KODEX 반도체', '반도체'),
+    '305720': ('KODEX 2차전지산업', '2차전지'), '102780': ('KODEX 삼성그룹', '삼성그룹'),
+    '379800': ('KODEX 미국S&P500', '미국주식'), '360750': ('TIGER 미국S&P500', '미국주식'),
+    '133690': ('TIGER 미국나스닥100', '미국주식'), '132030': ('KODEX 골드선물', '금'),
+    '273130': ('KODEX 종합채권액티브', '한국 채권'),
+}
+
+def _discovery_etf_universe() -> list:
+    out: list = []
+    for tkr, (nm, cat) in US_ETFS.items():
+        out.append({'ticker': tkr.upper(), 'name': nm, 'market': 'US', 'sector': cat})
+    for code, (nm, cat) in KR_ETFS.items():
+        out.append({'ticker': code, 'name': nm, 'market': 'KR', 'sector': cat})
+    return out
+
+# ETF 신호 → higher_better
+_ETF_SIGNALS = {'near_52w_high': True, 'ret_6m': True, 'expense_ratio': False,
+                'aum': True, 'avg_volume': True}
+_ETF_GROUPS = {'momentum': (['near_52w_high', 'ret_6m'], 0.50),
+               'cost': (['expense_ratio'], 0.25), 'size': (['aum', 'avg_volume'], 0.25)}
+
+def _etf_score(rows: list) -> list:
+    """ETF 전용 점수 — 추세·저비용·규모. 시장별 백분위. 순수함수."""
+    rows = [dict(r) for r in rows]
+    by_market: dict = {}
+    for r in rows:
+        by_market.setdefault(r.get('market', 'US'), []).append(r)
+    for group in by_market.values():
+        sig_vals = {s: [r[s] for r in group if r.get(s) is not None] for s in _ETF_SIGNALS}
+        for r in group:
+            sig_pct = {}
+            for s, hb in _ETF_SIGNALS.items():
+                v = r.get(s)
+                sig_pct[s] = None if v is None else _pct_rank(sig_vals[s], v, hb)
+            grp = {}
+            for gname, (sigs, _w) in _ETF_GROUPS.items():
+                avail = [sig_pct[s] for s in sigs if sig_pct[s] is not None]
+                grp[gname] = round(sum(avail) / len(avail), 2) if avail else None
+            r['pct_momentum'] = grp['momentum']     # 표시용 (추세)
+            r['pct_value'] = grp['cost']            # 표시용 (저비용)
+            r['pct_quality'] = grp['size']          # 표시용 (규모)
+            r['pct_growth'] = None; r['pct_sentiment'] = None
+            r['data_completeness'] = sum(1 for v in grp.values() if v is not None)
+            num = den = 0.0
+            for gname, (_s, w) in _ETF_GROUPS.items():
+                if grp[gname] is not None:
+                    num += w * grp[gname]; den += w
+            r['composite_score'] = round(num / den, 2) if den > 0 else 0.0
+            ok = r.get('current_price') is not None and grp['momentum'] is not None
+            r['gate_pass'] = 1 if ok else 0
+            r['gate_fail_reason'] = '' if ok else '데이터 부족'
+    return rows
+
+def _discovery_etf_metrics(ticker: str, market: str) -> dict:
+    """ETF raw 지표 — 추세(52주·6개월)·보수율·AUM·거래량. 종목당 격리."""
+    m: dict = {'near_52w_high': None, 'ret_6m': None, 'expense_ratio': None, 'aum': None,
+               'avg_volume': None, 'current_price': None, 'exchange': '', 'quote_type': 'ETF'}
+    try:
+        info, sym = {}, None
+        if market == 'US':
+            info = _yf_info_safe(ticker.upper(), timeout=8); sym = ticker.upper()
+        else:
+            for sfx in ('.KS', '.KQ'):
+                ik = _yf_info_safe(kr_code(ticker) + sfx, timeout=6)
+                if ik and (ik.get('regularMarketPrice') or ik.get('navPrice')):
+                    info, sym = ik, kr_code(ticker) + sfx; break
+        cur = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('navPrice')
+        hi = info.get('fiftyTwoWeekHigh')
+        m['current_price'] = float(cur) if cur and not _nan(cur) else None
+        if m['current_price'] and hi and float(hi) > 0:
+            m['near_52w_high'] = round(m['current_price'] / float(hi), 4)
+        exp = info.get('annualReportExpenseRatio') or info.get('netExpenseRatio')
+        m['expense_ratio'] = round(float(exp), 3) if exp and not _nan(exp) else None  # 이미 % 단위
+        aum = info.get('totalAssets')
+        m['aum'] = float(aum) if aum and not _nan(aum) else None
+        vol = info.get('averageVolume') or info.get('averageVolume10days')
+        m['avg_volume'] = float(vol) if vol and not _nan(vol) else None
+        m['exchange'] = info.get('exchange', '') or ''
+        try:
+            res = _yf_chart(sym, '6mo', '1d') if sym else None
+            if res:
+                cl = [c for c in res.get('indicators', {}).get('quote', [{}])[0].get('close', []) if c is not None]
+                if len(cl) > 5 and cl[0]:
+                    m['ret_6m'] = round((cl[-1] / cl[0] - 1) * 100, 2)
+        except Exception:
+            pass
     except Exception:
         pass
     return m
@@ -6121,61 +6232,78 @@ class DiscoverScanReq(BaseModel):
 
 _discover_scan_busy = {'v': False}   # 동시 스캔 방지 (cron·관리자 수동 겹침 차단)
 
+def _store_discovery_rows(conn, rows: list, now: float):
+    """스코어된 행(개별종목·ETF 공용)을 discovery_scores + history에 저장."""
+    snap_date = strftime('%Y-%m-%d', gmtime(now + 9 * 3600))
+    for r in rows:
+        conn.execute(
+            "INSERT OR REPLACE INTO discovery_scores ("
+            "ticker, market, name, sector, peg, rel_per, eps_growth, rev_growth, "
+            "roe, debt_to_equity, near_52w_high, analyst_upside, pct_value, pct_growth, "
+            "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
+            "gate_fail_reason, data_completeness, computed_at, "
+            "current_price, target_price, trailing_pe, forward_pe, profit_margin, "
+            "exchange, quote_type, expense_ratio, aum, ret_6m) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (r['ticker'], r['market'], r.get('name', ''), r.get('sector', ''),
+             r.get('peg'), r.get('rel_per'), r.get('eps_growth'), r.get('rev_growth'),
+             r.get('roe'), r.get('debt_to_equity'), r.get('near_52w_high'),
+             r.get('analyst_upside'), r.get('pct_value'), r.get('pct_growth'),
+             r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
+             r.get('composite_score', 0), r.get('gate_pass', 0),
+             r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now,
+             r.get('current_price'), r.get('target_price'), r.get('trailing_pe'),
+             r.get('forward_pe'), r.get('profit_margin'),
+             r.get('exchange', ''), r.get('quote_type', ''),
+             r.get('expense_ratio'), r.get('aum'), r.get('ret_6m')))
+        conn.execute(
+            "INSERT OR REPLACE INTO discovery_history "
+            "(snapshot_date, ticker, market, sector, composite_score, gate_pass) "
+            "VALUES (?,?,?,?,?,?)",
+            (snap_date, r['ticker'], r['market'], r.get('sector', ''),
+             r.get('composite_score', 0), r.get('gate_pass', 0)))
+
+
 def _do_discover_scan() -> dict:
-    """universe 전체 raw 수집 → GARP 스코어 → discovery_scores 저장. (cron·관리자 공용)
-    Oracle 1GB RAM(MemoryMax 850M) — 동시성 2 제한. 4는 pandas/yfinance 피크가
-    한계를 넘겨 OOM-kill 발생(2026-06 확인) → 종목당 예외는 _discovery_raw_metrics가 흡수."""
+    """개별종목(GARP) + ETF(전용 모델) 스캔 → discovery_scores 저장. (cron·관리자 공용)
+    Oracle 1GB RAM(MemoryMax 850M) — 동시성 2 제한(4는 OOM-kill 확인). 종목당 예외 흡수."""
     _discover_scan_busy['v'] = True
     try:
         t0 = time()
+        # 1) 개별종목 (GARP)
         universe = _discovery_universe()
         rows: list = []
-
         def _fetch(item):
             m = _discovery_raw_metrics(item['ticker'], item['market'])
             m.update({'ticker': item['ticker'], 'name': item['name'],
                       'market': item['market'], 'sector': item['sector']})
             return m
-
         with _cf.ThreadPoolExecutor(max_workers=2) as ex:
             for m in ex.map(_fetch, universe):
                 rows.append(m)
-
         scored = _garp_score(rows)
+
+        # 2) ETF (추세·저비용·규모 전용 모델)
+        etf_uni = _discovery_etf_universe()
+        etf_rows: list = []
+        def _fetch_etf(item):
+            m = _discovery_etf_metrics(item['ticker'], item['market'])
+            m.update({'ticker': item['ticker'], 'name': item['name'],
+                      'market': item['market'], 'sector': item['sector']})
+            return m
+        with _cf.ThreadPoolExecutor(max_workers=2) as ex:
+            for m in ex.map(_fetch_etf, etf_uni):
+                etf_rows.append(m)
+        etf_scored = _etf_score(etf_rows)
+
         now = time()
         with _db() as conn:
-            for r in scored:
-                conn.execute(
-                    "INSERT OR REPLACE INTO discovery_scores ("
-                    "ticker, market, name, sector, peg, rel_per, eps_growth, rev_growth, "
-                    "roe, debt_to_equity, near_52w_high, analyst_upside, pct_value, pct_growth, "
-                    "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
-                    "gate_fail_reason, data_completeness, computed_at, "
-                    "current_price, target_price, trailing_pe, forward_pe, profit_margin, "
-                    "exchange, quote_type) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (r['ticker'], r['market'], r.get('name', ''), r.get('sector', ''),
-                     r.get('peg'), r.get('rel_per'), r.get('eps_growth'), r.get('rev_growth'),
-                     r.get('roe'), r.get('debt_to_equity'), r.get('near_52w_high'),
-                     r.get('analyst_upside'), r.get('pct_value'), r.get('pct_growth'),
-                     r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
-                     r.get('composite_score', 0), r.get('gate_pass', 0),
-                     r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now,
-                     r.get('current_price'), r.get('target_price'), r.get('trailing_pe'),
-                     r.get('forward_pe'), r.get('profit_margin'),
-                     r.get('exchange', ''), r.get('quote_type', '')))
-            # 포워드테스트 아카이빙: 일자별(KST) 랭킹 스냅샷 누적 (같은 날 재스캔은 덮어씀)
-            snap_date = strftime('%Y-%m-%d', gmtime(now + 9 * 3600))
-            for r in scored:
-                conn.execute(
-                    "INSERT OR REPLACE INTO discovery_history "
-                    "(snapshot_date, ticker, market, sector, composite_score, gate_pass) "
-                    "VALUES (?,?,?,?,?,?)",
-                    (snap_date, r['ticker'], r['market'], r.get('sector', ''),
-                     r.get('composite_score', 0), r.get('gate_pass', 0)))
+            _store_discovery_rows(conn, scored, now)
+            _store_discovery_rows(conn, etf_scored, now)
 
-        return {'scanned': len(universe), 'scored': len(scored),
-                'gate_passed': sum(1 for r in scored if r.get('gate_pass')),
+        return {'scanned': len(universe) + len(etf_uni), 'stocks': len(scored),
+                'etfs': len(etf_scored),
+                'gate_passed': sum(1 for r in scored + etf_scored if r.get('gate_pass')),
                 'elapsed_s': round(time() - t0, 1)}
     finally:
         _discover_scan_busy['v'] = False
@@ -6214,13 +6342,18 @@ def discover_rescan(cu: dict = Depends(require_approved)):
 
 @app.get("/api/discover")
 def get_discover(market: str = 'ALL', min_score: float = 0, sort: str = 'score',
-                 limit: int = 50, offset: int = 0, include_failed: bool = False):
+                 limit: int = 50, offset: int = 0, include_failed: bool = False,
+                 qtype: str = 'stock'):
     """발굴 랭킹 조회 — discovery_scores read only. 무인증 공용 데이터(데모·비로그인 열람).
-    gate_pass=1 우선, composite_score desc 기본 정렬."""
+    qtype: 'stock'(개별종목, 기본) | 'etf' | 'all'. gate_pass=1 우선, composite desc 기본."""
     where = ["composite_score >= ?"]
     params: list = [min_score]
     if market in ('US', 'KR'):
         where.append("market = ?"); params.append(market)
+    if qtype == 'etf':
+        where.append("quote_type = 'ETF'")
+    elif qtype == 'stock':
+        where.append("quote_type != 'ETF'")
     if not include_failed:
         where.append("gate_pass = 1")
     order = {'score': 'composite_score DESC',
