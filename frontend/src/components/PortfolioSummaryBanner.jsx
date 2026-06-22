@@ -1,5 +1,6 @@
 import React from 'react'
 import { useStore } from '../store'
+import { effPrice } from '../utils/effPrice'
 
 /**
  * 비중 탭 진입 즉시 보여주는 헤더 — A안 무채색 + 인포그래픽.
@@ -18,7 +19,7 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
     for (const h of allHoldings) {
       const tkr = h.ticker
       const isUs = !/^A?\d{6}$/.test(tkr)
-      const cur = prices?.[tkr]?.current_price ?? h.avg_price
+      const cur = effPrice(h, prices)
       const mul = isUs ? usdKrw : 1
       const v   = h.quantity * cur * mul
       total += v

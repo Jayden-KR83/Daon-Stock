@@ -14,6 +14,7 @@ import DividendsCard from '../components/DividendsCard'
 import PortfolioSummaryBanner from '../components/PortfolioSummaryBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
+import { effPrice } from '../utils/effPrice'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import './TrendsTab.css'   // tt-ai-widget 스타일 공유 사용
 
@@ -178,7 +179,7 @@ export default function AllocationTab() {
 
   const isUs = h => !/^A?\d{6}$/.test(h.ticker)
   const val  = h => {
-    const cur = prices[h.ticker]?.current_price ?? h.avg_price
+    const cur = effPrice(h, prices)
     return h.quantity * cur * (isUs(h) ? usdKrw : 1)
   }
 
@@ -224,7 +225,7 @@ export default function AllocationTab() {
     setExporting(true)
     try {
       const rows = allHoldings.map(h => {
-        const cur = prices[h.ticker]?.current_price ?? h.avg_price
+        const cur = effPrice(h, prices)
         return {
           ticker: h.ticker, name: h.name || h.ticker,
           account: ACC_LABELS[h.account] || h.account, sector: h.sector || '기타',
@@ -266,9 +267,7 @@ export default function AllocationTab() {
   const [strategyErr, setStrategyErr] = useState('')
   const [strategyAcc, setStrategyAcc] = useState('ALL')
   const [strategyComputedAt, setStrategyComputedAt] = useState(0)  // epoch seconds
-  // Life Timeline 입력 (localStorage 지속)
-  const [retireYears, setRetireYears] = useState(() => localStorage.getItem('daon_retire_years') || '')
-  const [monthlyInflow, setMonthlyInflow] = useState(() => localStorage.getItem('daon_monthly_inflow') || '')
+  // 은퇴까지 기간·월 납입은 '목표 기반 포트폴리오' 카드에서 설정 → localStorage 공유(생성 시 읽음)
 
   // 계좌 필터/최초 진입 시: 저장된 전략 결과 미리보기
   useEffect(() => {
@@ -306,8 +305,8 @@ export default function AllocationTab() {
         prices,
         scope: strategyAcc,
         force_refresh: forceRefresh,
-        years_to_retirement: retireYears ? Number(retireYears) : null,
-        monthly_inflow: monthlyInflow ? Number(monthlyInflow) : null,
+        years_to_retirement: Number(localStorage.getItem('daon_retire_years')) || null,
+        monthly_inflow: Number(localStorage.getItem('daon_monthly_inflow')) || null,
       })
       setStrategyReport(result)
       setStrategyComputedAt(Math.floor(Date.now() / 1000))
@@ -673,24 +672,9 @@ export default function AllocationTab() {
                 보유 종목 + 은퇴 타임라인을 결합해 5년 단위 자산배분·월배당 시뮬을 생성합니다. 소요 약 1~3분.
               </div>
 
-              {/* Life Timeline 입력 — 은퇴까지 햇수 · 매월 추가 투입 (선택, 입력 시 더 정밀) */}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 130px' }}>
-                  <span style={{ fontSize: 10, color: 'rgba(248,250,252,.6)', fontWeight: 700 }}>은퇴까지 (년)</span>
-                  <input type="number" value={retireYears} min={1} max={50} placeholder="예: 15"
-                    onChange={e => { setRetireYears(e.target.value); localStorage.setItem('daon_retire_years', e.target.value) }}
-                    style={{ height: 36, padding: '0 10px', borderRadius: 6, fontSize: 16,
-                      border: '1px solid rgba(148,163,184,.35)', background: 'rgba(15,23,42,.45)',
-                      color: '#F8FAFC', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
-                </label>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px' }}>
-                  <span style={{ fontSize: 10, color: 'rgba(248,250,252,.6)', fontWeight: 700 }}>매월 추가 투입 (₩)</span>
-                  <input type="number" value={monthlyInflow} min={0} step={100000} placeholder="예: 1000000"
-                    onChange={e => { setMonthlyInflow(e.target.value); localStorage.setItem('daon_monthly_inflow', e.target.value) }}
-                    style={{ height: 36, padding: '0 10px', borderRadius: 6, fontSize: 16,
-                      border: '1px solid rgba(148,163,184,.35)', background: 'rgba(15,23,42,.45)',
-                      color: '#F8FAFC', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
-                </label>
+              {/* 은퇴 기간·월 납입은 위 '목표 기반 포트폴리오'에서 설정 → 여기선 그 값을 읽어 분석에만 반영 */}
+              <div className="tt-ai-desc" style={{ marginTop: 8, fontSize: 11, opacity: 0.75 }}>
+                은퇴까지 기간·매월 납입액은 위 <strong>목표 기반 포트폴리오</strong>에서 설정한 값을 사용합니다.
               </div>
 
               {/* 분석 대상(드롭다운 필터) + 실행 버튼 — 같은 줄 */}

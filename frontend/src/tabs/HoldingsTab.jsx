@@ -12,6 +12,7 @@ import Sparkles from '../components/Sparkles'
 import { SkeletonRow } from '../components/Skeleton'
 import { usePriceFlash } from '../hooks/usePriceFlash'
 import { isKrTicker } from '../utils/displayName'
+import { effPrice } from '../utils/effPrice'
 import { useAccounts } from '../utils/accounts'
 import { listNotes } from '../api'
 import './HoldingsTab.css'
@@ -79,7 +80,7 @@ export default function HoldingsTab() {
     let totalCur = 0, totalInvest = 0
     for (const h of filtered) {
       const isUs = !/^A?\d{6}$/.test(h.ticker)
-      const cur  = prices[h.ticker]?.current_price ?? h.avg_price
+      const cur  = effPrice(h, prices)
       const mul  = isUs ? usdKrw : 1
       totalCur    += h.quantity * cur * mul
       totalInvest += h.quantity * h.avg_price * mul
@@ -96,7 +97,7 @@ export default function HoldingsTab() {
     return [...filtered].sort((a, b) => {
       const getVal = h => {
         const isUs = !/^A?\d{6}$/.test(h.ticker)
-        const cur  = prices[h.ticker]?.current_price ?? h.avg_price
+        const cur  = effPrice(h, prices)
         return h.quantity * cur * (isUs ? usdKrw : 1)
       }
       const diff = getVal(b) - getVal(a)
@@ -308,7 +309,8 @@ export default function HoldingsTab() {
           const hasLivePrice = priceData != null && rawCur != null
             && typeof rawCur === 'number' && !isNaN(rawCur)
           const isStale = !!priceData?._stale
-          const cur     = hasLivePrice ? rawCur : avg
+          const manual  = Number(h.manual_price) || 0
+          const cur     = hasLivePrice ? rawCur : (manual > 0 ? manual : avg)
           const chgPct  = Number(priceData?.change_pct) || 0
           const up      = chgPct >= 0
           const mul     = isUs ? (Number(usdKrw) || 1) : 1
@@ -574,6 +576,7 @@ function EditPanel({ holding, onSave, onCancel, onDelete }) {
         { label: '수량', key: 'quantity', type: 'number' },
         { label: '평균 단가', key: 'avg_price', type: 'number' },
         { label: '섹터', key: 'sector', type: 'text' },
+        { label: '수동 기준가 (시세 미조회 시 · 0=미사용)', key: 'manual_price', type: 'number' },
       ].map(f => (
         <div key={f.key} className="edit-field">
           <label className="edit-label">{f.label}</label>

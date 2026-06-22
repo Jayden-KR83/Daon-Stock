@@ -320,6 +320,10 @@ def _migrate_schema():
                           ('quote_type', "TEXT NOT NULL DEFAULT ''")):
             if ds_cols and col not in ds_cols:
                 conn.execute(f"ALTER TABLE discovery_scores ADD COLUMN {col} {decl}")
+        # 수동 기준가: 외부 시세 미조회 종목(한국 비상장 펀드 등)에 사용자가 직접 입력한 참고가
+        pf_cols = {row['name'] for row in conn.execute("PRAGMA table_info(portfolios)").fetchall()}
+        if pf_cols and 'manual_price' not in pf_cols:
+            conn.execute("ALTER TABLE portfolios ADD COLUMN manual_price REAL NOT NULL DEFAULT 0")
         # 마이그레이션 직후, 기존 사용자(이미 가입된 자)는 자동 approved + ai_enabled (legacy compat)
         if added_status:
             conn.execute(
@@ -891,7 +895,7 @@ def _chart_to_full(ticker: str, res: dict) -> dict | None:
 def _load_user_portfolio(user_id: str) -> dict:
     with _db() as conn:
         rows = conn.execute(
-            "SELECT account,ticker,name,avg_price,quantity,sector FROM portfolios WHERE user_id=?",
+            "SELECT account,ticker,name,avg_price,quantity,sector,manual_price FROM portfolios WHERE user_id=?",
             (user_id,)
         ).fetchall()
         wl = conn.execute(
@@ -906,6 +910,7 @@ def _load_user_portfolio(user_id: str) -> dict:
                 'ticker': r['ticker'], 'name': r['name'],
                 'avg_price': r['avg_price'], 'quantity': r['quantity'],
                 'sector': r['sector'],
+                'manual_price': (r['manual_price'] if 'manual_price' in r.keys() else 0) or 0,
             })
     watchlist = [{'ticker': w['ticker'], 'name': w['name'],
                   'exchange': w['exchange'], 'qtype': w['qtype']} for w in wl]
@@ -919,9 +924,10 @@ def _save_user_portfolio(user_id: str, user_data: dict):
         for acc, holdings in user_data.get('portfolios', {}).items():
             for h in holdings:
                 conn.execute(
-                    "INSERT INTO portfolios(user_id,account,ticker,name,avg_price,quantity,sector) VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO portfolios(user_id,account,ticker,name,avg_price,quantity,sector,manual_price) VALUES(?,?,?,?,?,?,?,?)",
                     (user_id, acc, h.get('ticker',''), h.get('name',''),
-                     h.get('avg_price',0), h.get('quantity',0), h.get('sector',''))
+                     h.get('avg_price',0), h.get('quantity',0), h.get('sector',''),
+                     h.get('manual_price',0) or 0)
                 )
         for w in user_data.get('watchlist', []):
             conn.execute(
@@ -3209,6 +3215,7 @@ def _stock_peers(ticker: str) -> list:
 # ─── Pydantic ─────────────────────────────────────────────────────────
 class Holding(BaseModel):
     ticker: str; name: str; quantity: float; avg_price: float; sector: str = ''
+    manual_price: float = 0   # 외부 시세 미조회 종목용 사용자 직접 입력 참고가(0=미설정)
 
 class WatchlistItem(BaseModel):
     ticker: str; name: str; exchange: str = ''; qtype: str = ''
@@ -3697,7 +3704,7 @@ def analyze(req: AnalyzeReq, cu: dict = Depends(require_ai_enabled)):
         name  = h.get('name', tkr)
         sector= h.get('sector','?')
         is_us = not re.match(r'^A?\d{6}$', tkr)
-        cur   = req.prices.get(tkr, {}).get('current_price') or avg
+        cur   = req.prices.get(tkr, {}).get('current_price') or (h.get('manual_price') or 0) or avg
         mul   = usd_krw if is_us else 1
         val   = qty * cur * mul
         cost  = qty * avg * mul
@@ -4293,7 +4300,7 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
         sector = h.get('sector', '기타')
         acct   = h.get('account', '')
         is_us  = not re.match(r'^A?\d{6}$', tkr)
-        cur    = float(req.prices.get(tkr, {}).get('current_price') or avg)
+        cur    = float(req.prices.get(tkr, {}).get('current_price') or (h.get('manual_price') or 0) or avg)
         mul    = usd_krw if is_us else 1.0
         val    = qty * cur * mul
         pnl    = (cur - avg) / avg * 100 if avg > 0 else 0.0
@@ -5061,7 +5068,7 @@ def _capture_net_worth_snapshot(user_id: str, portfolio_dict: dict, prices: dict
                 continue
             qty = float(h.get('quantity') or 0)
             avg = float(h.get('avg_price') or 0)
-            cur = (prices or {}).get(ticker, {}).get('current_price') or avg
+            cur = (prices or {}).get(ticker, {}).get('current_price') or (h.get('manual_price') or 0) or avg
             is_us = not is_kr(ticker)
             mul = usd_krw if is_us else 1.0
             v = qty * float(cur) * mul

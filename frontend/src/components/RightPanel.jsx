@@ -6,6 +6,7 @@ import Sparkline from './Sparkline'
 import LogoCircle from './LogoCircle'
 import { SkeletonRow, SkeletonNews } from './Skeleton'
 import { displayName } from '../utils/displayName'
+import { effPrice } from '../utils/effPrice'
 import './RightPanel.css'
 
 const isKr = tkr => /^A?\d{6}$/.test(tkr)
@@ -127,7 +128,7 @@ function PortfolioPanel({ market }) {
       .map(h => ({
         ...h,
         pct:   prices[h.ticker]?.change_pct ?? 0,
-        price: prices[h.ticker]?.current_price ?? h.avg_price,
+        price: effPrice(h, prices),
         spark: prices[h.ticker]?.spark,
       }))
       .sort((a, b) => b.pct - a.pct),

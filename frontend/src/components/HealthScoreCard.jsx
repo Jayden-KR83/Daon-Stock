@@ -37,7 +37,7 @@ export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw 
       const r = await getPortfolioHealth({
         holdings: allHoldings.map(h => ({
           ticker: h.ticker, quantity: h.quantity, avg_price: h.avg_price,
-          account: h.account, sector: h.sector,
+          account: h.account, sector: h.sector, manual_price: h.manual_price || 0,
         })),
         prices,
         usd_krw: usdKrw,

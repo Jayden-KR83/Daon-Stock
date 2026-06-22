@@ -64,6 +64,14 @@ export default function GoalsCard() {
     }
   }, [data, loadedOnce])
 
+  // 은퇴까지 기간(년)·월 납입(₩)을 Strategy Report와 공유 — 목표기반 카드가 단일 입력처.
+  useEffect(() => {
+    const td = new Date(form.target_date)
+    const yrs = Math.round((td - new Date()) / (365.25 * 86400000))
+    if (Number.isFinite(yrs) && yrs >= 1) localStorage.setItem('daon_retire_years', String(yrs))
+    localStorage.setItem('daon_monthly_inflow', String(Math.max(0, form.monthly_man) * 1e4))
+  }, [form.target_date, form.monthly_man])
+
   function toBody() {
     return {
       id: form.id, name: form.name || '내 목표',
