@@ -23,6 +23,10 @@ const EXCH = { NMS: '나스닥', NGM: '나스닥', NCM: '나스닥', NYQ: 'NYSE'
 const FAIL_KO = { 'PEG>1.5': '성장 대비 비쌈', 'EPS성장≤0': '이익 감소', '부채비율≥200': '빚 과다', '매출 급감': '매출 급감' }
 
 const mktKo = (m) => (m === 'KR' ? '한국' : m === 'US' ? '미국' : m)
+// 종합점수 → 컨빅션 등급 (투자자가 한눈에 강도를 알 수 있게)
+const convLabel = (s) => s >= 80 ? { t: '강력', c: 'var(--m-primary)' }
+  : s >= 70 ? { t: '추천', c: 'var(--m-primary)' }
+  : s >= 60 ? { t: '관심', c: 'var(--m-text-secondary)' } : null
 const fmtPrice = (v, m) => v == null ? '—' : (m === 'KR' ? '₩' + Math.round(v).toLocaleString() : '$' + Number(v).toFixed(2))
 const fmtPe = (v) => v == null ? '—' : Number(v).toFixed(1) + '배'
 const fmtPct = (v) => v == null ? '—' : (v > 0 ? '+' : '') + Math.round(v) + '%'
@@ -149,6 +153,7 @@ export default function DiscoverTab() {
 
   const [qtype, setQtype] = useState('stock')   // 'stock'(개별종목) | 'etf'
   const [market, setMarket] = useState('ALL')
+  const [strongOnly, setStrongOnly] = useState(true)   // 기본: 추천 등급(≥60)만
   const [includeFailed, setIncludeFailed] = useState(false)
   const [expanded, setExpanded] = useState(null)
   const [rescanMsg, setRescanMsg] = useState('')
@@ -160,8 +165,9 @@ export default function DiscoverTab() {
   const isEtf = qtype === 'etf'
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['discover', market, includeFailed, qtype],
-    queryFn: () => getDiscover({ market, sort: 'score', include_failed: includeFailed, limit: 200, qtype }),
+    queryKey: ['discover', market, includeFailed, qtype, strongOnly],
+    queryFn: () => getDiscover({ market, sort: 'score', include_failed: includeFailed,
+      min_score: strongOnly ? 60 : 0, limit: 200, qtype }),
     staleTime: 10 * 60_000,
   })
   const items = data?.items || []
@@ -240,6 +246,10 @@ export default function DiscoverTab() {
             {[['ALL', '전체'], ['US', '미국'], ['KR', '한국']].map(([v, l]) => (
               <button key={v} onClick={() => setMarket(v)} className={`seg-btn ${market === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
           </div>
+          <div className="seg-ctrl" title="추천 등급(종합 60점 이상)만 보기 / 게이트 통과 전체 보기">
+            {[['추천만', true], ['전체', false]].map(([l, v]) => (
+              <button key={l} onClick={() => setStrongOnly(v)} className={`seg-btn ${strongOnly === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
+          </div>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 종목·티커·섹터 검색"
             style={{ fontSize: 11.5, padding: '5px 9px', borderRadius: 4, border: '1px solid var(--m-outline-variant)',
               background: 'var(--m-surface)', color: 'var(--m-text)', width: 170, fontFamily: 'inherit' }} />
@@ -311,9 +321,12 @@ export default function DiscoverTab() {
                   <React.Fragment key={row.ticker}>
                     <tr onClick={() => setExpanded(open ? null : row.ticker)} className="discover-row"
                       style={{ cursor: 'pointer', opacity: failed ? 0.6 : 1 }}>
-                      <td style={{ ...td, maxWidth: 150 }}>
+                      <td style={{ ...td, maxWidth: 160 }}>
                         <span style={{ color: 'var(--m-text-tertiary)', marginRight: 4, fontSize: 9 }}>{open ? '▼' : '▶'}</span>
-                        <span style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.name || row.ticker}</span>
+                        <span style={{ fontWeight: 800 }}>{row.name || row.ticker}</span>
+                        {(() => { const cv = convLabel(row.composite_score); return cv && (
+                          <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 5px',
+                            borderRadius: 2, color: cv.c, border: `1px solid ${cv.c}` }}>{cv.t}</span>) })()}
                       </td>
                       <td style={{ ...td, fontSize: 11, color: 'var(--m-text-tertiary)', fontWeight: 600 }}>{row.ticker}</td>
                       <td style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)' }}>{mktKo(row.market)}</td>
