@@ -4244,6 +4244,19 @@ def _metrics_fingerprint(holdings: list) -> str:
     ])
     return hashlib.md5(json.dumps(items).encode()).hexdigest()
 
+def _strategy_fingerprint(holdings: list, prices: dict, years, inflow) -> str:
+    """AI 전략 리포트 캐시 지문. 평가액을 결정하는 모든 입력(수량·평단·현재가)을 포함해야
+    stale 리포트(옛 총액·비중·수익률) 반환을 막는다. 종목 목록만 해시하면 수량/시세 변경이
+    무시돼 상단 실시간 표와 불일치한다 (정합성 오류의 근본 원인)."""
+    prices = prices or {}
+    def sig(h):
+        tkr = h.get('ticker', '')
+        cur = (prices.get(tkr, {}) or {}).get('current_price') \
+            or (h.get('manual_price') or 0) or h.get('avg_price', 0)
+        return [tkr, round(float(h.get('quantity', 0) or 0), 4),
+                round(float(h.get('avg_price', 0) or 0), 4), round(float(cur or 0), 2)]
+    return hashlib.md5(json.dumps([sorted(sig(h) for h in holdings), years, inflow]).encode()).hexdigest()
+
 @app.get("/api/portfolio/metrics/cached")
 def portfolio_metrics_cached(scope: str = 'ALL', cu: dict = Depends(get_current_user)):
     """저장된 성과 분석 결과 조회 (없으면 {cached: false})"""
@@ -4371,10 +4384,8 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
         req.force_refresh = False
     _log_event(cu['user_id'], 'ai_call', {'kind': 'portfolio_strategy', 'scope': req.scope})
     _bump_ai_call(cu['user_id'])
-    _fp = hashlib.md5(json.dumps([
-        sorted(h.get('ticker', '') for h in req.holdings),
-        req.years_to_retirement, req.monthly_inflow,
-    ]).encode()).hexdigest()
+    _fp = _strategy_fingerprint(req.holdings, req.prices,
+                                req.years_to_retirement, req.monthly_inflow)
     _cache_key = f"strategy:{cu['user_id']}:{_fp}"
     # 1) force_refresh면 캐시 무시
     if not req.force_refresh:
@@ -4469,6 +4480,45 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     avg_mdd  = sum(e['mdd'] for e in valid_m) / len(valid_m) if valid_m else 0
     avg_sh   = sum(e['sharpe'] for e in valid_m) / len(valid_m) if valid_m else 0
 
+    # ── 검증된 핵심 수치(verified_facts): 백엔드가 산출한 권위 수치 ──
+    #    프론트가 이 값을 그대로 표시 → AI 본문 텍스트 드리프트와 무관하게 항상 정확.
+    def _e_weight(e):
+        return round(e['value_krw'] / total_krw * 100, 1) if total_krw else 0.0
+    vf_holdings = [{
+        'ticker': e['ticker'], 'name': e['name'], 'account': e['account'],
+        'weight_pct': _e_weight(e), 'return_pct': e['pnl_pct'],
+        'value_krw': e['value_krw'], 'is_us': e['is_us'],
+    } for e in enriched]
+    vf_sectors = [{'sector': k, 'weight_pct': round(v / total_krw * 100, 1) if total_krw else 0.0}
+                  for k, v in sorted(sector_map.items(), key=lambda x: -x[1])]
+    _ranked = [e for e in enriched if e['pnl_pct'] is not None]
+
+    # ── 절세 스코프(Tax Scope): 계좌 과세권 분리 (명세 3) ──
+    #    미국 주식(양도세 연 250만 공제)과 한국 계좌(ISA/연금/일반)는 과세권이 달라
+    #    손절-상쇄(Tax-Loss Harvesting)를 한 묶음으로 섞으면 안 된다.
+    us_holdings = [e for e in enriched if e['is_us']]
+    kr_holdings = [e for e in enriched if not e['is_us']]
+    us_total = sum(e['value_krw'] for e in us_holdings)
+    kr_total = sum(e['value_krw'] for e in kr_holdings)
+    def _grp_lines(grp):
+        return '\n'.join(
+            f"    [{e['ticker']}] {e['name']} | 계좌:{e['account']} | "
+            f"비중:{_e_weight(e):.1f}% | 수익률:{e['pnl_pct']:+.1f}%" for e in grp
+        ) or '    (없음)'
+
+    verified_facts = {
+        'total_krw':   round(total_krw),
+        'holdings':    vf_holdings,
+        'sectors':     vf_sectors,
+        'top_gainer':  (max(_ranked, key=lambda e: e['pnl_pct'])['ticker'] if _ranked else None),
+        'top_loser':   (min(_ranked, key=lambda e: e['pnl_pct'])['ticker'] if _ranked else None),
+        'stock_count': len(enriched),
+        'tax_scope': {
+            'US': {'count': len(us_holdings), 'value_krw': round(us_total)},
+            'KR': {'count': len(kr_holdings), 'value_krw': round(kr_total)},
+        },
+    }
+
     # Life Timeline 입력 정제
     _accounts = sorted({e['account'] for e in enriched if e.get('account')})
     _acct_str = ', '.join(_accounts) if _accounts else '미지정'
@@ -4492,6 +4542,18 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
 
 === 섹터 비중 ===
 {chr(10).join(sector_lines)}
+
+=== 절세 스코프 (과세권 분리 — 명세) ===
+- 미국 계좌군 (US, 합계 ₩{us_total:,.0f}): 양도소득세 연 250만원 공제, 22% 분리과세
+{_grp_lines(us_holdings)}
+- 한국 계좌군 (KR_PERSONAL/ISA/연금 등, 합계 ₩{kr_total:,.0f}): 계좌별 비과세·분리과세 한도 상이
+{_grp_lines(kr_holdings)}
+
+[절대 규칙 — 수치 정합성 (위반 시 리포트 무효)]
+1. 본문에 등장하는 모든 수치(비중%, 평가액, 수익률%)는 위 '입력 데이터'·'보유 종목'·'섹터 비중'에 제시된 값만 **그대로 인용**하라. 제시되지 않은 숫자를 추정·생성하지 마라(환각 금지).
+2. 총 평가 자산은 반드시 ₩{total_krw:,.0f}만 사용하라. 다른 총액을 쓰지 마라.
+3. 절세(손절-상쇄, Tax-Loss Harvesting) 제안은 **동일 과세권 안에서만** 하라. 미국 주식 손절은 미국 계좌군의 미국 양도세(연 250만원 공제) 범위에서만 매칭하고, 한국 계좌(ISA/연금/일반)와 미국 계좌를 **한 문장의 절세 전략으로 섞지 마라**.
+4. 각 서술 문장에서 가장 핵심이 되는 어구 1개를 **별표 두 개**로 감싸 강조하라. 예: 엔비디아 비중이 **과도하게 집중**되어 있습니다. (문장당 최대 1회, 수치 자체는 감싸지 말 것)
 
 [작성 지침]
 - [1] 종합 리스크 진단: 은퇴 잔여 시간 대비 현재 변동성(MDD)·섹터 쏠림이 유효한지, 절세 계좌(DC/ISA 등)의 혜택이 현재 종목 구성에 올바르게 활용되는지 세무/금융 관점으로 진단.
@@ -4534,6 +4596,8 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
             'total_krw':  round(total_krw),
             'stock_count': len(enriched),
         }
+        # 검증된 핵심 수치 — 프론트가 AI 텍스트 대신 이 값을 권위로 표시
+        result['verified_facts'] = verified_facts
         _set_ai_cache(_cache_key, result)
         # SQLite에도 저장 — 서버 재시작 후에도 마지막 결과 미리보기 가능
         try:
@@ -5374,12 +5438,16 @@ def portfolio_health(req: HealthScoreReq, cu: dict = Depends(require_approved)):
             return e['ticker'], None
     with _cf.ThreadPoolExecutor(max_workers=min(len(enriched), 20)) as ex:
         futs = [ex.submit(_fetch_m, e) for e in enriched]
-        for fut in _cf.as_completed(futs, timeout=30):
-            try:
-                t, m = fut.result(timeout=0)
-                if m: metrics_map[t] = m
-            except Exception:
-                pass
+        try:
+            for fut in _cf.as_completed(futs, timeout=30):
+                try:
+                    t, m = fut.result(timeout=0)
+                    if m: metrics_map[t] = m
+                except Exception:
+                    pass
+        except Exception:
+            # as_completed 자체 타임아웃 등 외부 API 지연/단절 — 부분 결과로 진행(셧다운 금지)
+            pass
 
     # 변동성: 평균 MDD ~ -1로 normalize (값이 클수록 변동 큼)
     valid_mdds = [m['mdd'] for m in metrics_map.values() if m.get('mdd') is not None]
@@ -5393,12 +5461,25 @@ def portfolio_health(req: HealthScoreReq, cu: dict = Depends(require_approved)):
     sharpe_score = round(max(0, min(100, (avg_sharpe + 1) / 2 * 100)))
 
     # ─── 종합 점수 (가중) ───
-    overall = round(
-        diversification * 0.30
-      + sector_score    * 0.25
-      + mdd_score       * 0.25
-      + sharpe_score    * 0.20
-    )
+    # 외부 지표(MDD·샤프)가 전부 실패하면(외부 금융 API 단절) 셧다운하지 않고,
+    # 결정론 지표(분산·섹터 집중)만으로 점수를 추정한다 (명세 2 — 로컬 fallback).
+    metrics_ok = bool(valid_mdds or valid_sharpes)
+    sub_scores = {
+        '분산도':      diversification,
+        '섹터 집중도': sector_score,
+    }
+    if metrics_ok:
+        sub_scores['변동성 관리']  = mdd_score
+        sub_scores['위험조정 수익'] = sharpe_score
+        overall = round(
+            diversification * 0.30
+          + sector_score    * 0.25
+          + mdd_score       * 0.25
+          + sharpe_score    * 0.20
+        )
+    else:
+        # 섹터 쏠림·분산 패널티 중심 추정 (시장 지표 대체)
+        overall = round(diversification * 0.5 + sector_score * 0.5)
 
     # 등급 (S/A/B/C/D)
     grade = ('S', '#16A34A') if overall >= 85 \
@@ -5408,12 +5489,6 @@ def portfolio_health(req: HealthScoreReq, cu: dict = Depends(require_approved)):
        else ('D', '#DC2626')
 
     # 코멘트 (가장 낮은 점수 항목 기준)
-    sub_scores = {
-        '분산도':       diversification,
-        '섹터 집중도':  sector_score,
-        '변동성 관리':  mdd_score,
-        '위험조정 수익': sharpe_score,
-    }
     weakest = min(sub_scores.items(), key=lambda x: x[1])
     comment = {
         '분산도':       f"{n}종목 보유 — 더 다양화하면 위험이 줄어듭니다",
@@ -5427,11 +5502,14 @@ def portfolio_health(req: HealthScoreReq, cu: dict = Depends(require_approved)):
         'grade':         grade[0],
         'grade_color':   grade[1],
         'sub_scores':    sub_scores,
+        'estimated':     not metrics_ok,   # True면 외부 시장지표 일시 불가 → 분산·집중 기반 추정
+        'estimate_note': (None if metrics_ok else
+                          "외부 시장지표(MDD·샤프) 일시 조회 불가 — 분산·섹터 집중도 기반 추정치"),
         'stats': {
             'holdings_count':  n,
             'max_sector_pct':  round(max_sector_pct, 1),
-            'avg_mdd':         round(avg_mdd, 2),
-            'avg_sharpe':      round(avg_sharpe, 2),
+            'avg_mdd':         (round(avg_mdd, 2) if metrics_ok else None),
+            'avg_sharpe':      (round(avg_sharpe, 2) if metrics_ok else None),
             'hhi':             round(hhi, 4),
         },
         'weakest':       weakest[0],
