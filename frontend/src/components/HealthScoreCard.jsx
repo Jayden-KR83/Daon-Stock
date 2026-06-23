@@ -140,6 +140,12 @@ export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw 
               color: 'var(--clr-text-strong)', fontWeight: 600, lineHeight: 1.6 }}>
               {data.comment}
             </div>
+            {data.estimated && data.estimate_note && (
+              <div className="ko-keep" style={{ fontSize: 10.5, color: '#D97706',
+                lineHeight: 1.5, marginTop: 6 }}>
+                ※ {data.estimate_note}
+              </div>
+            )}
             {data.grade !== 'S' && data.weakest && S_GRADE_TIPS[data.weakest] && (
               <div className="ko-keep" style={{ fontSize: 11.5,
                 color: 'var(--m-text-secondary)', lineHeight: 1.6, marginTop: 6 }}>

@@ -914,25 +914,40 @@ function splitToSentences(text) {
     .filter(s => s.length > 4)
 }
 
-/* 텍스트 내 숫자·퍼센트·금액을 글자색만 강조 (음영 X, 직사각형 X) */
-function HighlightedText({ text, tone = 'neutral' }) {
+/* 숫자·퍼센트·금액을 글자색+굵게 강조 (음영 X, 직사각형 X). 음수=빨강 / 양수=초록 / 중립=진한글씨 */
+function NumHighlight({ text }) {
   if (!text) return null
-  const re = /(\+?\-?\d+(?:,\d{3})*(?:\.\d+)?%?|₩\s*[\d,]+|\$\s*[\d,]+(?:\.\d+)?)/g
-  const parts = text.split(re)
+  const re = /(\+?-?\d+(?:,\d{3})*(?:\.\d+)?%?|₩\s*[\d,]+|\$\s*[\d,]+(?:\.\d+)?)/g
+  const numRe = /^(\+?-?\d+(?:,\d{3})*(?:\.\d+)?%?|₩\s*[\d,]+|\$\s*[\d,]+(?:\.\d+)?)$/
   return (
     <>
-      {parts.map((p, i) => {
-        if (re.test(p)) {
-          const isNeg = /^-/.test(p)
-          const isPos = /^\+/.test(p)
-          const klass = isNeg ? 'num-neg' : isPos ? 'num-pos' : 'num-neutral'
-          return (
-            <span key={i} className={klass} style={{
-              whiteSpace: 'nowrap',
-            }}>{p}</span>
-          )
+      {text.split(re).map((p, i) => {
+        if (!p) return null
+        if (numRe.test(p)) {
+          const klass = /^-/.test(p) ? 'num-neg' : /^\+/.test(p) ? 'num-pos' : 'num-neutral'
+          return <span key={i} className={klass}
+            style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{p}</span>
         }
         return <React.Fragment key={i}>{p}</React.Fragment>
+      })}
+    </>
+  )
+}
+
+/* AI 본문 강조 렌더러:
+   - **어구** → 굵은 글씨 + 강조색(--m-primary) (AI가 문장당 핵심 1개 표시)
+   - 숫자/퍼센트/금액 → 색상 + 굵게 (NumHighlight) */
+function HighlightedText({ text, tone = 'neutral' }) {
+  if (!text) return null
+  const segs = String(text).split(/(\*\*[^*]+\*\*)/g)
+  return (
+    <>
+      {segs.map((seg, si) => {
+        const m = /^\*\*([^*]+)\*\*$/.exec(seg)
+        if (m) {
+          return <strong key={si} style={{ color: 'var(--m-primary)', fontWeight: 800 }}>{m[1]}</strong>
+        }
+        return <NumHighlight key={si} text={seg} />
       })}
     </>
   )
@@ -948,6 +963,94 @@ function riskSeverity(title = '', detail = '') {
   return { level: 'med', label: '관찰', value: 0.5 }
 }
 
+/* 검증된 핵심 수치 — 백엔드가 직접 계산한 권위 수치(verified_facts).
+   AI 본문 텍스트 드리프트와 무관하게 항상 이 값이 정확. (정합성 최우선) */
+function VerifiedFacts({ vf }) {
+  if (!vf) return null
+  const top = (vf.holdings || []).slice(0, 5)
+  const sectors = (vf.sectors || []).slice(0, 4)
+  const tax = vf.tax_scope || {}
+  return (
+    <div className="mono-card" style={{ marginBottom: 12 }}>
+      <div className="mono-section-header">
+        <div className="mono-section-title is-accent">검증된 핵심 수치</div>
+        <span className="mono-pill" style={{ color: 'var(--m-text-tertiary)' }}>실시간 계산값</span>
+      </div>
+      <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
+        margin: '4px 0 10px', lineHeight: 1.5 }}>
+        보유 데이터로 직접 계산한 값 — AI 서술과 무관하게 정확합니다.
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div className="m3-label" style={{ marginBottom: 2 }}>총 평가 자산</div>
+        <div style={{ fontSize: 20, fontWeight: 900, color: 'var(--m-text)',
+          fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em' }}>{_won(vf.total_krw)}</div>
+      </div>
+
+      {top.length > 0 && (
+        <div style={{ overflowX: 'auto', marginBottom: sectors.length ? 10 : 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ color: 'var(--m-text-tertiary)' }}>
+                <th style={thStyle}>상위 종목</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>비중</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>수익률</th>
+              </tr>
+            </thead>
+            <tbody>
+              {top.map((h, i) => (
+                <tr key={i} style={{ borderTop: '1px solid var(--m-outline-variant)' }}>
+                  <td style={{ ...tdStyle, minWidth: 0 }}>{h.name || h.ticker}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums' }}>{h.weight_pct}%</td>
+                  <td className={(h.return_pct ?? 0) >= 0 ? 'num-pos' : 'num-neg'}
+                    style={{ ...tdStyle, textAlign: 'right', fontWeight: 700,
+                      fontVariantNumeric: 'tabular-nums' }}>
+                    {(h.return_pct ?? 0) >= 0 ? '+' : ''}{h.return_pct}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {sectors.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6,
+          marginBottom: (tax.US || tax.KR) ? 10 : 0 }}>
+          {sectors.map((s, i) => (
+            <span key={i} style={{ fontSize: 11, color: 'var(--m-text-secondary)',
+              border: '1px solid var(--m-outline-variant)', borderRadius: 2, padding: '3px 7px' }}>
+              {s.sector} <strong style={{ color: 'var(--m-text)' }}>{s.weight_pct}%</strong>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(tax.US?.count > 0 || tax.KR?.count > 0) && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          {tax.US?.count > 0 && (
+            <div style={{ flex: 1, minWidth: 0, border: '1px solid var(--m-outline-variant)',
+              borderRadius: 2, padding: '6px 8px' }}>
+              <div className="m3-label">미국 계좌 · 양도세권</div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--m-text)',
+                fontVariantNumeric: 'tabular-nums' }}>{_won(tax.US.value_krw)} · {tax.US.count}종</div>
+            </div>
+          )}
+          {tax.KR?.count > 0 && (
+            <div style={{ flex: 1, minWidth: 0, border: '1px solid var(--m-outline-variant)',
+              borderRadius: 2, padding: '6px 8px' }}>
+              <div className="m3-label">한국 계좌 · ISA/연금 등</div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--m-text)',
+                fontVariantNumeric: 'tabular-nums' }}>{_won(tax.KR.value_krw)} · {tax.KR.count}종</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DaonAIReport({ data }) {
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
@@ -957,8 +1060,8 @@ function DaonAIReport({ data }) {
 
   return (
     <div>
-      {/* 포트폴리오 건강도 지표(평균 수익률·MDD·샤프)는 Portfolio Health Score 카드로 일원화 —
-          MDD·샤프 중복 제거, Report는 AI 정성 분석에 집중 (2026-06-06) */}
+      {/* 검증된 핵심 수치 — AI 텍스트보다 우선하는 권위 수치 (정합성 최우선) */}
+      <VerifiedFacts vf={data.verified_facts} />
 
       {/* 전문가 총평 */}
       <div className="mono-card" style={{ marginBottom: 12 }}>
@@ -1207,27 +1310,20 @@ function AllocPhase({ phase, idx }) {
    - small: 더 작은 폰트 사용 */
 function BulletList({ items = [], color, bulletColor, tone = 'neutral', small = false }) {
   if (!items || items.length === 0) return null
-  // 1문장이면 bullet 없이 그대로 — 어색한 단일 bullet 방지
-  if (items.length === 1) {
-    return (
-      <div className="ko-keep" style={{ fontSize: small ? 12 : 13, color,
-        lineHeight: 1.75 }}>
-        <HighlightedText text={items[0]} tone={tone} />
-      </div>
-    )
-  }
+  // 머릿글 마커 통일: 모든 문장(단일 포함)에 동일한 작은 정사각형 마커.
+  // 전문 자산관리 보고서 톤 + design.md 직사각형 원칙(원형 점 → 사각형).
   return (
     <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
       {items.map((s, i) => (
         <li key={i} className="ko-keep" style={{
-          position: 'relative', paddingLeft: 16,
-          marginBottom: i < items.length - 1 ? 6 : 0,
+          position: 'relative', paddingLeft: 15,
+          marginBottom: i < items.length - 1 ? 7 : 0,
           fontSize: small ? 12 : 13, color, lineHeight: 1.7,
         }}>
           <span style={{
-            position: 'absolute', left: 0, top: '0.55em',
-            width: 6, height: 6, borderRadius: '50%',
-            background: bulletColor || color, opacity: 0.85,
+            position: 'absolute', left: 0, top: '0.6em',
+            width: 5, height: 5, borderRadius: 0,
+            background: bulletColor || color, opacity: 0.9,
           }} />
           <HighlightedText text={s} tone={tone} />
         </li>
