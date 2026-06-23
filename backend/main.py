@@ -2887,7 +2887,10 @@ def _garp_score(rows: list) -> list:
                 ap = axis_pct[axis]
                 if ap is not None:
                     num += w * ap; den += w
-            r['composite_score'] = round(num / den, 2) if den > 0 else 0.0
+            base = num / den if den > 0 else 0.0
+            # 결측 패널티: 5요소 중 부족분만큼 감점(×완성도/5). 한 축(예: 저평가 99)만으로
+            # 상위에 오르는 것 차단 — 데이터 충실한 종목이 우선되도록(권위 확보).
+            r['composite_score'] = round(base * (r['data_completeness'] / 5.0), 2)
     return rows
 
 
@@ -2984,15 +2987,21 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
             trend = _financials_trend(ticker) or {}
         except Exception:
             trend = {}
-        m['eps_growth'] = _eps_yoy_from_trend(trend)
+        raw_eps_g = _eps_yoy_from_trend(trend)
+        # 성장률 winsorize(+50% 상한): 적자→흑자·코로나백신 소멸 같은 기저효과로 YoY가 수백%
+        # 튀어 성장 순위를 지배하는 것을 차단. 음수는 그대로(게이트가 거름).
+        m['eps_growth'] = (min(raw_eps_g, 50.0) if (raw_eps_g is not None and raw_eps_g > 0) else raw_eps_g)
         # rev_growth: yfinance info의 revenueGrowth가 US/KR 모두 안정적 → 1차.
         # 분기 합산 YoY(_ttm_yoy)는 yfinance가 4~5분기만 줘 대개 None → fallback.
-        m['rev_growth'] = _ttm_yoy([r.get('value') for r in trend.get('revenue', [])])
+        raw_rev_g = _ttm_yoy([r.get('value') for r in trend.get('revenue', [])])
+        m['rev_growth'] = (min(raw_rev_g, 50.0) if (raw_rev_g is not None and raw_rev_g > 0) else raw_rev_g)
 
         if market == 'US':
-            if f.get('revenue_growth') is not None:
-                m['rev_growth'] = f.get('revenue_growth')
-            m['peg'] = f.get('peg_ratio')
+            rg = f.get('revenue_growth')
+            if rg is not None:
+                m['rev_growth'] = min(rg, 50.0) if rg > 0 else rg
+            up = f.get('peg_ratio')   # Yahoo PEG(5년 성장 기반) — 비현실치(≤0.1)는 데이터오류로 드롭
+            m['peg'] = up if (up is not None and up > 0.1) else None
             m['debt_to_equity'] = f.get('debt_to_equity')
             m['profit_margin'] = f.get('profit_margin')
             full = _stock_full(ticker) or {}
@@ -3021,7 +3030,8 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
                            or ik.get('exchange')):
                     info_kr, used_sfx = ik, sfx; break
             if m['rev_growth'] is None and info_kr.get('revenueGrowth') is not None:
-                m['rev_growth'] = round(info_kr['revenueGrowth'] * 100, 2)
+                _rg = round(info_kr['revenueGrowth'] * 100, 2)
+                m['rev_growth'] = min(_rg, 50.0) if _rg > 0 else _rg
             m['exchange'] = info_kr.get('exchange') or (
                 'KSC' if used_sfx == '.KS' else 'KOE' if used_sfx == '.KQ' else '')
             m['quote_type'] = info_kr.get('quoteType') or 'EQUITY'
@@ -3034,9 +3044,11 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
             if cur and tgt and na >= 3:                                 # 기대(전문가) 축 보강
                 m['target_price'] = round(tgt, 2)
                 m['analyst_upside'] = round((tgt - cur) / cur * 100, 2)
-            pe, eg = m['trailing_pe'], m['eps_growth']
-            if pe and pe > 0 and eg and eg > 0:
-                m['peg'] = round(pe / min(eg, _GROWTH_CAP_FOR_PEG), 3)  # 성장률 캡(경기민감주 함정)
+            # PEG는 지속가능 성장 구간(0<성장≤50%)에서만 계산. raw 성장률이 50% 초과(적자턴어라운드·
+            # 코로나기저·시클리컬 고점)면 PEG 드롭 → 가치는 PER·선행PER로만 평가(가짜 초저PEG 방지).
+            pe = m['trailing_pe']
+            if pe and pe > 0 and raw_eps_g is not None and 0 < raw_eps_g <= 50:
+                m['peg'] = round(pe / raw_eps_g, 3)
             # current_price + near_52w_high: KR 차트(_kr_history), 없으면 info 현재가
             try:
                 hist = _kr_history(ticker) or []
@@ -3118,7 +3130,8 @@ def _etf_score(rows: list) -> list:
             for gname, (_s, w) in _ETF_GROUPS.items():
                 if grp[gname] is not None:
                     num += w * grp[gname]; den += w
-            r['composite_score'] = round(num / den, 2) if den > 0 else 0.0
+            base = num / den if den > 0 else 0.0
+            r['composite_score'] = round(base * (r['data_completeness'] / 3.0), 2)  # 결측 패널티(/3)
             ok = r.get('current_price') is not None and grp['momentum'] is not None
             r['gate_pass'] = 1 if ok else 0
             r['gate_fail_reason'] = '' if ok else '데이터 부족'
