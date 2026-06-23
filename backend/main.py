@@ -258,6 +258,9 @@ def _init_db():
             expense_ratio     REAL,                     -- ETF 보수율 % (US)
             aum               REAL,                     -- ETF 순자산 (US)
             ret_6m            REAL,                     -- 6개월 수익률 % (ETF)
+            psr               REAL,                     -- 주가매출비율 (저점발굴)
+            rnd_intensity     REAL,                     -- R&D/매출 (저점발굴)
+            runway_years      REAL,                     -- 현금런웨이 연수 (저점발굴)
             -- 축별 백분위 (0~100, 시장 내 정규화). N/A 축은 NULL
             pct_value         REAL,
             pct_growth        REAL,
@@ -321,7 +324,8 @@ def _migrate_schema():
                           ('trailing_pe', 'REAL'), ('forward_pe', 'REAL'),
                           ('profit_margin', 'REAL'), ('exchange', "TEXT NOT NULL DEFAULT ''"),
                           ('quote_type', "TEXT NOT NULL DEFAULT ''"),
-                          ('expense_ratio', 'REAL'), ('aum', 'REAL'), ('ret_6m', 'REAL')):
+                          ('expense_ratio', 'REAL'), ('aum', 'REAL'), ('ret_6m', 'REAL'),
+                          ('psr', 'REAL'), ('rnd_intensity', 'REAL'), ('runway_years', 'REAL')):
             if ds_cols and col not in ds_cols:
                 conn.execute(f"ALTER TABLE discovery_scores ADD COLUMN {col} {decl}")
         # 수동 기준가: 외부 시세 미조회 종목(한국 비상장 펀드 등)에 사용자가 직접 입력한 참고가
@@ -3175,6 +3179,150 @@ def _discovery_etf_metrics(ticker: str, market: str) -> dict:
     except Exception:
         pass
     return m
+
+
+# ─── 저점 발굴 (AI·바이오 혁신/턴어라운드) — 적자 착시 방어 + 바닥다지기 ──────
+# Gemini 비판 보정: ① PSR÷R&D집중도(적자기업 가치) ② 현금런웨이 생존게이트(무모한 소각 배제)
+# ③ 바닥다지기(고점이 아닌 저점·120선 돌파 포착). 흑자게이트는 적용 안 함(pre-profit 타깃 보존).
+# US 한정(R&D·PSR 데이터). 상폐 종목은 게이트(현재가)가 자동 제외.
+INNOVATION_UNIVERSE = {
+    'SDGR': ('Schrödinger', 'AI 신약'), 'RXRX': ('Recursion', 'AI 신약'),
+    'ABCL': ('AbCellera', 'AI 항체'), 'ABSI': ('Absci', 'AI 신약'),
+    'RLAY': ('Relay Tx', 'AI 신약'), 'TEM': ('Tempus AI', 'AI 진단'),
+    'CRSP': ('CRISPR Tx', '유전자편집'), 'NTLA': ('Intellia', '유전자편집'),
+    'BEAM': ('Beam Tx', '유전자편집'), 'VERV': ('Verve Tx', '유전자편집'),
+    'CRBU': ('Caribou', '유전자편집'), 'RCKT': ('Rocket Pharma', '유전자치료'),
+    'PACB': ('PacBio', '유전체'), 'TWST': ('Twist Bio', '합성생물학'),
+    'DNA': ('Ginkgo Bio', '합성생물학'), 'AI': ('C3.ai', 'AI 플랫폼'),
+    'PATH': ('UiPath', 'AI 자동화'), 'SOUN': ('SoundHound', 'AI 음성'),
+    'BBAI': ('BigBear.ai', 'AI 분석'), 'RXST': ('RxSight', '디지털 헬스'),
+}
+
+def _discovery_innov_universe() -> list:
+    return [{'ticker': t, 'name': nm, 'market': 'US', 'sector': cat}
+            for t, (nm, cat) in INNOVATION_UNIVERSE.items()]
+
+def _yf_rnd(ticker: str):
+    """income_stmt에서 최근 R&D 비용. 스레드 타임아웃 보호."""
+    def _work():
+        import yfinance as yf
+        st = yf.Ticker(ticker).income_stmt
+        if st is None or st.empty:
+            return None
+        row = next((x for x in st.index if 'research' in str(x).lower()), None)
+        if row is None:
+            return None
+        v = st.loc[row].iloc[0]
+        return float(v) if v == v else None   # NaN 거름
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(_work).result(timeout=8)
+    except Exception:
+        return None
+
+def _base_building(closes: list, vols: list):
+    """바닥다지기 raw(0~100, 높을수록 저점 다지기+초기 돌파). 120선 막 돌파 + 저변동성 + 거래량 유입."""
+    import statistics as _st
+    c = [x for x in (closes or []) if x]
+    if len(c) < 130:
+        return None
+    ma120 = sum(c[-120:]) / 120
+    cur = c[-1]
+    if ma120 <= 0:
+        return None
+    dist = (cur / ma120 - 1) * 100               # 120일선 대비 %
+    seg = c[-126:]
+    rets = [seg[i] / seg[i - 1] - 1 for i in range(1, len(seg)) if seg[i - 1]]
+    vol6m = _st.pstdev(rets) * 100 if len(rets) > 5 else None   # 일간 변동성%
+    v = [x for x in (vols or []) if x]
+    vsurge = (sum(v[-20:]) / 20) / (sum(v[-120:-20]) / 100) if len(v) >= 120 and sum(v[-120:-20]) else None
+    score = 0.0
+    if 0 <= dist <= 15: score += 45              # 막 돌파~초입(이상적)
+    elif -6 <= dist < 0: score += 28             # 돌파 직전 바닥
+    elif 15 < dist <= 30: score += 15            # 다소 진행
+    if vol6m is not None: score += max(0.0, min(30.0, 30 - vol6m * 7))  # 저변동성 보상
+    if vsurge is not None and vsurge > 1.2: score += 25                  # 거래량 유입
+    return round(score, 1)
+
+def _discovery_innov_metrics(ticker: str, market: str) -> dict:
+    """저점발굴 raw — PSR·R&D집중도·런웨이·바닥다지기. US 한정. 종목당 격리."""
+    m: dict = {'psr': None, 'rnd_intensity': None, 'runway_years': None,
+               'pct_momentum': None, 'near_52w_high': None, 'current_price': None,
+               'revenue': None, 'exchange': '', 'quote_type': 'INNOV'}
+    try:
+        info = _yf_info_safe(ticker.upper(), timeout=10)
+        cur = info.get('currentPrice') or info.get('regularMarketPrice')
+        m['current_price'] = float(cur) if cur and not _nan(cur) else None
+        psr = info.get('priceToSalesTrailing12Months')
+        rev = info.get('totalRevenue')
+        m['revenue'] = float(rev) if rev and not _nan(rev) else None
+        # PSR은 매출이 유의미할 때만(무매출 PSR 폭주 방지)
+        if psr and not _nan(psr) and m['revenue'] and m['revenue'] >= 10e6:
+            m['psr'] = round(float(psr), 2)
+        rnd = _yf_rnd(ticker)
+        if rnd and m['revenue'] and m['revenue'] > 0:
+            m['rnd_intensity'] = round(rnd / m['revenue'], 3)
+        # 런웨이: 현금 / 연간 소각. 흑자(FCF≥0)면 충분(99)
+        cash = info.get('totalCash'); fcf = info.get('freeCashflow')
+        if fcf is not None and not _nan(fcf):
+            if fcf >= 0:
+                m['runway_years'] = 99.0
+            elif cash and not _nan(cash):
+                m['runway_years'] = round(cash / abs(fcf), 2)
+        hi = info.get('fiftyTwoWeekHigh')
+        if m['current_price'] and hi and float(hi) > 0:
+            m['near_52w_high'] = round(m['current_price'] / float(hi), 4)
+        m['exchange'] = info.get('exchange', '') or ''
+        res = _yf_chart(ticker.upper(), '1y', '1d')
+        if res:
+            q0 = res.get('indicators', {}).get('quote', [{}])[0]
+            m['pct_momentum'] = _base_building(q0.get('close', []), q0.get('volume', []))
+    except Exception:
+        pass
+    return m
+
+# 저점발굴 신호 → higher_better
+_INNOV_SIGNALS = {'mod_val': False, 'rnd_intensity': True, 'pct_momentum': True, 'runway_years': True}
+_INNOV_W = {'mod_val': 0.30, 'rnd_intensity': 0.20, 'pct_momentum': 0.35, 'runway_years': 0.15}
+
+def _innov_score(rows: list) -> list:
+    """저점발굴 점수 — 변형밸류(PSR÷R&D) 30·파이프라인(R&D) 20·바닥다지기 35·생존 15. 순수함수."""
+    rows = [dict(r) for r in rows]
+    for r in rows:
+        # 변형 밸류: PSR ÷ R&D집중도 (낮을수록 저평가 + 진짜 파이프라인). 둘 다 있을 때만.
+        r['mod_val'] = (round(r['psr'] / r['rnd_intensity'], 2)
+                        if r.get('psr') and r.get('rnd_intensity') and r['rnd_intensity'] > 0 else None)
+        # 런웨이는 99(흑자) 상한 캡 — 순위 왜곡 방지
+        if r.get('runway_years') is not None:
+            r['runway_years'] = min(r['runway_years'], 10.0)
+        # R&D집중도 상한 캡(무모한 소각이 1위 되는 것 방지)
+        if r.get('rnd_intensity') is not None:
+            r['rnd_intensity'] = min(r['rnd_intensity'], 3.0)
+    sig_vals = {s: [r[s] for r in rows if r.get(s) is not None] for s in _INNOV_SIGNALS}
+    for r in rows:
+        pcts = {}
+        for s, hb in _INNOV_SIGNALS.items():
+            v = r.get(s)
+            pcts[s] = None if v is None else _pct_rank(sig_vals[s], v, hb)
+        r['pct_value'] = pcts['mod_val']
+        r['pct_growth'] = pcts['rnd_intensity']
+        r['pct_momentum'] = pcts['pct_momentum']
+        r['pct_quality'] = pcts['runway_years']
+        r['pct_sentiment'] = None
+        r['data_completeness'] = sum(1 for v in pcts.values() if v is not None)
+        num = den = 0.0
+        for s, w in _INNOV_W.items():
+            if pcts[s] is not None:
+                num += w * pcts[s]; den += w
+        base = num / den if den > 0 else 0.0
+        r['composite_score'] = round(base * (r['data_completeness'] / 4.0), 2)   # 결측 패널티(/4)
+        # 생존 게이트: 현재가 + 바닥다지기 데이터 + 런웨이 1년 이상(좀비 배제)
+        rw = r.get('runway_years')
+        ok = (r.get('current_price') is not None and r.get('pct_momentum') is not None
+              and rw is not None and rw >= 1.0)
+        r['gate_pass'] = 1 if ok else 0
+        r['gate_fail_reason'] = '' if ok else ('현금소진 위험' if (rw is not None and rw < 1.0) else '데이터 부족')
+    return rows
 
 
 def safe_i_local(v):
@@ -6343,8 +6491,9 @@ def _store_discovery_rows(conn, rows: list, now: float):
             "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
             "gate_fail_reason, data_completeness, computed_at, "
             "current_price, target_price, trailing_pe, forward_pe, profit_margin, "
-            "exchange, quote_type, expense_ratio, aum, ret_6m) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "exchange, quote_type, expense_ratio, aum, ret_6m, "
+            "psr, rnd_intensity, runway_years) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (r['ticker'], r['market'], r.get('name', ''), r.get('sector', ''),
              r.get('peg'), r.get('rel_per'), r.get('eps_growth'), r.get('rev_growth'),
              r.get('roe'), r.get('debt_to_equity'), r.get('near_52w_high'),
@@ -6355,7 +6504,8 @@ def _store_discovery_rows(conn, rows: list, now: float):
              r.get('current_price'), r.get('target_price'), r.get('trailing_pe'),
              r.get('forward_pe'), r.get('profit_margin'),
              r.get('exchange', ''), r.get('quote_type', ''),
-             r.get('expense_ratio'), r.get('aum'), r.get('ret_6m')))
+             r.get('expense_ratio'), r.get('aum'), r.get('ret_6m'),
+             r.get('psr'), r.get('rnd_intensity'), r.get('runway_years')))
         conn.execute(
             "INSERT OR REPLACE INTO discovery_history "
             "(snapshot_date, ticker, market, sector, composite_score, gate_pass) "
@@ -6396,17 +6546,31 @@ def _do_discover_scan() -> dict:
                 etf_rows.append(m)
         etf_scored = _etf_score(etf_rows)
 
+        # 3) 저점 발굴 (AI·바이오 혁신/턴어라운드 전용 모델)
+        innov_uni = _discovery_innov_universe()
+        innov_rows: list = []
+        def _fetch_innov(item):
+            m = _discovery_innov_metrics(item['ticker'], item['market'])
+            m.update({'ticker': item['ticker'], 'name': item['name'],
+                      'market': item['market'], 'sector': item['sector']})
+            return m
+        with _cf.ThreadPoolExecutor(max_workers=2) as ex:
+            for m in ex.map(_fetch_innov, innov_uni):
+                innov_rows.append(m)
+        innov_scored = _innov_score(innov_rows)
+
         now = time()
         with _db() as conn:
             _store_discovery_rows(conn, scored, now)
             _store_discovery_rows(conn, etf_scored, now)
+            _store_discovery_rows(conn, innov_scored, now)
             # 고아 행 제거: 이번 스캔에서 갱신 안 된(universe에서 빠진/상폐된) 티커 삭제.
             # 안 하면 제거된 티커(예: PXD)가 옛 gate_pass=1로 영구 잔존해 추천에 노출됨.
             conn.execute("DELETE FROM discovery_scores WHERE computed_at < ?", (now - 1,))
 
-        return {'scanned': len(universe) + len(etf_uni), 'stocks': len(scored),
-                'etfs': len(etf_scored),
-                'gate_passed': sum(1 for r in scored + etf_scored if r.get('gate_pass')),
+        return {'scanned': len(universe) + len(etf_uni) + len(innov_uni),
+                'stocks': len(scored), 'etfs': len(etf_scored), 'innov': len(innov_scored),
+                'gate_passed': sum(1 for r in scored + etf_scored + innov_scored if r.get('gate_pass')),
                 'elapsed_s': round(time() - t0, 1)}
     finally:
         _discover_scan_busy['v'] = False
@@ -6448,15 +6612,17 @@ def get_discover(market: str = 'ALL', min_score: float = 0, sort: str = 'score',
                  limit: int = 50, offset: int = 0, include_failed: bool = False,
                  qtype: str = 'stock'):
     """발굴 랭킹 조회 — discovery_scores read only. 무인증 공용 데이터(데모·비로그인 열람).
-    qtype: 'stock'(개별종목, 기본) | 'etf' | 'all'. gate_pass=1 우선, composite desc 기본."""
+    qtype: 'stock'(개별종목, 기본) | 'etf' | 'innov'(저점발굴) | 'all'. gate_pass=1 우선, composite desc 기본."""
     where = ["composite_score >= ?"]
     params: list = [min_score]
     if market in ('US', 'KR'):
         where.append("market = ?"); params.append(market)
     if qtype == 'etf':
         where.append("quote_type = 'ETF'")
+    elif qtype == 'innov':
+        where.append("quote_type = 'INNOV'")
     elif qtype == 'stock':
-        where.append("quote_type != 'ETF'")
+        where.append("quote_type NOT IN ('ETF','INNOV')")
     if not include_failed:
         where.append("gate_pass = 1")
     order = {'score': 'composite_score DESC',
