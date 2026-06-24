@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { useStore } from '../store'
-import { getDiscover, rescanDiscover } from '../api'
+import { getDiscover, rescanDiscover, getCachedAnalysis } from '../api'
 
 /* 신규 종목 발굴 (GARP) — 표 + 종목별 레이더 인포그래픽(확장).
  * 행 클릭 → 5요소 레이더 + 밸류에이션(현재가·목표가·상승여력·PER·PEG·순이익률) + 메타 펼침.
@@ -56,6 +56,46 @@ function valNote(row) {
 const td = { padding: '8px 7px', fontSize: 12, color: 'var(--m-text)', whiteSpace: 'nowrap' }
 const th = { padding: '6px 7px', fontSize: 11, fontWeight: 700, color: 'var(--m-text-secondary)', whiteSpace: 'nowrap' }
 
+// 캐시된 AI 심층 분석 인라인 표시 — 있으면 핵심 요약(추천·촉매·리스크) 자동 노출(무과금 읽기),
+// 없으면 라이브 생성 버튼. CLI 배치로 채워진 ai_cache(stock_v2)를 모든 사용자가 무료 열람.
+function CachedAI({ ticker, name, onPick }) {
+  const { data } = useQuery({
+    queryKey: ['discoverAI', ticker],
+    queryFn: () => getCachedAnalysis(ticker, name || ''),
+    staleTime: 30 * 60_000,
+  })
+  const a = data?.cached ? data.data : null
+  const aiAgo = data?.computed_at ? agoLabel(data.computed_at) : null
+  const recColor = (r) => r === '매수' ? 'var(--m-positive)' : r === '매도' ? 'var(--m-negative)' : 'var(--m-text-secondary)'
+  if (!a) {
+    return (
+      <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(ticker) }}
+        style={{ marginTop: 10, fontSize: 12, padding: '7px 14px' }}>AI 심층 분석 보기 →</button>
+    )
+  }
+  return (
+    <div style={{ marginTop: 10, background: 'var(--m-surface)', border: '1px solid var(--m-outline-variant)', borderRadius: 4, padding: '9px 11px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+        <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--m-text-secondary)' }}>AI 심층</span>
+        {a.recommendation && <span style={{ fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 2,
+          color: recColor(a.recommendation), border: `1px solid ${recColor(a.recommendation)}` }}>{a.recommendation}</span>}
+        {aiAgo && <span style={{ fontSize: 9.5, color: 'var(--m-text-tertiary)', marginLeft: 'auto' }}>분석 {aiAgo}</span>}
+      </div>
+      <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)', lineHeight: 1.55 }}>{a.summary}</div>
+      {(a.catalysts_short?.[0] || a.bear?.[0]) && (
+        <div style={{ display: 'grid', gap: 4, marginTop: 7 }}>
+          {a.catalysts_short?.[0] && <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-secondary)', lineHeight: 1.5 }}>
+            <b style={{ color: 'var(--m-positive)' }}>촉매</b> {a.catalysts_short[0]}</div>}
+          {a.bear?.[0] && <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-secondary)', lineHeight: 1.5 }}>
+            <b style={{ color: 'var(--m-negative)' }}>리스크</b> {a.bear[0]}</div>}
+        </div>
+      )}
+      <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(ticker) }}
+        style={{ marginTop: 9, fontSize: 12, padding: '7px 14px' }}>전체 분석 보기 →</button>
+    </div>
+  )
+}
+
 function DetailPanel({ row, onPick }) {
   const radarData = AXES.map(ax => ({ axis: ax.label, v: axVal(row, ax) }))
   const kv = (label, value, hint) => (
@@ -106,10 +146,7 @@ function DetailPanel({ row, onPick }) {
           <span>{mktKo(row.market)} · {exch}</span><span>·</span><span>{type}</span><span>·</span><span>{row.sector}</span>
           {!row.gate_pass && <span style={{ color: 'var(--m-negative)' }}>· 기준 미달: {FAIL_KO[row.gate_fail_reason] || row.gate_fail_reason}</span>}
         </div>
-        <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(row.ticker) }}
-          style={{ marginTop: 10, fontSize: 12, padding: '7px 14px' }}>
-          AI 심층 분석 보기 →
-        </button>
+        <CachedAI ticker={row.ticker} name={row.name} onPick={onPick} />
       </div>
     </div>
   )
@@ -201,8 +238,7 @@ function InnovDetail({ row, onPick }) {
           <span style={{ color: 'var(--m-negative)', fontWeight: 700 }}>· ⚠ 고위험 위성(satellite) — 변동성 큼, 소액 분산</span>
           {!row.gate_pass && <span style={{ color: 'var(--m-negative)' }}>· 기준 미달: {row.gate_fail_reason}</span>}
         </div>
-        <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(row.ticker) }}
-          style={{ marginTop: 10, fontSize: 12, padding: '7px 14px' }}>AI 심층 분석 보기 →</button>
+        <CachedAI ticker={row.ticker} name={row.name} onPick={onPick} />
       </div>
     </div>
   )
