@@ -40,7 +40,8 @@ export default function AlertsCard({ allHoldings = [], prices = {}, usdKrw = 138
 
   useEffect(() => {
     if (allHoldings.length === 0) return
-    if (Object.keys(prices).length === 0) return
+    // 시세가 아직 안 실려도 실행 — 백엔드가 평단가로 대체 계산하므로 본문이 공백으로 남지 않음.
+    // 시세가 도착하면 deps(prices 키 수) 변화로 자동 재실행되어 정확한 비중으로 갱신.
     run()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allHoldings.length, Object.keys(prices).length, thresholds])
