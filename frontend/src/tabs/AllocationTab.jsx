@@ -934,6 +934,12 @@ function splitToSentences(text) {
     .filter(s => s.length > 4)
 }
 
+/* 문장이 끝나면(.?!。) 줄바꿈 삽입 — whiteSpace:'pre-line' 컨테이너와 함께 사용. */
+function breakSentences(text) {
+  if (typeof text !== 'string') return text
+  return text.replace(/([^\d\s])([.?!。])\s+/g, '$1$2\n').trim()
+}
+
 /* 숫자·퍼센트·금액을 글자색+굵게 강조 (음영 X, 직사각형 X). 음수=빨강 / 양수=초록 / 중립=진한글씨 */
 function NumHighlight({ text }) {
   if (!text) return null
@@ -1266,8 +1272,9 @@ function DaonAIReport({ data }) {
               border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
               <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--m-negative)',
                 letterSpacing: '.03em', marginBottom: 3 }}>월가의 경고</div>
-              <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)', lineHeight: 1.6 }}>
-                {String(data.dividend_simulation.warning).replace(/^\s*\[?월가의 경고\]?\s*[:·-]?\s*/, '')}
+              <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)',
+                lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                {breakSentences(String(data.dividend_simulation.warning).replace(/^\s*\[?월가의 경고\]?\s*[:·-]?\s*/, ''))}
               </div>
             </div>
           )}
@@ -1420,15 +1427,16 @@ function AllocPhase({ phase, idx }) {
       </div>
       {phase.account_strategy && (
         <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)',
-          lineHeight: 1.6, marginBottom: 3 }}>
+          lineHeight: 1.6, marginBottom: 3, whiteSpace: 'pre-line' }}>
           <span style={{ color: 'var(--m-text-tertiary)', fontWeight: 700 }}>계좌 운용 </span>
-          {phase.account_strategy}
+          {breakSentences(phase.account_strategy)}
         </div>
       )}
       {phase.inflow_direction && (
-        <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)', lineHeight: 1.6 }}>
+        <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)',
+          lineHeight: 1.6, whiteSpace: 'pre-line' }}>
           <span style={{ color: 'var(--m-text-tertiary)', fontWeight: 700 }}>추가 투입 </span>
-          {phase.inflow_direction}
+          {breakSentences(phase.inflow_direction)}
         </div>
       )}
     </div>
