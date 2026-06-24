@@ -7,6 +7,18 @@ from __future__ import annotations
 import hashlib, json, os, re, secrets, sqlite3, urllib.parse, math, uuid
 import concurrent.futures as _cf
 from contextlib import contextmanager
+
+
+def _as_completed_safe(futs, timeout):
+    """concurrent.futures.as_completed의 전체 타임아웃을 삼키고, 그때까지 완료된 future만 yield.
+    51종목처럼 일부 yfinance 호출이 느려 미완료로 남아도 TimeoutError가 엔드포인트를
+    죽이지 않게 한다(배당·Health·전략 공통 셧다운 방지). 미완료 종목은 자연스럽게 누락."""
+    try:
+        for f in _cf.as_completed(futs, timeout=timeout):
+            yield f
+    except Exception:
+        return
+
 from datetime import datetime
 from functools import wraps
 from threading import Lock
@@ -2042,7 +2054,7 @@ def _market_data():
     results_map = {}
     with _cf.ThreadPoolExecutor(max_workers=12) as ex:
         futs = {ex.submit(_fetch_one, nt): nt for nt in MARKET_TICKERS}
-        for fut in _cf.as_completed(futs, timeout=15):
+        for fut in _as_completed_safe(futs, timeout=15):
             try:
                 item = fut.result(timeout=0)
                 if item:
@@ -2320,7 +2332,7 @@ def _most_active_us() -> list:
         # spark 병렬 fetch
         with _cf.ThreadPoolExecutor(max_workers=10) as ex:
             futs = {ex.submit(_fetch_spark, it['ticker']): i for i, it in enumerate(items)}
-            for fut in _cf.as_completed(futs, timeout=12):
+            for fut in _as_completed_safe(futs, timeout=12):
                 try:
                     items[futs[fut]]['spark'] = fut.result(timeout=0)
                 except Exception:
@@ -2381,7 +2393,7 @@ def _most_active_kr() -> dict:
     if results:
         with _cf.ThreadPoolExecutor(max_workers=10) as ex:
             futs = {ex.submit(_fetch_kr_spark, it): i for i, it in enumerate(results)}
-            for fut in _cf.as_completed(futs, timeout=12):
+            for fut in _as_completed_safe(futs, timeout=12):
                 try:
                     results[futs[fut]]['spark'] = fut.result(timeout=0)
                 except Exception:
@@ -2401,7 +2413,7 @@ def _sector_us() -> list:
     results = []
     with _cf.ThreadPoolExecutor(max_workers=11) as ex:
         futs = [ex.submit(_fetch, item) for item in SECTOR_ETFS.items()]
-        for fut in _cf.as_completed(futs, timeout=15):
+        for fut in _as_completed_safe(futs, timeout=15):
             try:
                 r = fut.result(timeout=0)
                 if r: results.append(r)
@@ -2420,7 +2432,7 @@ def _sector_kr() -> list:
     results = []
     with _cf.ThreadPoolExecutor(max_workers=11) as ex:
         futs = [ex.submit(_fetch, item) for item in KOSPI_SECTOR_ETFS.items()]
-        for fut in _cf.as_completed(futs, timeout=20):
+        for fut in _as_completed_safe(futs, timeout=20):
             try:
                 r = fut.result(timeout=0)
                 if r: results.append(r)
@@ -2558,7 +2570,7 @@ def _sp500_heatmap() -> list:
     result = []
     with _cf.ThreadPoolExecutor(max_workers=29) as ex:
         futs = [ex.submit(_fetch, row) for row in HMAP]
-        for fut in _cf.as_completed(futs, timeout=20):
+        for fut in _as_completed_safe(futs, timeout=20):
             try:
                 r = fut.result(timeout=0)
                 if r: result.append(r)
@@ -2633,7 +2645,7 @@ def _batch_prices(tickers: list) -> dict:
         kr_futs = {ex.submit(_fetch_kr_price, t): t for t in kr}
         all_futs = {**us_futs, **kr_futs}
         try:
-            for fut in _cf.as_completed(all_futs, timeout=15):
+            for fut in _as_completed_safe(all_futs, timeout=15):
                 try:
                     ticker, p = fut.result(timeout=0)
                     if p:
@@ -3492,7 +3504,7 @@ def _stock_peers(ticker: str) -> list:
         peers = []
         with _cf.ThreadPoolExecutor(max_workers=5) as ex:
             futs = {ex.submit(_fetch_peer, pt): pt for pt in all_tickers[:5]}
-            for fut in _cf.as_completed(futs, timeout=8):
+            for fut in _as_completed_safe(futs, timeout=8):
                 try:
                     p = fut.result(timeout=0)
                     if p:
@@ -3917,7 +3929,7 @@ def _sector_stocks_us(sector: str) -> list:
     result_map = {}
     with _cf.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(_fetch, tn): tn[0] for tn in stocks}
-        for fut in _cf.as_completed(futs, timeout=15):
+        for fut in _as_completed_safe(futs, timeout=15):
             try:
                 r = fut.result(timeout=0)
                 result_map[r['ticker']] = r
@@ -3945,7 +3957,7 @@ def _sector_stocks_kr(sector: str) -> list:
     result_map = {}
     with _cf.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(_fetch, tn): tn[0] for tn in stocks}
-        for fut in _cf.as_completed(futs, timeout=20):
+        for fut in _as_completed_safe(futs, timeout=20):
             try:
                 r = fut.result(timeout=0)
                 result_map[r['ticker']] = r
@@ -4463,7 +4475,7 @@ def portfolio_metrics(req: MetricsReq, cu: dict = Depends(get_current_user)):
     results = []
     with _cf.ThreadPoolExecutor(max_workers=min(len(req.holdings) or 1, 20)) as ex:
         futs = {ex.submit(_fetch_metric, h): h for h in req.holdings}
-        for fut in _cf.as_completed(futs, timeout=30):
+        for fut in _as_completed_safe(futs, timeout=30):
             try:
                 results.append(fut.result(timeout=0))
             except Exception:
@@ -4535,6 +4547,56 @@ def portfolio_strategy_cached(scope: str = 'ALL', cu: dict = Depends(get_current
         'data':        result,
     }
 
+# ── AI 전략 비동기 생성 (Cloudflare 100s 한도 우회) ──
+# 동기 대기 시 Sonnet 호출(최대 150s)+metrics가 100초를 넘겨 524가 발생.
+# POST는 백그라운드 스레드를 띄우고 즉시 반환 → 프론트가 /strategy/poll로 결과를 폴링.
+_strategy_jobs = {}              # cache_key -> 'running' | {'error': msg}
+_strategy_jobs_lock = Lock()
+
+def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_meta, verified_facts):
+    try:
+        text = _call_claude(api_key, "claude-sonnet-4-6", prompt, 7000, 150)
+        result = _parse_claude_json(text)
+        result['_metrics_summary'] = summary_meta
+        result['verified_facts'] = verified_facts
+        _set_ai_cache(cache_key, result)
+        try:
+            with _db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO strategy_cache(user_id, scope, fingerprint, result_json, computed_at) "
+                    "VALUES (?,?,?,?,?)",
+                    (user_id, scope, fp, json.dumps(result, ensure_ascii=False), time()))
+        except Exception:
+            pass
+        with _strategy_jobs_lock:
+            _strategy_jobs.pop(cache_key, None)
+    except Exception as e:
+        with _strategy_jobs_lock:
+            _strategy_jobs[cache_key] = {'error': (str(e)[:140] or 'AI 분석 실패')}
+
+@app.get("/api/portfolio/strategy/poll")
+def portfolio_strategy_poll(fp: str, scope: str = 'ALL', cu: dict = Depends(get_current_user)):
+    """비동기 전략 생성 상태 폴링. status: done(+data) | running | error(+error) | unknown."""
+    cache_key = f"strategy:{cu['user_id']}:{fp}"
+    cached = _get_ai_cache(cache_key)
+    if cached is None:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT result_json FROM strategy_cache WHERE user_id=? AND scope=? AND fingerprint=?",
+                (cu['user_id'], scope, fp)).fetchone()
+        if row:
+            try: cached = json.loads(row['result_json'])
+            except Exception: cached = None
+    if cached is not None:
+        return {'status': 'done', 'data': cached}
+    with _strategy_jobs_lock:
+        job = _strategy_jobs.get(cache_key)
+    if job == 'running':
+        return {'status': 'running'}
+    if isinstance(job, dict) and job.get('error'):
+        return {'status': 'error', 'error': job['error']}
+    return {'status': 'unknown'}
+
 @app.post("/api/portfolio/strategy")
 def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled)):
     api_key = _stored_api_key()
@@ -4587,7 +4649,7 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     holdings_list = req.holdings
     with _cf.ThreadPoolExecutor(max_workers=min(len(holdings_list) or 1, 20)) as ex:
         futs = {ex.submit(_fetch_strategy_metric, h): h for h in holdings_list}
-        for fut in _cf.as_completed(futs, timeout=30):
+        for fut in _as_completed_safe(futs, timeout=30):
             try:
                 tkr, m = fut.result(timeout=0)
                 metrics_map[tkr] = m
@@ -4743,38 +4805,26 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
 
 [규칙] allocation_phases 는 {_yrs_eff}년을 5년 단위로 나눈 개수만큼 생성하고, 각 Phase allocation 자산 비중의 합은 반드시 100이어야 한다."""
 
-    try:
-        text = _call_claude(api_key, "claude-sonnet-4-6", prompt, 7000, 150)
-        try:
-            result = _parse_claude_json(text)
-        except Exception as pe:
-            raise HTTPException(500, f"AI 비서가 잠시 자리를 비웠습니다 — 응답 파싱 오류: {str(pe)[:80]}")
-        # 계산된 metrics 요약도 함께 반환
-        result['_metrics_summary'] = {
-            'avg_return': round(avg_ret, 1),
-            'avg_mdd':    round(avg_mdd, 1),
-            'avg_sharpe': round(avg_sh, 2),
-            'total_krw':  round(total_krw),
-            'stock_count': len(enriched),
-        }
-        # 검증된 핵심 수치 — 프론트가 AI 텍스트 대신 이 값을 권위로 표시
-        result['verified_facts'] = verified_facts
-        _set_ai_cache(_cache_key, result)
-        # SQLite에도 저장 — 서버 재시작 후에도 마지막 결과 미리보기 가능
-        try:
-            with _db() as conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO strategy_cache(user_id, scope, fingerprint, result_json, computed_at) "
-                    "VALUES (?,?,?,?,?)",
-                    (cu['user_id'], req.scope, _fp, json.dumps(result, ensure_ascii=False), time())
-                )
-        except Exception:
-            pass
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"AI 비서가 잠시 자리를 비웠습니다 — {str(e)[:100]}")
+    # 동기 대기는 Cloudflare 100s 한도에 걸려 524 → 백그라운드 생성 후 즉시 반환.
+    summary_meta = {
+        'avg_return': round(avg_ret, 1),
+        'avg_mdd':    round(avg_mdd, 1),
+        'avg_sharpe': round(avg_sh, 2),
+        'total_krw':  round(total_krw),
+        'stock_count': len(enriched),
+    }
+    import threading
+    with _strategy_jobs_lock:
+        running = (_strategy_jobs.get(_cache_key) == 'running')
+        if not running:
+            _strategy_jobs[_cache_key] = 'running'
+    if not running:
+        threading.Thread(
+            target=_run_strategy_job,
+            args=(_cache_key, cu['user_id'], req.scope, _fp, prompt, api_key, summary_meta, verified_facts),
+            daemon=True).start()
+    # 프론트는 fingerprint로 /strategy/poll을 폴링해 결과를 받는다.
+    return {'generating': True, 'fingerprint': _fp, 'scope': req.scope}
 
 
 # ─── ETF 비교 도구 ────────────────────────────────────────────────────────
@@ -4958,7 +5008,7 @@ def etf_compare(tickers: str = ''):
     results = []
     with _cf.ThreadPoolExecutor(max_workers=4) as ex:
         futs = {ex.submit(_etf_info, t): t for t in tlist}
-        for fut in _cf.as_completed(futs, timeout=25):
+        for fut in _as_completed_safe(futs, timeout=25):
             try:
                 results.append(fut.result(timeout=0))
             except Exception as e:
@@ -5319,7 +5369,7 @@ def backtest(req: BacktestReq, cu: dict = Depends(require_approved)):
     series_list = []
     with _cf.ThreadPoolExecutor(max_workers=min(len(req.holdings), 20)) as ex:
         futs = {ex.submit(_fetch, h): h for h in req.holdings}
-        for fut in _cf.as_completed(futs, timeout=30):
+        for fut in _as_completed_safe(futs, timeout=30):
             try:
                 r = fut.result(timeout=0)
                 if r: series_list.append(r)
@@ -5600,7 +5650,7 @@ def portfolio_health(req: HealthScoreReq, cu: dict = Depends(require_approved)):
     with _cf.ThreadPoolExecutor(max_workers=min(len(enriched), 20)) as ex:
         futs = [ex.submit(_fetch_m, e) for e in enriched]
         try:
-            for fut in _cf.as_completed(futs, timeout=30):
+            for fut in _as_completed_safe(futs, timeout=30):
                 try:
                     t, m = fut.result(timeout=0)
                     if m: metrics_map[t] = m
@@ -5979,7 +6029,7 @@ def portfolio_correlation(req: CorrelationReq, cu: dict = Depends(require_approv
     series = {}
     with _cf.ThreadPoolExecutor(max_workers=min(len(req.holdings), 20)) as ex:
         futs = [ex.submit(_fetch, h) for h in req.holdings]
-        for fut in _cf.as_completed(futs, timeout=30):
+        for fut in _as_completed_safe(futs, timeout=30):
             try:
                 r = fut.result(timeout=0)
                 if r: series[r[0]] = r[1]
@@ -6155,7 +6205,7 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
     ex = _cf.ThreadPoolExecutor(max_workers=min(len(all_tickers), 24))
     try:
         futs = [ex.submit(_fetch, t) for t in all_tickers]
-        for fut in _cf.as_completed(futs, timeout=22):
+        for fut in _as_completed_safe(futs, timeout=22):
             try:
                 r = fut.result(timeout=0)
                 if r: events.extend(r)
@@ -6211,7 +6261,7 @@ def compare_series(req: CompareSeriesReq, cu: dict = Depends(require_approved)):
     results = []
     with _cf.ThreadPoolExecutor(max_workers=len(req.tickers)) as ex:
         futs = [ex.submit(_fetch, t) for t in req.tickers]
-        for fut in _cf.as_completed(futs, timeout=20):
+        for fut in _as_completed_safe(futs, timeout=20):
             try:
                 r = fut.result(timeout=0)
                 if r: results.append(r)
@@ -6330,7 +6380,7 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
     with _cf.ThreadPoolExecutor(max_workers=min(len(valid), 15)) as ex:
         futs = {ex.submit(_fetch_dividends_single, h['ticker'], req.months_back): h
                 for h in valid}
-        for fut in _cf.as_completed(futs, timeout=35):
+        for fut in _as_completed_safe(futs, timeout=35):
             h = futs[fut]
             try: d = fut.result(timeout=0)
             except Exception: d = None
@@ -6810,9 +6860,36 @@ def _months_until(date_str: str) -> int:
     except Exception:
         return 1
 
+# 80% 신뢰구간(10~90 백분위)의 한쪽 z-점수. Φ(1.2816)=0.90.
+_Z_80 = 1.2816
+
 def _project_goal(current_value: float, monthly: float, months: int,
                   annual_return: float, annual_vol: float, target: float) -> dict:
-    """결정론 월별 중앙값 경로 + 80% 밴드(lognormal 포락) + 상태 + 달성확률 추정."""
+    """목표 달성 궤적·밴드·달성확률 추정 (결정론 + 로그정규 종가 분포).
+
+    ── 산정 모델 (업계·학술 표준) ─────────────────────────────────────────
+    1) 중앙값 경로 (Median path): 월 복리 적립식 미래가치 공식.
+         FV(t) = PV·(1+r)^t + PMT·[((1+r)^t − 1) / r],  r = (1+annual_return)^(1/12) − 1
+       → 결정론적 기대 경로. 적립식 미래가치(annuity FV) 표준식.
+    2) 불확실성 밴드 (80% 신뢰구간): 자산가치를 기하 브라운 운동(GBM)으로 보면
+       종가 V_T는 로그정규분포를 따른다. 분산은 시간에 비례(σ_T = σ·√T)하므로
+       horizon이 길수록 밴드가 넓어진다(불확실성의 시간 누적 — GBM의 근본 성질).
+         상단(90%) = median · exp(+1.2816·σ·√t),  하단(10%) = median · exp(−1.2816·σ·√t)
+       → Betterment·Schwab·Vanguard 등 로보어드바이저 "goal projection"의 10/90 백분위
+         밴드와 동일 방식. (best case는 '상위 10% 낙관 시나리오'이지 기대값이 아님)
+    3) 달성확률 P(V_T ≥ target): 로그정규 누적분포(CDF).
+         P = Φ( (ln(median_T) − ln(target)) / (σ·√T) )
+       median_T = target이면 정확히 50%. 중앙값이 목표보다 높을수록 확률↑.
+    ── 한계(정직 고지) ───────────────────────────────────────────────────
+       단일 로그정규 근사(적립금 시점분산·수익률 자기상관·리밸런싱 미반영)의 결정론 MVP.
+       동일 입력이면 결정론 추정이 몬테카를로와 고도로 상관한다는 결과(Kasten & Kasten,
+       Journal of Financial Planning, 2013)에 근거해 MVP는 결정론 채택, MC는 후속 단계.
+    참고:
+      - Geometric Brownian Motion / lognormal terminal value (Hull, Options Futures
+        and Other Derivatives; Luenberger, Investment Science).
+      - Betterment "How we calculate projections" (10th–90th percentile cone).
+      - Kasten, G. & Kasten, M. (2013) deterministic vs. Monte Carlo equivalence.
+    """
     months = max(1, int(months))
     r = (1.0 + annual_return) ** (1.0 / 12.0) - 1.0
     sigma = max(0.0, annual_vol)
@@ -6826,7 +6903,7 @@ def _project_goal(current_value: float, monthly: float, months: int,
             med = current_value * (1.0 + r) ** t + monthly * (((1.0 + r) ** t - 1.0) / r)
         median_final = med
         if t % step == 0 or t == months:
-            env = math.exp(1.2816 * sigma * math.sqrt(t / 12.0))   # 80%(10/90 백분위)
+            env = math.exp(_Z_80 * sigma * math.sqrt(t / 12.0))   # 80%(10/90 백분위)
             path.append({'month': t, 'median': round(med),
                          'low': round(med / env), 'high': round(med * env)})
     T = months / 12.0
@@ -6840,15 +6917,33 @@ def _project_goal(current_value: float, monthly: float, months: int,
     status = ('on_track' if median_final >= target
               else 'at_risk' if median_final >= target * 0.9
               else 'off_track')
+    # 밴드 폭(배수) — 사용자에게 '낙관/비관이 중앙값의 몇 배인지' 투명 고지용
+    band_mult = math.exp(_Z_80 * sigma * math.sqrt(T)) if T > 0 else 1.0
     return {
         'months': months,
         'current_value': round(current_value),
         'median_final': round(median_final),
+        'optimistic_final': round(median_final * band_mult),   # 상위 10% 낙관
+        'pessimistic_final': round(median_final / band_mult),  # 하위 10% 비관
         'target': round(target),
         'shortfall': round(target - median_final),   # 양수=부족
         'probability': round(prob, 3) if prob is not None else None,
         'status': status,
         'path': path,
+        'methodology': {
+            'model': 'deterministic_median + lognormal_band',
+            'confidence': 0.80,            # 10~90 백분위
+            'z': _Z_80,
+            'annual_return': round(annual_return, 4),
+            'annual_vol': round(sigma, 4),
+            'band_multiple': round(band_mult, 2),   # 낙관=중앙값×band_multiple
+            'horizon_years': round(T, 2),
+            'note': ('밴드는 80% 신뢰구간(상위10%~하위10%)이며 자산가치를 로그정규(GBM)로 '
+                     '가정합니다. 변동성이 시간에 누적되어 horizon이 길수록 넓어집니다. '
+                     '상단은 낙관 시나리오이지 기대값이 아닙니다.'),
+            'refs': ['Betterment 10/90 projection', 'GBM lognormal (Hull; Luenberger)',
+                     'Kasten & Kasten 2013, J. Financial Planning'],
+        },
     }
 
 class GoalReq(BaseModel):

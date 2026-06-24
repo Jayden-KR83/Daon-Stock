@@ -42,6 +42,7 @@ export default function GoalsCard() {
   const [currentValue, setCurrentValue] = useState(null)
   const [busy, setBusy] = useState(false)
   const [loadedOnce, setLoadedOnce] = useState(false)
+  const [showMethod, setShowMethod] = useState(false)
 
   const { data } = useQuery({ queryKey: ['goals'], queryFn: listGoals, staleTime: 60_000 })
 
@@ -188,6 +189,8 @@ export default function GoalsCard() {
               <span style={{ fontSize: 18, fontWeight: 900, color: 'var(--m-text)',
                 fontVariantNumeric: 'tabular-nums' }}>
                 달성확률 {(proj.probability * 100).toFixed(0)}%
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--m-text-tertiary)',
+                  marginLeft: 5 }}>P(만기값 ≥ 목표)</span>
               </span>
             )}
           </div>
@@ -208,6 +211,18 @@ export default function GoalsCard() {
             ))}
           </div>
 
+          {/* 낙관·비관 범위 — best case는 '상위 10% 낙관'이지 기대값이 아님을 명확히 */}
+          {proj.optimistic_final != null && (
+            <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)',
+              lineHeight: 1.6, marginBottom: 10 }}>
+              <strong style={{ color: 'var(--m-text)' }}>80% 신뢰구간</strong>{' '}
+              {fmtKRW(proj.pessimistic_final)}
+              <span style={{ color: 'var(--m-text-tertiary)' }}> (비관·하위10%)</span>
+              {' ~ '}{fmtKRW(proj.optimistic_final)}
+              <span style={{ color: 'var(--m-text-tertiary)' }}> (낙관·상위10%)</span>
+            </div>
+          )}
+
           {/* 예상 궤적 — 중앙값 + 80% 밴드 */}
           <ResponsiveContainer width="100%" height={180}>
             <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
@@ -218,7 +233,7 @@ export default function GoalsCard() {
                                   : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v}
                 domain={['auto', 'auto']} />
               <Tooltip
-                formatter={(v, n) => [fmtKRW(v), n === 'median' ? '중앙값' : n === 'band' ? '80% 범위' : '하단']}
+                formatter={(v, n) => [fmtKRW(v), n === 'median' ? '중앙값' : n === 'band' ? '80% 신뢰구간(10~90%)' : '하단']}
                 labelFormatter={l => `${l}년 차`}
                 contentStyle={{ borderRadius: 4, fontSize: 11,
                   border: '1px solid var(--m-outline-variant)', background: 'var(--m-surface)' }} />
@@ -242,6 +257,48 @@ export default function GoalsCard() {
               ? '현재 계획대로면 목표 시점에 목표 금액을 넘어설 것으로 추정됩니다.'
               : `목표에 ${fmtKRW(Math.abs(shortfall))} 부족할 것으로 추정됩니다. 월 납입을 늘리거나 목표 시점을 늦추면 달성 확률이 올라갑니다.`}
           </div>
+
+          {/* 산정 근거 · 방법론 (신뢰 확보 — 학술/업계 표준 + 레퍼런스) */}
+          {proj.methodology && (
+            <div style={{ marginTop: 8 }}>
+              <button onClick={() => setShowMethod(s => !s)} style={{
+                background: 'transparent', border: 'none', padding: '2px 0', cursor: 'pointer',
+                color: 'var(--m-primary)', fontSize: 11, fontWeight: 800, fontFamily: 'inherit' }}>
+                산정 근거 · 방법론 {showMethod ? '▴ 닫기' : '▾ 보기'}
+              </button>
+              {showMethod && (
+                <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)',
+                  lineHeight: 1.7, marginTop: 6, background: 'var(--m-surface-variant)',
+                  border: '1px solid var(--m-outline-variant)', borderRadius: 4, padding: '9px 11px' }}>
+                  <div style={{ marginBottom: 5 }}>
+                    <strong style={{ color: 'var(--m-text)' }}>① 중앙값 경로</strong> — 월 복리 적립식
+                    미래가치: <code>PV·(1+r)<sup>t</sup> + 월납입·[((1+r)<sup>t</sup>−1)/r]</code>
+                    (r = 연수익률의 월환산).
+                  </div>
+                  <div style={{ marginBottom: 5 }}>
+                    <strong style={{ color: 'var(--m-text)' }}>② 달성확률</strong> — 자산가치를
+                    로그정규(기하 브라운 운동)로 보고{' '}
+                    <code>P(만기값 ≥ 목표) = Φ((ln·중앙값 − ln·목표) / (σ√T))</code>.
+                    중앙값이 목표와 같으면 정확히 50%입니다.
+                  </div>
+                  <div style={{ marginBottom: 5 }}>
+                    <strong style={{ color: 'var(--m-text)' }}>③ 80% 밴드</strong> — 상위10%~하위10%
+                    신뢰구간 = <code>중앙값 × exp(±1.2816·σ·√t)</code>. 연 변동성
+                    σ={(proj.methodology.annual_vol * 100).toFixed(0)}% 가정에서 현재 낙관 상단은
+                    중앙값의 약 <strong style={{ color: 'var(--m-text)' }}>{proj.methodology.band_multiple}배</strong>.
+                    변동성이 시간에 누적돼 기간이 길수록 넓어집니다(GBM의 본질). <strong style={{ color: 'var(--m-text)' }}>상단은
+                    낙관 시나리오이지 기대값이 아닙니다.</strong>
+                  </div>
+                  <div style={{ color: 'var(--m-text-tertiary)', fontSize: 10 }}>
+                    방식: Betterment 10/90 projection · 로그정규 종가분포(Hull,
+                    <i> Options, Futures…</i>; Luenberger, <i>Investment Science</i>) ·
+                    결정론≈몬테카를로 동등성(Kasten &amp; Kasten, <i>J. Financial Planning</i>, 2013).
+                    적립금 시점분산·리밸런싱 미반영 결정론 추정.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 

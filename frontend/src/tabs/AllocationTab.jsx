@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'motion/react'
-import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
+import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, pollPortfolioStrategy, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
 import { useStore } from '../store'
 import LogoCircle from '../components/LogoCircle'
 import BorderBeam from '../components/BorderBeam'
@@ -300,7 +300,7 @@ export default function AllocationTab() {
     setStrategyLoading(true); setStrategyErr('')
     if (forceRefresh) setStrategyReport(null)
     try {
-      const result = await getPortfolioStrategy({
+      const res = await getPortfolioStrategy({
         holdings: targets.map(h => ({ ...h })),
         prices,
         scope: strategyAcc,
@@ -308,8 +308,28 @@ export default function AllocationTab() {
         years_to_retirement: Number(localStorage.getItem('daon_retire_years')) || null,
         monthly_inflow: Number(localStorage.getItem('daon_monthly_inflow')) || null,
       })
-      setStrategyReport(result)
-      setStrategyComputedAt(Math.floor(Date.now() / 1000))
+      // 캐시 적중 → 즉시 결과. 미스 → 백그라운드 생성 중(generating) → 폴링.
+      if (res && !res.generating) {
+        setStrategyReport(res)
+        setStrategyComputedAt(Math.floor(Date.now() / 1000))
+        return
+      }
+      const fp = res?.fingerprint
+      const started = Date.now()
+      // AI 생성은 1~3분 소요 — 5초 간격으로 최대 ~3.5분 폴링 (Cloudflare 100s 한도 우회)
+      while (fp && Date.now() - started < 210_000) {
+        await new Promise(r => setTimeout(r, 5000))
+        let p
+        try { p = await pollPortfolioStrategy(fp, strategyAcc) } catch { continue }
+        if (p.status === 'done') {
+          setStrategyReport(p.data)
+          setStrategyComputedAt(Math.floor(Date.now() / 1000))
+          return
+        }
+        if (p.status === 'error') { setStrategyErr(p.error || 'AI 분석 실패'); return }
+        // running / unknown → 계속 폴링
+      }
+      setStrategyErr('분석이 지연되고 있습니다 — 잠시 후 다시 시도해주세요')
     } catch (e) {
       const msg = e.response?.data?.detail || e.message || '분석 실패'
       setStrategyErr(msg)

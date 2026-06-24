@@ -42,9 +42,12 @@ export const analyzePortfolio  = (body)      => api.post('/portfolio/analyze', b
 export const getPortfolioMetrics  = (body)   => api.post('/portfolio/metrics', body, { timeout: 120_000 }).then(r => r.data)
 export const getPortfolioMetricsCached = (scope = 'ALL') =>
   api.get('/portfolio/metrics/cached', { params: { scope } }).then(r => r.data)
-export const getPortfolioStrategy = (body)   => api.post('/portfolio/strategy', body, { timeout: 180_000 }).then(r => r.data)
+export const getPortfolioStrategy = (body)   => api.post('/portfolio/strategy', body, { timeout: 60_000 }).then(r => r.data)
 export const getPortfolioStrategyCached = (scope = 'ALL') =>
   api.get('/portfolio/strategy/cached', { params: { scope } }).then(r => r.data)
+// 비동기 전략 생성 폴링 — status: done(+data) | running | error(+error) | unknown
+export const pollPortfolioStrategy = (fp, scope = 'ALL') =>
+  api.get('/portfolio/strategy/poll', { params: { fp, scope } }).then(r => r.data)
 
 // ETF 비교 도구
 export const getEtfCompare    = (tickers) =>
