@@ -1126,6 +1126,83 @@ function DiscoveryHorizon({ dh }) {
   )
 }
 
+/* 월 배당 전환 시뮬레이터 — AI 제안(계좌·자산·비중)을 시드로, 사용자가 비중·가정 배당률을
+   직접 조정하면 예상 월 현금흐름을 결정론으로 즉시 재계산. 예상월 = 총액 × 비중% × 배당률% ÷ 12. */
+function _extractYield(s) {
+  const m = String(s || '').match(/(\d+(?:\.\d+)?)\s*%/)
+  return m ? Number(m[1]) : null
+}
+function DividendSimulator({ sim, totalKrw }) {
+  const seed = React.useMemo(() => (sim?.rows || []).map(r => ({
+    account: r.account, asset: r.asset,
+    weight: Number(r.weight) || 0,
+    yieldPct: _extractYield(r.monthly_cashflow) ?? 3.0,
+  })), [sim])
+  const [rows, setRows] = useState(seed)
+  const [base, setBase] = useState(Math.round(totalKrw) || 0)
+  React.useEffect(() => { setRows(seed) }, [seed])
+  React.useEffect(() => { if (totalKrw) setBase(Math.round(totalKrw)) }, [totalKrw])
+
+  const won = n => '₩' + Math.round(n || 0).toLocaleString()
+  const monthlyOf = r => base * (r.weight / 100) * (r.yieldPct / 100) / 12
+  const totalMonthly = rows.reduce((s, r) => s + monthlyOf(r), 0)
+  const weightSum = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0)
+  const setRow = (i, k, v) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
+  const inp = {
+    width: 52, textAlign: 'right', padding: '3px 5px', borderRadius: 2,
+    border: '1px solid var(--m-outline-variant)', background: 'var(--m-surface)',
+    color: 'var(--m-text)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit',
+  }
+  return (
+    <div>
+      {/* 기준 설정: 전환 대상 총액 + 합계 월 현금흐름 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span className="m3-label">전환 대상 총액</span>
+        <input type="number" value={base} onChange={e => setBase(Number(e.target.value) || 0)}
+          style={{ ...inp, width: 128 }} />
+        <span style={{ fontSize: 11, color: 'var(--m-text-tertiary)' }}>원</span>
+        <span style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 900, color: 'var(--m-positive)',
+          fontVariantNumeric: 'tabular-nums' }}>월 {won(totalMonthly)}</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+          <thead>
+            <tr style={{ color: 'var(--m-text-tertiary)' }}>
+              <th style={thStyle}>계좌</th><th style={thStyle}>추천 자산</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>비중%</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>배당률%</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>예상 월</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--m-outline-variant)' }}>
+                <td style={tdStyle}>{r.account}</td>
+                <td style={tdStyle}>{r.asset}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                  <input type="number" value={r.weight} min={0} max={100}
+                    onChange={e => setRow(i, 'weight', Number(e.target.value) || 0)} style={inp} />
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                  <input type="number" value={r.yieldPct} step="0.1" min={0} max={20}
+                    onChange={e => setRow(i, 'yieldPct', Number(e.target.value) || 0)} style={inp} />
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums' }}>{won(monthlyOf(r))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="ko-keep" style={{ fontSize: 10, lineHeight: 1.5, marginTop: 6,
+        color: weightSum === 100 ? 'var(--m-text-tertiary)' : '#D97706' }}>
+        {weightSum !== 100 ? `⚠ 비중 합계 ${weightSum}% (100% 기준 권장) · ` : ''}
+        예상 월 = 총액 × 비중% × 배당률% ÷ 12. 가정 배당률 기반 추정이며 실제 배당은 종목·시기마다 다릅니다.
+      </div>
+    </div>
+  )
+}
+
 function DaonAIReport({ data }) {
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
@@ -1135,8 +1212,7 @@ function DaonAIReport({ data }) {
 
   return (
     <div>
-      {/* 검증된 핵심 수치 — AI 텍스트보다 우선하는 권위 수치 (정합성 최우선) */}
-      <VerifiedFacts vf={data.verified_facts} />
+      {/* 검증된 핵심 수치 블록은 프론트 비노출 (백엔드 verified_facts는 프롬프트 변수바인딩용으로 유지) */}
 
       {/* 전문가 총평 */}
       <div className="mono-card" style={{ marginBottom: 12 }}>
@@ -1177,36 +1253,13 @@ function DaonAIReport({ data }) {
       {data.dividend_simulation
         && (data.dividend_simulation.rows?.length > 0 || data.dividend_simulation.warning) && (
         <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-header">
-            <div className="mono-section-title is-accent">월 배당 전환 시뮬레이션</div>
-            {data.dividend_simulation.total_monthly && (
-              <span className="mono-pill" style={{ color: 'var(--m-positive)' }}>
-                월 {data.dividend_simulation.total_monthly}
-              </span>
-            )}
+          <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>월 배당 전환 시뮬레이션</div>
+          <div className="mono-section-sub ko-keep" style={{ marginBottom: 8 }}>
+            비중·가정 배당수익률을 직접 조정하면 예상 월 현금흐름이 즉시 다시 계산됩니다.
           </div>
           {data.dividend_simulation.rows?.length > 0 && (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
-                <thead>
-                  <tr style={{ color: 'var(--m-text-tertiary)' }}>
-                    <th style={thStyle}>계좌</th><th style={thStyle}>추천 자산</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>비중</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>예상 월</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.dividend_simulation.rows.map((r, i) => (
-                    <tr key={i} style={{ borderTop: '1px solid var(--m-outline-variant)' }}>
-                      <td style={tdStyle}>{r.account}</td>
-                      <td style={tdStyle}>{r.asset}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.weight}%</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{r.monthly_cashflow}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DividendSimulator sim={data.dividend_simulation}
+              totalKrw={data.verified_facts?.total_krw || data._metrics_summary?.total_krw || 0} />
           )}
           {data.dividend_simulation.warning && (
             <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--m-surface-variant)',
