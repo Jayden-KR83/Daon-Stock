@@ -4534,18 +4534,52 @@ def portfolio_strategy_cached(scope: str = 'ALL', cu: dict = Depends(get_current
         'data':        result,
     }
 
+def _discovery_candidates_by_horizon(limit: int = 6) -> dict:
+    """저점발굴(discovery_scores)을 투자 지평선별로 매칭 (시계열 해석 엔진 연동).
+    저점발굴은 고위험 투기 영역 → 가드레일로 막는 대신 '지평선 가중치'로 성격을 바꾼다.
+      · 단기(1~3년): 생존력(런웨이>3년)+바닥다지기(pct_momentum>80) 통과 종목만 — 가격 안정성.
+      · 중기(5~10년): R&D 집중도(rnd_intensity) 최상위 — AI·바이오 상업화 알파(≈5년 타임라인).
+      · 장기(11~15년·은퇴 임박): 노출을 0%로 수렴(Decay) — 자본손실 위험 동결(룰 강제)."""
+    out = {'short': [], 'mid': [],
+           'long_rule': '은퇴 임박(장기) 구간: 고위험 혁신주 목표 비중 0%로 수렴(decay).'}
+    try:
+        with _db() as conn:
+            short_rows = conn.execute(
+                "SELECT ticker, name, composite_score, runway_years, pct_momentum "
+                "FROM discovery_scores WHERE market='US' AND gate_pass=1 "
+                "AND runway_years > 3 AND pct_momentum > 80 "
+                "ORDER BY composite_score DESC LIMIT ?", (limit,)).fetchall()
+            mid_rows = conn.execute(
+                "SELECT ticker, name, composite_score, rnd_intensity "
+                "FROM discovery_scores WHERE market='US' AND gate_pass=1 "
+                "AND rnd_intensity IS NOT NULL "
+                "ORDER BY rnd_intensity DESC LIMIT ?", (limit,)).fetchall()
+        out['short'] = [{'ticker': r['ticker'], 'name': r['name'],
+                         'runway_years': r['runway_years'], 'base_building': r['pct_momentum'],
+                         'score': round(r['composite_score'] or 0, 1)} for r in short_rows]
+        out['mid'] = [{'ticker': r['ticker'], 'name': r['name'],
+                       'rnd_intensity': r['rnd_intensity'],
+                       'score': round(r['composite_score'] or 0, 1)} for r in mid_rows]
+    except Exception:
+        pass
+    return out
+
+
 # ── AI 전략 비동기 생성 (Cloudflare 100s 한도 우회) ──
 # 동기 대기 시 Sonnet 호출(최대 150s)+metrics가 100초를 넘겨 524가 발생.
 # POST는 백그라운드 스레드를 띄우고 즉시 반환 → 프론트가 /strategy/poll로 결과를 폴링.
 _strategy_jobs = {}              # cache_key -> 'running' | {'error': msg}
 _strategy_jobs_lock = Lock()
 
-def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_meta, verified_facts):
+def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_meta, verified_facts,
+                      discovery_horizon=None):
     try:
         text = _call_claude(api_key, "claude-sonnet-4-6", prompt, 7000, 150)
         result = _parse_claude_json(text)
         result['_metrics_summary'] = summary_meta
         result['verified_facts'] = verified_facts
+        if discovery_horizon:
+            result['discovery_horizon'] = discovery_horizon
         _set_ai_cache(cache_key, result)
         try:
             with _db() as conn:
@@ -4738,6 +4772,26 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     _inflow_str = (f"₩{req.monthly_inflow:,.0f}/월"
                    if (req.monthly_inflow and req.monthly_inflow > 0) else "미입력")
 
+    # 저점발굴 시계열 연동 — 지평선별 후보 풀 + 장기 decay 규칙
+    disc = _discovery_candidates_by_horizon()
+    def _disc_line(items, extra):
+        return ('; '.join(f"{c['ticker']}({c['name']}, {extra(c)})" for c in items) or '해당 없음')
+    disc_section = ''
+    if disc.get('short') or disc.get('mid'):
+        disc_section = f"""
+
+=== 저점발굴 시계열 연동 (고위험 혁신주 — 지평선별 가중치) ===
+- 단기(1~3년) 후보 [생존 런웨이>3년 + 바닥다지기>80, 가격 안정성 우선]:
+    {_disc_line(disc['short'], lambda c: f"런웨이{c['runway_years']}y·바닥{c['base_building']}")}
+- 중기(5~10년) 후보 [R&D 집중도 최상위, AI·바이오 상업화 알파]:
+    {_disc_line(disc['mid'], lambda c: f"R&D집중도{c['rnd_intensity']}")}
+- 장기(11~15년·은퇴 임박): {disc['long_rule']}
+[저점발굴 적용 규칙]
+- 단기 Phase: 위 단기 후보 중에서만, 총자산의 소액(권장 ≤5%)으로 분산 노출(위성 비중).
+- 중기 Phase: 위 중기 후보에 구조적 알파 추구 비중을 배분(여전히 핵심 아닌 위성).
+- 장기/은퇴 임박 Phase: 이런 고위험 투기 혁신주 비중을 0%로 수렴시켜 자본손실 위험을 동결하라.
+- 저점발굴 종목은 투기적이므로 절대 핵심(core) 자산으로 다루지 마라."""
+
     prompt = f"""[역할] 당신은 월스트리트 출신 세계 최고 수준의 자산 배분가(Asset Allocator)이자 글로벌 매크로 분석가입니다. 보유 자산과 은퇴까지 남은 시간(Life Timeline)을 결합해 5년 단위 포괄적 자산배분(주식·채권·금·부동산/리츠·암호화폐·연금) 전략을 도출합니다. 명료하고 냉철한 전문 어조로 한국어로 작성하세요.
 
 === 입력 데이터 ===
@@ -4764,6 +4818,7 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
 2. 총 평가 자산은 반드시 ₩{total_krw:,.0f}만 사용하라. 다른 총액을 쓰지 마라.
 3. 절세(손절-상쇄, Tax-Loss Harvesting) 제안은 **동일 과세권 안에서만** 하라. 미국 주식 손절은 미국 계좌군의 미국 양도세(연 250만원 공제) 범위에서만 매칭하고, 한국 계좌(ISA/연금/일반)와 미국 계좌를 **한 문장의 절세 전략으로 섞지 마라**.
 4. 각 서술 문장에서 가장 핵심이 되는 어구 1개를 **별표 두 개**로 감싸 강조하라. 예: 엔비디아 비중이 **과도하게 집중**되어 있습니다. (문장당 최대 1회, 수치 자체는 감싸지 말 것)
+{disc_section}
 
 [작성 지침]
 - [1] 종합 리스크 진단: 은퇴 잔여 시간 대비 현재 변동성(MDD)·섹터 쏠림이 유효한지, 절세 계좌(DC/ISA 등)의 혜택이 현재 종목 구성에 올바르게 활용되는지 세무/금융 관점으로 진단.
@@ -4808,7 +4863,7 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     if not running:
         threading.Thread(
             target=_run_strategy_job,
-            args=(_cache_key, cu['user_id'], req.scope, _fp, prompt, api_key, summary_meta, verified_facts),
+            args=(_cache_key, cu['user_id'], req.scope, _fp, prompt, api_key, summary_meta, verified_facts, disc),
             daemon=True).start()
     # 프론트는 fingerprint로 /strategy/poll을 폴링해 결과를 받는다.
     return {'generating': True, 'fingerprint': _fp, 'scope': req.scope}
@@ -6412,7 +6467,7 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
     upcoming.sort(key=lambda x: x['ex_date'])
 
     return {
-        'events':              events[:50],     # 최근 50건만
+        'events':              events[:400],    # 분기 히스토그램(다년) 집계용 — 넉넉히
         'upcoming':            upcoming[:20],
         'annual_estimate_krw': round(annual_total, 0),
         'ttm_received_krw':    round(ttm_total, 0),

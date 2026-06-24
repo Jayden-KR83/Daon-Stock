@@ -997,8 +997,10 @@ function VerifiedFacts({ vf }) {
         <span className="mono-pill" style={{ color: 'var(--m-text-tertiary)' }}>실시간 계산값</span>
       </div>
       <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
-        margin: '4px 0 10px', lineHeight: 1.5 }}>
-        보유 데이터로 직접 계산한 값 — AI 서술과 무관하게 정확합니다.
+        margin: '4px 0 10px', lineHeight: 1.55 }}>
+        아래 AI 전략 글은 가끔 숫자를 잘못 인용할 수 있습니다. 이 표는 시스템이 회원님의 보유 데이터로
+        <strong style={{ color: 'var(--m-text-secondary)' }}> 직접 계산한 정확한 값</strong>이니,
+        AI 글의 수치와 다르면 <strong style={{ color: 'var(--m-text-secondary)' }}>이 값을 기준</strong>으로 삼으세요.
       </div>
 
       <div style={{ marginBottom: 10 }}>
@@ -1071,6 +1073,59 @@ function VerifiedFacts({ vf }) {
   )
 }
 
+/* 저점발굴 시계열 매칭 — 단/중/장기 지평선별 고위험 혁신주 위성 후보(백엔드 결정론값).
+   가드레일 대신 '시간 지평선 가중치'로 성격을 바꾸는 구조: 단기=생존력, 중기=R&D알파, 장기=0% 수렴. */
+function DiscoveryHorizon({ dh }) {
+  if (!dh || ((dh.short?.length || 0) === 0 && (dh.mid?.length || 0) === 0)) return null
+  const Chips = ({ items, meta }) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+      {items.map((c, i) => (
+        <span key={i} style={{ fontSize: 11, color: 'var(--m-text)',
+          border: '1px solid var(--m-outline-variant)', borderRadius: 2, padding: '3px 7px' }}>
+          <strong>{c.ticker}</strong>
+          <span style={{ color: 'var(--m-text-tertiary)', marginLeft: 4 }}>{meta(c)}</span>
+        </span>
+      ))}
+    </div>
+  )
+  const Row = ({ label, desc, children }) => (
+    <div style={{ padding: '8px 0', borderTop: '1px solid var(--m-outline-variant)' }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--m-text)', marginBottom: 2 }}>{label}</div>
+      <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
+        marginBottom: 6, lineHeight: 1.5 }}>{desc}</div>
+      {children}
+    </div>
+  )
+  return (
+    <div className="mono-card" style={{ marginBottom: 12 }}>
+      <div className="mono-section-title is-accent" style={{ marginBottom: 2 }}>
+        저점발굴 시계열 매칭
+      </div>
+      <div className="mono-section-sub ko-keep" style={{ marginBottom: 6 }}>
+        고위험 혁신주(AI·바이오)를 지평선별 <strong>위성(satellite)</strong> 비중으로만 — 핵심 자산 아님.
+      </div>
+      {dh.short?.length > 0 && (
+        <Row label="단기 (1~3년) · 안정성 우선"
+          desc="생존 런웨이 3년 초과 + 바닥다지기 80 초과 — 부도·증자 리스크 낮은 종목만, 소액(≤5%) 분산">
+          <Chips items={dh.short} meta={c => `런웨이 ${c.runway_years}y · 바닥 ${c.base_building}`} />
+        </Row>
+      )}
+      {dh.mid?.length > 0 && (
+        <Row label="중기 (5~10년) · 구조적 알파"
+          desc="R&D 집중도 최상위 — AI·바이오 메가트렌드 상업화(≈5년) 알파 포착">
+          <Chips items={dh.mid} meta={c => `R&D ${c.rnd_intensity}`} />
+        </Row>
+      )}
+      <Row label="장기 (11~15년·은퇴 임박) · 0% 수렴"
+        desc={dh.long_rule || '고위험 혁신주 비중 0%로 수렴 — 자본손실 위험 동결'}>
+        <span style={{ fontSize: 11, color: 'var(--m-negative)', fontWeight: 700 }}>
+          목표 비중 0% (Decay)
+        </span>
+      </Row>
+    </div>
+  )
+}
+
 function DaonAIReport({ data }) {
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
@@ -1114,6 +1169,9 @@ function DaonAIReport({ data }) {
           </div>
         </div>
       )}
+
+      {/* 저점발굴 시계열 매칭 — 지평선별 위성(satellite) 후보 + 장기 decay */}
+      <DiscoveryHorizon dh={data.discovery_horizon} />
 
       {/* [3] 월 배당 전환 시뮬레이션 */}
       {data.dividend_simulation

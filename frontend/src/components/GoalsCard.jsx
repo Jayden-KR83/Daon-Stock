@@ -248,14 +248,15 @@ export default function GoalsCard() {
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* 권고 */}
+          {/* 조언 — '그래서 무엇을 할까' 한두 문장 */}
           <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text-secondary)',
-            lineHeight: 1.6, marginTop: 8,
+            lineHeight: 1.65, marginTop: 8,
             background: 'var(--m-surface-variant)', border: '1px solid var(--m-outline-variant)',
             borderRadius: 4, padding: '8px 10px' }}>
+            <strong style={{ color: 'var(--m-text)', marginRight: 4 }}>조언</strong>
             {proj.status === 'on_track'
-              ? '현재 계획대로면 목표 시점에 목표 금액을 넘어설 것으로 추정됩니다.'
-              : `목표에 ${fmtKRW(Math.abs(shortfall))} 부족할 것으로 추정됩니다. 월 납입을 늘리거나 목표 시점을 늦추면 달성 확률이 올라갑니다.`}
+              ? '지금처럼 매달 꾸준히 납입을 이어가면 목표를 넘어설 것으로 보입니다. 변동성 큰 자산을 무리하게 늘릴 필요는 없습니다.'
+              : `목표에 ${fmtKRW(Math.abs(shortfall))} 부족할 것으로 추정됩니다. 달성 확률을 높이려면 ① 월 납입 늘리기 ② 목표 시점 미루기 ③ 목표 금액 낮추기 중 하나가 필요하며, 가장 손쉬운 건 월 납입을 조금씩 올리는 것입니다.`}
           </div>
 
           {/* 산정 근거 · 방법론 (신뢰 확보 — 학술/업계 표준 + 레퍼런스) */}
@@ -270,6 +271,15 @@ export default function GoalsCard() {
                 <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)',
                   lineHeight: 1.7, marginTop: 6, background: 'var(--m-surface-variant)',
                   border: '1px solid var(--m-outline-variant)', borderRadius: 4, padding: '9px 11px' }}>
+                  <div style={{ marginBottom: 8, padding: '7px 9px', borderRadius: 3,
+                    background: 'var(--m-surface)', border: '1px solid var(--m-outline-variant)' }}>
+                    <strong style={{ color: 'var(--m-text)' }}>쉽게 말하면</strong> — ① 매달 넣는 돈에
+                    <strong style={{ color: 'var(--m-text)' }}> 이자가 이자를 낳는 복리</strong>가 붙어 나중에 얼마가 될지
+                    가운데값을 그리고(중앙값), ② 주가는 오르락내리락하니 <strong style={{ color: 'var(--m-text)' }}>잘 풀릴 때와
+                    안 풀릴 때의 범위</strong>를 함께 그린 뒤(80% 밴드), ③ 그 범위에서
+                    <strong style={{ color: 'var(--m-text)' }}> 목표 금액을 넘을 가능성</strong>이 몇 %인지 센 것이
+                    달성확률입니다. 기간이 길수록 미래는 더 불확실해서 범위가 넓어집니다.
+                  </div>
                   <div style={{ marginBottom: 5 }}>
                     <strong style={{ color: 'var(--m-text)' }}>① 중앙값 경로</strong> — 월 복리 적립식
                     미래가치: <code>PV·(1+r)<sup>t</sup> + 월납입·[((1+r)<sup>t</sup>−1)/r]</code>
