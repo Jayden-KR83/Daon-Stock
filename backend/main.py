@@ -598,8 +598,11 @@ KR_SECTOR_TOP = {
                   ('000100','유한양행'),('069620','대웅제약'),('185750','종근당'),
                   ('326030','SK바이오사이언스'),('141080','레고켐바이오'),('237690','에스티팜'),('000520','삼일제약')],
     '방산·우주':  [('012450','한화에어로스페이스'),('047810','한국항공우주'),('000880','한화'),
-                  ('272210','한화시스템'),('042660','한화오션'),('329180','HD현대중공업'),
-                  ('009540','HD한국조선해양'),('010140','삼성중공업'),('064350','현대로템'),('079550','LIG넥스원')],
+                  ('272210','한화시스템'),('064350','현대로템'),('079550','LIG넥스원')],
+    # 조선·중공업: 본질이 상선·LNGC 위주 시클리컬 → '방산·우주' 멀티플 오적용 방지(섹터중립 밸류 정합).
+    # (군함 매출 일부 있으나 상업 조선이 본질. HD한국조선해양은 조선 지주사.)
+    '조선·중공업':[('009540','HD한국조선해양'),('329180','HD현대중공업'),
+                  ('042660','한화오션'),('010140','삼성중공업')],
     '화학·에너지':[('051910','LG화학'),('003670','포스코퓨처엠'),('010950','S-Oil'),
                   ('096770','SK이노베이션'),('011170','롯데케미칼'),('005490','POSCO홀딩스'),
                   ('004020','현대제철'),('078930','GS'),('267250','HD현대'),('011790','SKC')],
@@ -3147,7 +3150,11 @@ def _etf_score(rows: list) -> list:
                 if grp[gname] is not None:
                     num += w * grp[gname]; den += w
             base = num / den if den > 0 else 0.0
-            r['composite_score'] = round(base * (r['data_completeness'] / 3.0), 2)  # 결측 패널티(/3)
+            # 결측 패널티: 한국 ETF는 보수율(저비용)이 *구조적으로* 미제공 → 그걸 결측으로 벌하면
+            # 한·미 형평성 붕괴(고성과 KR ETF가 부당 강등). KR은 달성가능 축수(추세+규모=2) 기준으로
+            # 재정규화, 미국은 3축 기준. 같은 시장 안에서 진짜 결측(예: 추세 누락)만 페널티.
+            expected = 2 if r.get('market') == 'KR' else 3
+            r['composite_score'] = round(base * min(1.0, r['data_completeness'] / expected), 2)
             ok = r.get('current_price') is not None and grp['momentum'] is not None
             r['gate_pass'] = 1 if ok else 0
             r['gate_fail_reason'] = '' if ok else '데이터 부족'
@@ -3293,6 +3300,8 @@ def _discovery_innov_metrics(ticker: str, market: str) -> dict:
         pass
     return m
 
+# 임상 단계 바이오(3상 비용 폭증·유증 희석 위험 큼) → 런웨이 게이트 1.5년. AI SW 등은 1.0년.
+_BIO_CLINICAL_CATS = {'AI 신약', 'AI 항체', '유전자편집', '유전자치료', '유전체', '합성생물학'}
 # 저점발굴 신호 → higher_better
 _INNOV_SIGNALS = {'mod_val': False, 'rnd_intensity': True, 'pct_momentum': True, 'runway_years': True}
 _INNOV_W = {'mod_val': 0.30, 'rnd_intensity': 0.20, 'pct_momentum': 0.35, 'runway_years': 0.15}
@@ -3301,15 +3310,17 @@ def _innov_score(rows: list) -> list:
     """저점발굴 점수 — 변형밸류(PSR÷R&D) 30·파이프라인(R&D) 20·바닥다지기 35·생존 15. 순수함수."""
     rows = [dict(r) for r in rows]
     for r in rows:
-        # 변형 밸류: PSR ÷ R&D집중도 (낮을수록 저평가 + 진짜 파이프라인). 둘 다 있을 때만.
-        r['mod_val'] = (round(r['psr'] / r['rnd_intensity'], 2)
-                        if r.get('psr') and r.get('rnd_intensity') and r['rnd_intensity'] > 0 else None)
-        # 런웨이는 99(흑자) 상한 캡 — 순위 왜곡 방지
-        if r.get('runway_years') is not None:
-            r['runway_years'] = min(r['runway_years'], 10.0)
-        # R&D집중도 상한 캡(무모한 소각이 1위 되는 것 방지)
+        # ① R&D집중도 상한 캡을 mod_val 계산 *전에* 적용 — 캡 전 값(예 RXRX 720%)으로 나누면
+        #    무모한 현금소각 기업의 변형밸류가 비정상적으로 낮아져(=저평가 오인) 상위 독식.
+        #    캡 후 값으로 계산하면 mod_val ≥ PSR/3.0 하한이 보장됨(분모 폭주 방지).
         if r.get('rnd_intensity') is not None:
             r['rnd_intensity'] = min(r['rnd_intensity'], 3.0)
+        # 런웨이는 흑자(99) 상한 캡 — 순위 왜곡 방지
+        if r.get('runway_years') is not None:
+            r['runway_years'] = min(r['runway_years'], 10.0)
+        # ② 변형 밸류: PSR ÷ (캡 적용된)R&D집중도. 낮을수록 저평가 + 진짜 파이프라인. 둘 다 있을 때만.
+        r['mod_val'] = (round(r['psr'] / r['rnd_intensity'], 2)
+                        if r.get('psr') and r.get('rnd_intensity') and r['rnd_intensity'] > 0 else None)
     sig_vals = {s: [r[s] for r in rows if r.get(s) is not None] for s in _INNOV_SIGNALS}
     for r in rows:
         pcts = {}
@@ -3328,12 +3339,14 @@ def _innov_score(rows: list) -> list:
                 num += w * pcts[s]; den += w
         base = num / den if den > 0 else 0.0
         r['composite_score'] = round(base * (r['data_completeness'] / 4.0), 2)   # 결측 패널티(/4)
-        # 생존 게이트: 현재가 + 바닥다지기 데이터 + 런웨이 1년 이상(좀비 배제)
+        # 생존 게이트: 현재가 + 바닥다지기 데이터 + 런웨이(임상 바이오 1.5년·그 외 1.0년).
+        # 임상 바이오는 3상 비용·유상증자(주주가치 희석) 위험이 커 마지노선을 1.5년으로 강화.
         rw = r.get('runway_years')
+        min_rw = 1.5 if r.get('sector') in _BIO_CLINICAL_CATS else 1.0
         ok = (r.get('current_price') is not None and r.get('pct_momentum') is not None
-              and rw is not None and rw >= 1.0)
+              and rw is not None and rw >= min_rw)
         r['gate_pass'] = 1 if ok else 0
-        r['gate_fail_reason'] = '' if ok else ('현금소진 위험' if (rw is not None and rw < 1.0) else '데이터 부족')
+        r['gate_fail_reason'] = '' if ok else ('현금소진 위험' if (rw is not None and rw < min_rw) else '데이터 부족')
     return rows
 
 
