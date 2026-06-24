@@ -23,7 +23,7 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
       holdings: allHoldings.map(h => ({
         ticker: h.ticker, quantity: h.quantity, name: h.name,
       })),
-      months_back: 24,
+      months_back: 48,   // 최근 4년 — 분기 히스토그램으로 과거 이력 표시
       usd_krw: usdKrw,
     })
       .then(r => { if (!aborted) setData(r) })
@@ -252,11 +252,11 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
               <div className="ko-keep" style={{ padding: '14px 12px',
                 border: '1px dashed var(--m-outline-variant)', borderRadius: 2,
                 fontSize: 12, color: 'var(--m-text-secondary)', textAlign: 'center' }}>
-                최근 24개월 수령 이력 없음
+                최근 수령 이력 없음
               </div>
             ) : (
               <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-                {data.events.map((e, i) => (
+                {data.events.slice(0, 80).map((e, i) => (
                   <div key={i} onClick={() => setChartTicker(e.ticker)}
                     style={{
                       display: 'grid',
@@ -293,43 +293,50 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
   )
 }
 
-/* 월별 버킷 — 최근 18개월(수령) + 향후 6개월(예정) = 24개월 윈도우.
-   events.date / upcoming.ex_date 는 'YYYY-MM-DD' → 'YYYY-MM' 키로 집계. */
-function buildDividendMonths(events, upcoming) {
+/* 분기 버킷 — 과거 ~3.5년(14분기 수령) + 향후 2분기(예정).
+   events.date / upcoming.ex_date 'YYYY-MM-DD' → 분기 키 'YYYY-Q'로 집계. x축은 'YY/NQ. */
+function _quarterKey(year, q) { return `${year}-${q}` }
+function buildDividendQuarters(events, upcoming) {
   const now = new Date()
-  const base = new Date(now.getFullYear(), now.getMonth(), 1)
-  const months = []
+  const curQ = Math.floor(now.getMonth() / 3) + 1
+  const quarters = []
   const idx = {}
-  for (let i = -17; i <= 6; i++) {
-    const d = new Date(base.getFullYear(), base.getMonth() + i, 1)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    idx[key] = months.length
-    months.push({ key, year: d.getFullYear(), month: d.getMonth() + 1,
-      received: 0, expected: 0, isFuture: i > 0 })
+  // 과거 14분기 ~ 미래 2분기
+  for (let i = -14; i <= 2; i++) {
+    let y = now.getFullYear(), q = curQ + i
+    while (q < 1) { q += 4; y -= 1 }
+    while (q > 4) { q -= 4; y += 1 }
+    const key = _quarterKey(y, q)
+    if (idx[key] != null) continue
+    idx[key] = quarters.length
+    quarters.push({ key, year: y, q, received: 0, expected: 0, isFuture: i > 0 })
+  }
+  const toKey = (dateStr) => {
+    const d = new Date(dateStr)
+    if (isNaN(d)) return null
+    return _quarterKey(d.getFullYear(), Math.floor(d.getMonth() / 3) + 1)
   }
   for (const e of events || []) {
-    const k = String(e.date || '').slice(0, 7)
-    if (idx[k] != null) months[idx[k]].received += (e.total_krw || 0)
+    const k = toKey(e.date); if (k != null && idx[k] != null) quarters[idx[k]].received += (e.total_krw || 0)
   }
   for (const u of upcoming || []) {
-    const k = String(u.ex_date || '').slice(0, 7)
-    if (idx[k] != null) months[idx[k]].expected += (u.est_total_krw || 0)
+    const k = toKey(u.ex_date); if (k != null && idx[k] != null) quarters[idx[k]].expected += (u.est_total_krw || 0)
   }
-  return months
+  return quarters
 }
 
 function DividendHistogram({ events, upcoming, fmtKrw }) {
-  const months = React.useMemo(() => buildDividendMonths(events, upcoming), [events, upcoming])
-  const max = Math.max(1, ...months.map(m => Math.max(m.received, m.expected)))
-  const sumReceived = months.reduce((s, m) => s + m.received, 0)
-  const sumExpected = months.reduce((s, m) => s + m.expected, 0)
+  const quarters = React.useMemo(() => buildDividendQuarters(events, upcoming), [events, upcoming])
+  const max = Math.max(1, ...quarters.map(m => Math.max(m.received, m.expected)))
+  const sumReceived = quarters.reduce((s, m) => s + m.received, 0)
+  const sumExpected = quarters.reduce((s, m) => s + m.expected, 0)
 
   if (sumReceived === 0 && sumExpected === 0) {
     return (
       <div className="ko-keep" style={{ padding: '14px 12px',
         border: '1px dashed var(--m-outline-variant)', borderRadius: 2,
         fontSize: 12, color: 'var(--m-text-secondary)', textAlign: 'center' }}>
-        최근 24개월 구간에 집계된 배당 내역이 없습니다
+        해당 구간에 집계된 배당 내역이 없습니다
       </div>
     )
   }
@@ -341,22 +348,22 @@ function DividendHistogram({ events, upcoming, fmtKrw }) {
         fontSize: 11, color: 'var(--m-text-secondary)' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <i style={{ width: 9, height: 9, background: '#1F4FD3', borderRadius: 1 }} />
-          수령 18개월 <strong style={{ color: 'var(--m-text)', marginLeft: 2 }}>{fmtKrw(sumReceived)}</strong>
+          수령 누계 <strong style={{ color: 'var(--m-text)', marginLeft: 2 }}>{fmtKrw(sumReceived)}</strong>
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <i style={{ width: 9, height: 9, background: 'rgba(31,79,211,0.32)',
             borderRadius: 1 }} />
-          예정 6개월 <strong style={{ color: 'var(--m-text)', marginLeft: 2 }}>{fmtKrw(sumExpected)}</strong>
+          예정 <strong style={{ color: 'var(--m-text)', marginLeft: 2 }}>{fmtKrw(sumExpected)}</strong>
         </span>
       </div>
 
-      {/* 막대 — 24개월 */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 112,
+      {/* 막대 — 분기별 */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 112,
         borderBottom: '1px solid var(--m-outline-variant)' }}>
-        {months.map(m => {
+        {quarters.map(m => {
           const rH = (m.received / max) * 100
           const eH = (m.expected / max) * 100
-          const title = `${m.year}.${String(m.month).padStart(2, '0')}`
+          const title = `'${String(m.year).slice(2)}/${m.q}Q`
             + (m.received ? ` · 수령 ${fmtKrw(m.received)}` : '')
             + (m.expected ? ` · 예정 ${fmtKrw(m.expected)}` : '')
           return (
@@ -376,20 +383,21 @@ function DividendHistogram({ events, upcoming, fmtKrw }) {
         })}
       </div>
 
-      {/* x축 라벨 — 1월(연도)·7월만 표기해 과밀 방지 */}
-      <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
-        {months.map((m, i) => (
+      {/* x축 라벨 — 분기마다 'YY/NQ (1Q·3Q만 표기해 과밀 방지) */}
+      <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+        {quarters.map(m => (
           <div key={m.key} style={{ flex: 1, minWidth: 0, textAlign: 'center',
             fontSize: 8, fontWeight: 700, color: 'var(--m-text-tertiary)',
             whiteSpace: 'nowrap', overflow: 'visible' }}>
-            {m.month === 1 ? `'${String(m.year).slice(2)}` : m.month === 7 ? '7' : ''}
+            {(m.q === 1 || m.q === 3) ? `'${String(m.year).slice(2)}/${m.q}Q` : ''}
           </div>
         ))}
       </div>
 
       <div className="ko-keep" style={{ fontSize: 10,
         color: 'var(--m-text-tertiary)', marginTop: 8, lineHeight: 1.55 }}>
-        진한 막대 = 실제 수령, 옅은 막대 = 예정(분기 배당 가정). 이력은 최대 50건 기준이라 종목이 많으면 일부 누락될 수 있습니다.
+        진한 막대 = 실제 수령, 옅은 막대 = 예정(분기 배당 가정). <strong>현재 보유 수량 기준</strong>으로 환산해
+        매수 이전 분기는 가상 추정입니다. 과거 시세 출처(yfinance)에 배당 데이터가 없는 한국 펀드·일부 ETF는 제외됩니다.
       </div>
     </div>
   )

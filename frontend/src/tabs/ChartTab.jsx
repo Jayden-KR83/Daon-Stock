@@ -1202,11 +1202,13 @@ function Section({ title, num, barColor = 'var(--clr-text-sub)', children, defau
 
 /* 통일 불릿 — 행잉 인덴트(내어쓰기): 줄바꿈 시 본문이 마커가 아닌 텍스트 기준 정렬 */
 function Bullet({ children, markerColor = 'var(--clr-text-tertiary)' }) {
+  // 한 불릿이 여러 문장이면 문장마다 줄바꿈 (가독성)
+  const content = typeof children === 'string' ? breakSentences(children) : children
   return (
     <div style={{ display: 'flex', gap: 7, padding: '3px 0', fontSize: 12.5,
       lineHeight: 1.62, color: 'var(--clr-text)' }}>
       <span style={{ flexShrink: 0, color: markerColor, fontWeight: 700 }}>–</span>
-      <span style={{ flex: 1 }}>{children}</span>
+      <span style={{ flex: 1, whiteSpace: 'pre-line' }}>{content}</span>
     </div>
   )
 }

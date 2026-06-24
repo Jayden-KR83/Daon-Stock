@@ -997,8 +997,10 @@ function VerifiedFacts({ vf }) {
         <span className="mono-pill" style={{ color: 'var(--m-text-tertiary)' }}>실시간 계산값</span>
       </div>
       <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
-        margin: '4px 0 10px', lineHeight: 1.5 }}>
-        보유 데이터로 직접 계산한 값 — AI 서술과 무관하게 정확합니다.
+        margin: '4px 0 10px', lineHeight: 1.55 }}>
+        아래 AI 전략 글은 가끔 숫자를 잘못 인용할 수 있습니다. 이 표는 시스템이 회원님의 보유 데이터로
+        <strong style={{ color: 'var(--m-text-secondary)' }}> 직접 계산한 정확한 값</strong>이니,
+        AI 글의 수치와 다르면 <strong style={{ color: 'var(--m-text-secondary)' }}>이 값을 기준</strong>으로 삼으세요.
       </div>
 
       <div style={{ marginBottom: 10 }}>
@@ -1071,6 +1073,136 @@ function VerifiedFacts({ vf }) {
   )
 }
 
+/* 저점발굴 시계열 매칭 — 단/중/장기 지평선별 고위험 혁신주 위성 후보(백엔드 결정론값).
+   가드레일 대신 '시간 지평선 가중치'로 성격을 바꾸는 구조: 단기=생존력, 중기=R&D알파, 장기=0% 수렴. */
+function DiscoveryHorizon({ dh }) {
+  if (!dh || ((dh.short?.length || 0) === 0 && (dh.mid?.length || 0) === 0)) return null
+  const Chips = ({ items, meta }) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+      {items.map((c, i) => (
+        <span key={i} style={{ fontSize: 11, color: 'var(--m-text)',
+          border: '1px solid var(--m-outline-variant)', borderRadius: 2, padding: '3px 7px' }}>
+          <strong>{c.ticker}</strong>
+          <span style={{ color: 'var(--m-text-tertiary)', marginLeft: 4 }}>{meta(c)}</span>
+        </span>
+      ))}
+    </div>
+  )
+  const Row = ({ label, desc, children }) => (
+    <div style={{ padding: '8px 0', borderTop: '1px solid var(--m-outline-variant)' }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--m-text)', marginBottom: 2 }}>{label}</div>
+      <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
+        marginBottom: 6, lineHeight: 1.5 }}>{desc}</div>
+      {children}
+    </div>
+  )
+  return (
+    <div className="mono-card" style={{ marginBottom: 12 }}>
+      <div className="mono-section-title is-accent" style={{ marginBottom: 2 }}>
+        저점발굴 시계열 매칭
+      </div>
+      <div className="mono-section-sub ko-keep" style={{ marginBottom: 6 }}>
+        고위험 혁신주(AI·바이오)를 지평선별 <strong>위성(satellite)</strong> 비중으로만 — 핵심 자산 아님.
+      </div>
+      {dh.short?.length > 0 && (
+        <Row label="단기 (1~3년) · 안정성 우선"
+          desc="생존 런웨이 3년 초과 + 바닥다지기 80 초과 — 부도·증자 리스크 낮은 종목만, 소액(≤5%) 분산">
+          <Chips items={dh.short} meta={c => `런웨이 ${c.runway_years}y · 바닥 ${c.base_building}`} />
+        </Row>
+      )}
+      {dh.mid?.length > 0 && (
+        <Row label="중기 (5~10년) · 구조적 알파"
+          desc="R&D 집중도 최상위 — AI·바이오 메가트렌드 상업화(≈5년) 알파 포착">
+          <Chips items={dh.mid} meta={c => `R&D ${c.rnd_intensity}`} />
+        </Row>
+      )}
+      <Row label="장기 (11~15년·은퇴 임박) · 0% 수렴"
+        desc={dh.long_rule || '고위험 혁신주 비중 0%로 수렴 — 자본손실 위험 동결'}>
+        <span style={{ fontSize: 11, color: 'var(--m-negative)', fontWeight: 700 }}>
+          목표 비중 0% (Decay)
+        </span>
+      </Row>
+    </div>
+  )
+}
+
+/* 월 배당 전환 시뮬레이터 — AI 제안(계좌·자산·비중)을 시드로, 사용자가 비중·가정 배당률을
+   직접 조정하면 예상 월 현금흐름을 결정론으로 즉시 재계산. 예상월 = 총액 × 비중% × 배당률% ÷ 12. */
+function _extractYield(s) {
+  const m = String(s || '').match(/(\d+(?:\.\d+)?)\s*%/)
+  return m ? Number(m[1]) : null
+}
+function DividendSimulator({ sim, totalKrw }) {
+  const seed = React.useMemo(() => (sim?.rows || []).map(r => ({
+    account: r.account, asset: r.asset,
+    weight: Number(r.weight) || 0,
+    yieldPct: _extractYield(r.monthly_cashflow) ?? 3.0,
+  })), [sim])
+  const [rows, setRows] = useState(seed)
+  const [base, setBase] = useState(Math.round(totalKrw) || 0)
+  React.useEffect(() => { setRows(seed) }, [seed])
+  React.useEffect(() => { if (totalKrw) setBase(Math.round(totalKrw)) }, [totalKrw])
+
+  const won = n => '₩' + Math.round(n || 0).toLocaleString()
+  const monthlyOf = r => base * (r.weight / 100) * (r.yieldPct / 100) / 12
+  const totalMonthly = rows.reduce((s, r) => s + monthlyOf(r), 0)
+  const weightSum = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0)
+  const setRow = (i, k, v) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
+  const inp = {
+    width: 52, textAlign: 'right', padding: '3px 5px', borderRadius: 2,
+    border: '1px solid var(--m-outline-variant)', background: 'var(--m-surface)',
+    color: 'var(--m-text)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit',
+  }
+  return (
+    <div>
+      {/* 기준 설정: 전환 대상 총액 + 합계 월 현금흐름 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span className="m3-label">전환 대상 총액</span>
+        <input type="number" value={base} onChange={e => setBase(Number(e.target.value) || 0)}
+          style={{ ...inp, width: 128 }} />
+        <span style={{ fontSize: 11, color: 'var(--m-text-tertiary)' }}>원</span>
+        <span style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 900, color: 'var(--m-positive)',
+          fontVariantNumeric: 'tabular-nums' }}>월 {won(totalMonthly)}</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+          <thead>
+            <tr style={{ color: 'var(--m-text-tertiary)' }}>
+              <th style={thStyle}>계좌</th><th style={thStyle}>추천 자산</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>비중%</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>배당률%</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>예상 월</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--m-outline-variant)' }}>
+                <td style={tdStyle}>{r.account}</td>
+                <td style={tdStyle}>{r.asset}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                  <input type="number" value={r.weight} min={0} max={100}
+                    onChange={e => setRow(i, 'weight', Number(e.target.value) || 0)} style={inp} />
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                  <input type="number" value={r.yieldPct} step="0.1" min={0} max={20}
+                    onChange={e => setRow(i, 'yieldPct', Number(e.target.value) || 0)} style={inp} />
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums' }}>{won(monthlyOf(r))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="ko-keep" style={{ fontSize: 10, lineHeight: 1.5, marginTop: 6,
+        color: weightSum === 100 ? 'var(--m-text-tertiary)' : '#D97706' }}>
+        {weightSum !== 100 ? `⚠ 비중 합계 ${weightSum}% (100% 기준 권장) · ` : ''}
+        예상 월 = 총액 × 비중% × 배당률% ÷ 12. 가정 배당률 기반 추정이며 실제 배당은 종목·시기마다 다릅니다.
+      </div>
+    </div>
+  )
+}
+
 function DaonAIReport({ data }) {
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
@@ -1080,8 +1212,7 @@ function DaonAIReport({ data }) {
 
   return (
     <div>
-      {/* 검증된 핵심 수치 — AI 텍스트보다 우선하는 권위 수치 (정합성 최우선) */}
-      <VerifiedFacts vf={data.verified_facts} />
+      {/* 검증된 핵심 수치 블록은 프론트 비노출 (백엔드 verified_facts는 프롬프트 변수바인딩용으로 유지) */}
 
       {/* 전문가 총평 */}
       <div className="mono-card" style={{ marginBottom: 12 }}>
@@ -1115,40 +1246,20 @@ function DaonAIReport({ data }) {
         </div>
       )}
 
+      {/* 저점발굴 시계열 매칭 — 지평선별 위성(satellite) 후보 + 장기 decay */}
+      <DiscoveryHorizon dh={data.discovery_horizon} />
+
       {/* [3] 월 배당 전환 시뮬레이션 */}
       {data.dividend_simulation
         && (data.dividend_simulation.rows?.length > 0 || data.dividend_simulation.warning) && (
         <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-header">
-            <div className="mono-section-title is-accent">월 배당 전환 시뮬레이션</div>
-            {data.dividend_simulation.total_monthly && (
-              <span className="mono-pill" style={{ color: 'var(--m-positive)' }}>
-                월 {data.dividend_simulation.total_monthly}
-              </span>
-            )}
+          <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>월 배당 전환 시뮬레이션</div>
+          <div className="mono-section-sub ko-keep" style={{ marginBottom: 8 }}>
+            비중·가정 배당수익률을 직접 조정하면 예상 월 현금흐름이 즉시 다시 계산됩니다.
           </div>
           {data.dividend_simulation.rows?.length > 0 && (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
-                <thead>
-                  <tr style={{ color: 'var(--m-text-tertiary)' }}>
-                    <th style={thStyle}>계좌</th><th style={thStyle}>추천 자산</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>비중</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>예상 월</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.dividend_simulation.rows.map((r, i) => (
-                    <tr key={i} style={{ borderTop: '1px solid var(--m-outline-variant)' }}>
-                      <td style={tdStyle}>{r.account}</td>
-                      <td style={tdStyle}>{r.asset}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.weight}%</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{r.monthly_cashflow}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DividendSimulator sim={data.dividend_simulation}
+              totalKrw={data.verified_facts?.total_krw || data._metrics_summary?.total_krw || 0} />
           )}
           {data.dividend_simulation.warning && (
             <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--m-surface-variant)',
