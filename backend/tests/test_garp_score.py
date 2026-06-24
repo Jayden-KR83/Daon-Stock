@@ -65,15 +65,14 @@ class TestGarpScore:
         assert out[('US', 1.0)] == 100 and out[('US', 2.0)] == 0
         assert out[('KR', 0.5)] == 100 and out[('KR', 0.9)] == 0
 
-    def test_kr_reweight_no_phantom_zero(self):
-        # KR 단일종목: 가용 3축(value/growth/quality)만 → 재정규화 분모 0.75.
-        # 백분위 전부 50(단일표본)이면 composite도 50이어야(가중치 0.75로 나눔).
-        # 만약 phantom 0으로 5축을 채우면 composite=30으로 깨짐 → 회귀 검출.
+    def test_kr_reweight_with_missing_penalty(self):
+        # KR 단일종목: 가용 3축(value/growth/quality)만. 재정규화 base=50, 결측 패널티 ×3/5 → 30.
+        # phantom 0으로 5축을 채우면 base 30이 되어 또 다른 값 → 재정규화+패널티 분리 검증.
         rows = [{'market': 'KR', 'peg': 1.0, 'eps_growth': 10, 'roe': 12}]
         out = main._garp_score(rows)[0]
         assert out['pct_momentum'] is None and out['pct_sentiment'] is None
         assert out['data_completeness'] == 3
-        assert out['composite_score'] == 50.0
+        assert out['composite_score'] == 30.0   # 50(재정규화) × 3/5(결측 패널티)
 
     def test_full_axes_completeness_five(self):
         rows = [{'market': 'US', 'peg': 1.0, 'trailing_pe': 10, 'eps_growth': 10,
@@ -113,10 +112,11 @@ class TestGarpScore:
         def grp(mkt):
             return [{'market': mkt, 'peg': 2.0, 'near_52w_high': 0.99},
                     {'market': mkt, 'peg': 1.0, 'near_52w_high': 0.50}]
-        us = main._garp_score(grp('US'))[0]   # value pct 0, momentum pct 100
+        us = main._garp_score(grp('US'))[0]   # value pct 0, momentum pct 100, 2/5축
         kr = main._garp_score(grp('KR'))[0]
-        assert round(us['composite_score'], 1) == 33.3   # (.30*0+.15*100)/.45
-        assert round(kr['composite_score'], 1) == 12.5   # (.35*0+.05*100)/.40
+        # base=(.30*0+.15*100)/.45=33.3 → ×2/5(결측 패널티)=13.3 / KR base 12.5 → ×0.4=5.0
+        assert round(us['composite_score'], 1) == 13.3
+        assert round(kr['composite_score'], 1) == 5.0
         assert kr['composite_score'] < us['composite_score']
 
     def test_estimate_revision_feeds_sentiment(self):
