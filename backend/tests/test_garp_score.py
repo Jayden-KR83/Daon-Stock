@@ -143,6 +143,69 @@ class TestGarpScore:
         assert out[('A', 10)] < 1.0 and out[('B', 30)] < 1.0   # 섹터 median보다 쌈
 
 
+class TestInnovScore:
+    def _base(self, **over):
+        r = {'market': 'US', 'sector': 'AI 신약', 'psr': 4.0, 'rnd_intensity': 1.0,
+             'pct_momentum': 50.0, 'runway_years': 5.0, 'current_price': 10.0}
+        r.update(over)
+        return r
+
+    def test_modval_uses_capped_rnd(self):
+        # Gemini #1: mod_val(PSR÷R&D)은 *캡 적용된* R&D집중도(상한 3.0)로 계산해야.
+        # 무모한 소각(R&D 600%)을 캡 전 값으로 나누면 변형밸류가 비정상적으로 낮아져 저평가 오인.
+        out = main._innov_score([self._base(psr=30.0, rnd_intensity=6.0)])[0]
+        assert out['rnd_intensity'] == 3.0          # 캡 적용
+        assert out['mod_val'] == 10.0               # 30 ÷ 3.0 (캡 후), 30÷6=5.0 아님
+
+    def test_bio_clinical_runway_gate_15(self):
+        # Gemini #2: 임상 바이오는 유증 희석 위험 커 런웨이 게이트 1.5년. 1.2년이면 탈락.
+        bio = main._innov_score([self._base(sector='유전자치료', runway_years=1.2)])[0]
+        assert bio['gate_pass'] == 0 and bio['gate_fail_reason'] == '현금소진 위험'
+
+    def test_non_bio_runway_gate_10(self):
+        # AI 소프트웨어 등 비임상은 1.0년 유지 → 런웨이 1.2년 통과.
+        sw = main._innov_score([self._base(sector='AI 플랫폼', runway_years=1.2)])[0]
+        assert sw['gate_pass'] == 1 and sw['gate_fail_reason'] == ''
+
+    def test_runway_below_one_always_fails(self):
+        sw = main._innov_score([self._base(sector='AI 플랫폼', runway_years=0.5)])[0]
+        assert sw['gate_pass'] == 0 and sw['gate_fail_reason'] == '현금소진 위험'
+
+
+class TestEtfEquity:
+    def test_kr_etf_no_structural_cost_penalty(self):
+        # Gemini #3: 한국 ETF는 보수율(저비용)이 구조적 미제공 → 결측 패널티 분모를 2(추세+규모)로.
+        # 2/2축을 갖춘 최상위 KR ETF는 강등되면 안 됨(구 /3 패널티면 100→66.7로 부당 강등).
+        rows = [
+            {'market': 'KR', 'near_52w_high': 0.95, 'ret_6m': 20, 'avg_volume': 2e6,
+             'expense_ratio': None, 'aum': None, 'current_price': 100},
+            {'market': 'KR', 'near_52w_high': 0.50, 'ret_6m': -5, 'avg_volume': 1e6,
+             'expense_ratio': None, 'aum': None, 'current_price': 100},
+        ]
+        out = main._etf_score(rows)
+        top = max(out, key=lambda r: r['composite_score'])
+        assert top['data_completeness'] == 2           # 추세+규모만(저비용 구조적 결측)
+        assert top['composite_score'] == 100.0         # 패널티 없음(구 코드면 66.67)
+
+    def test_us_etf_keeps_three_axis_penalty(self):
+        # 미국 ETF는 3축 기준 유지 — 저비용 진짜 결측이면 패널티.
+        rows = [{'market': 'US', 'near_52w_high': 0.95, 'ret_6m': 20, 'avg_volume': 2e6,
+                 'expense_ratio': None, 'aum': 5e9, 'current_price': 100}]
+        out = main._etf_score(rows)[0]
+        assert out['composite_score'] < 100.0          # 저비용 결측 → /3 패널티 잔존
+
+
+class TestSectorReclassification:
+    def test_shipbuilders_split_from_defense(self):
+        # Gemini #4: 조선 시클리컬을 '방산·우주'에서 분리(섹터중립 밸류 오적용 방지).
+        assert '조선·중공업' in main.KR_SECTOR_TOP
+        ship = dict(main.KR_SECTOR_TOP['조선·중공업'])
+        assert '009540' in ship and ship['009540'] == 'HD한국조선해양'
+        defense = dict(main.KR_SECTOR_TOP['방산·우주'])
+        assert '009540' not in defense and '329180' not in defense   # 조선주 빠짐
+        assert '012450' in defense                                    # 한화에어로는 잔류
+
+
 class TestGrowthHelpers:
     def test_ttm_yoy_basic(self):
         # 직전 4분기 합 100, 최근 4분기 합 120 → +20%
