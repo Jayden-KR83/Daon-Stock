@@ -232,6 +232,21 @@ const COMPARE_FEATURES = [
 ]
 
 const ROADMAP = [
+  { title: '[다음] 분석 리포트 풀 통합 (B2)', priority: 'High',
+    desc: '리스크 진단 카드에 Claude 정성 진단을 정량 경고와 1:1 매칭(백엔드에서 알림↔AI 문단 구조화·태깅) + 스냅샷·시계열 액션 섹션을 단일 데이터 흐름으로 통합.',
+    cost: 'AI 토큰 소폭 증가', devTime: '2~3 세션',
+    considerations: '카드 골격(심각도 배지·design.md R1 준수)은 이미 구현 완료 → 백엔드 매칭·통합만 남음. Health 카드와 AI 리포트의 도착 타이밍(즉시 vs 1~3분) 처리 필요.',
+    verdict: '실행 예정', verdictReason: '상용화(SaaS) 단계 — 프리미엄 진단서 차별화의 핵심. 좌측 CLI 세션(2026-06-25)에서 B3까지 완료, B2가 다음 단계.' },
+  { title: '[다음] 멀티테넌트 온보딩 (UserProfileContext)', priority: 'High',
+    desc: '온보딩 입력(years_to_retire·monthly_inflow·target_wealth·target_markets·리스크 성향) → 발굴/추천/시계열 엔진에 동적 연동. target_markets 마스킹(CRYPTO·선물 배제), Conservative 또는 은퇴<5년이면 저점발굴 비중 캡/숨김.',
+    cost: '추가 비용 0', devTime: '2~3 세션',
+    considerations: '엔진은 이미 사용자 입력 기반(멀티테넌트, 개인값 하드코딩 0건) → 온보딩 폼 + array filter 마스킹 레이어만 추가하면 됨.',
+    verdict: '실행 예정', verdictReason: '상용화 단계 — 불특정 다수 유저 수용을 위한 입력 스키마 고정.' },
+  { title: '[다음] 시장 탭 디자인 R1 정리', priority: 'Low',
+    desc: '시장(Trends) 탭의 좌측 색 보더 2건(.tt-index-card-accent=warn · .tt-news-card=pos) 제거 → design.md R1(좌측 색띠 절대 금지) 준수. 의미는 제목 글자색·배지로만.',
+    cost: '추가 비용 0', devTime: '소규모 (<1 세션)',
+    considerations: '분석 탭은 이미 R1 준수 완료. 시장 탭만 잔여 위반. TrendsTab.css 2줄 수정.',
+    verdict: '실행 예정', verdictReason: '즉시 가능 — 디자인 일관성 마무리.' },
   { title: '채권 혼합 ETF 데이터 소스 확장', priority: 'High',
     desc: '447180·404610·470000 등 Yahoo/Naver 모두에서 조회 불가한 한국 ETF/펀드 시세. KRX OpenAPI 또는 KIS Developers API 연동 검토.',
     cost: 'KRX 무료. KIS 일 5천건 무료', devTime: '완료 (2026.06 · 수동 기준가 방식)',
