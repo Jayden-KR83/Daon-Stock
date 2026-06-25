@@ -3350,6 +3350,38 @@ def _innov_score(rows: list) -> list:
     return rows
 
 
+def _check_satellite_ceiling(holdings: list, threshold: float = 0.05) -> dict:
+    """[로드맵 #6 골격] 저점발굴(고위험 '위성') 자산이 총자산의 threshold(기본 5%)를 넘으면 경고.
+
+    holdings: [{'ticker', 'value_krw'}] — value_krw는 통화 환산 완료된 평가액.
+    INNOVATION_UNIVERSE(저점발굴 큐레이션)에 속한 티커를 위성 자산으로 식별.
+    순수 함수 — 한도 초과 시 시스템 로그 경고만 남김(강제 차단/UI 연동은 #6 본구현에서).
+    반환: {over, satellite_value, total_value, ratio, threshold, satellite_tickers}."""
+    satellite = {t.upper() for t in INNOVATION_UNIVERSE}
+    total = sat = 0.0
+    hits: list = []
+    for h in holdings or []:
+        try:
+            v = float(h.get('value_krw') or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        if v <= 0:
+            continue
+        total += v
+        if str(h.get('ticker', '')).upper() in satellite:
+            sat += v
+            hits.append(str(h.get('ticker', '')).upper())
+    ratio = (sat / total) if total > 0 else 0.0
+    over = ratio > threshold
+    if over:
+        import logging
+        logging.warning(
+            "satellite_ceiling exceeded: %.1f%% in bottom-discovery high-risk (%s) > %.0f%% cap",
+            ratio * 100, ",".join(sorted(hits)), threshold * 100)
+    return {'over': over, 'satellite_value': round(sat, 2), 'total_value': round(total, 2),
+            'ratio': round(ratio, 4), 'threshold': threshold, 'satellite_tickers': sorted(hits)}
+
+
 def safe_i_local(v):
     try: return int(v) if v and not _nan(v) else None
     except: return None

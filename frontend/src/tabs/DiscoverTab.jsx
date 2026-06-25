@@ -463,7 +463,8 @@ export default function DiscoverTab() {
                           <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end', alignItems: 'center', marginTop: 2 }}>
                             {isInnov && BIO_CLINICAL.has(row.sector) && (
                               <span title="임상 이벤트 리스크 — PSR·런웨이로 측정 불가. 임상 성패 발표 시 주가가 하루에 ±30% 이상 급변할 수 있습니다."
-                                style={{ fontSize: 9.5, color: 'var(--m-negative)', cursor: 'help', fontWeight: 800 }}>⚠</span>)}
+                                style={{ fontSize: 8.5, fontWeight: 800, padding: '0 4px', borderRadius: 2, lineHeight: 1.5, cursor: 'help',
+                                  color: 'var(--m-negative)', border: '1px solid var(--m-negative)' }}>⚠ 임상</span>)}
                             {row.ai_reco && (
                               <span title={`AI 심층 분석 의견: ${row.ai_reco} — 정량 점수와 별개의 질적 판단입니다. 행을 펼쳐 근거를 확인하세요.`}
                                 style={{ fontSize: 8.5, fontWeight: 800, padding: '0 4px', borderRadius: 2, lineHeight: 1.5,

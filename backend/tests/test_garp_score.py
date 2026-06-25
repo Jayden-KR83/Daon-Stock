@@ -206,6 +206,34 @@ class TestSectorReclassification:
         assert '012450' in defense                                    # 한화에어로는 잔류
 
 
+class TestSatelliteCeiling:
+    """로드맵 #6 골격 — 저점발굴(위성) 자산 5% 한도 체크 순수함수."""
+    def _innov(self):
+        return next(iter(main.INNOVATION_UNIVERSE))   # 위성 티커 1개
+
+    def test_over_ceiling_flags(self):
+        sat = self._innov()
+        out = main._check_satellite_ceiling([
+            {'ticker': sat, 'value_krw': 10_000},      # 위성 10%
+            {'ticker': '005930', 'value_krw': 90_000}, # 일반
+        ])
+        assert out['over'] is True
+        assert out['ratio'] == 0.1 and out['satellite_tickers'] == [sat.upper()]
+
+    def test_under_ceiling_ok(self):
+        sat = self._innov()
+        out = main._check_satellite_ceiling([
+            {'ticker': sat, 'value_krw': 3_000},       # 위성 3% (<5%)
+            {'ticker': 'NVDA', 'value_krw': 97_000},
+        ])
+        assert out['over'] is False and out['ratio'] == 0.03
+
+    def test_empty_and_zero_safe(self):
+        assert main._check_satellite_ceiling([])['over'] is False
+        out = main._check_satellite_ceiling([{'ticker': 'NVDA', 'value_krw': 0}])
+        assert out['total_value'] == 0 and out['ratio'] == 0.0   # 0으로 나누기 방어
+
+
 class TestGrowthHelpers:
     def test_ttm_yoy_basic(self):
         # 직전 4분기 합 100, 최근 4분기 합 120 → +20%
