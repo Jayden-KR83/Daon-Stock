@@ -243,7 +243,8 @@ export default function AllocationTab() {
         getPortfolioAlerts({ ...payload, target_max_ticker_pct: 30, target_max_sector_pct: 50, target_max_loss_pct: -20 }),
         getPortfolioDividends(payload),
       ])
-      const dateStr = new Date().toISOString().slice(0, 10)
+      // KST 기준 날짜 (toISOString은 UTC라 KST 오전엔 전날로 표기되던 버그 수정)
+      const dateStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
       const md = _buildAnalysisMd({
         dateStr, rows,
         health: hR.status === 'fulfilled' ? hR.value : null,
@@ -782,7 +783,7 @@ export default function AllocationTab() {
               transition={{ duration: 0.45, ease: [0.22, 0.61, 0.36, 1] }}
               style={{ marginBottom: 16 }}
             >
-              <DaonAIReport data={strategyReport} />
+              <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} />
             </motion.div>
           )}
         </>
@@ -1209,7 +1210,15 @@ function DividendSimulator({ sim, totalKrw }) {
   )
 }
 
-function DaonAIReport({ data }) {
+function _fmtKstDateTime(epochSec) {
+  if (!epochSec) return ''
+  return new Date(epochSec * 1000).toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function DaonAIReport({ data, computedAt = 0 }) {
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
     MED:  { color: '#D97706', bg: 'rgba(217,119,6,.10)', label: '중기', desc: '1-3개월',  icon: '◆'  },
@@ -1218,7 +1227,13 @@ function DaonAIReport({ data }) {
 
   return (
     <div>
-      {/* 검증된 핵심 수치 블록은 프론트 비노출 (백엔드 verified_facts는 프롬프트 변수바인딩용으로 유지) */}
+      {/* 분석 도출 시각 — 우측 작게. 사용자가 최신 정보로 업데이트할지 판단용 */}
+      {computedAt > 0 && (
+        <div style={{ textAlign: 'right', fontSize: 10.5, color: 'var(--m-text-tertiary)',
+          marginBottom: 6 }}>
+          분석 기준 {_fmtKstDateTime(computedAt)}
+        </div>
+      )}
 
       {/* 전문가 총평 */}
       <div className="mono-card" style={{ marginBottom: 12 }}>
@@ -1380,8 +1395,7 @@ function DaonAIReport({ data }) {
       )}
 
       <div style={{ fontSize: 10, color: 'var(--clr-border-strong)', textAlign: 'right', marginTop: 4 }}>
-        생성 시각: {new Date().toLocaleString('ko-KR',
-          { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · Claude Sonnet 4.6
+        {computedAt > 0 ? `분석 도출: ${_fmtKstDateTime(computedAt)}` : '생성됨'} · Claude Sonnet 4.6
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
