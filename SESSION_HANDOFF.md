@@ -1,16 +1,17 @@
 # 세션 핸드오프 노트
 
-## 🟢 현재 세션 (2026-06-24~25) — 보유종목 분석 탭 개선 [좌측 CLI]
+## ✅ 세션 종료 (2026-06-24~25) — 보유종목 분석 탭 개선 [좌측 CLI]
 
-**상태**: ⏸️ 일시 중단(사용자 요청). 모든 작업 배포·푸시 완료. 작업트리 clean.
-**브랜치/배포**: `worktree-goal-based-portfolio` → origin/main. **라이브 번들 `index-BUZ5dFln.js`**(index.html·sw.js 일치 확인). pytest **52 통과**.
+**상태**: ✅ 종료(사용자 마무리 선언). 모든 작업 배포·푸시 완료. 작업트리 clean · origin/main 동기화. 다음 작업은 새 CLI로.
+**브랜치/배포**: `worktree-goal-based-portfolio` → origin/main. pytest **52 통과**. 라이브 번들 해시는 종료 시점 마지막 배포 기준(index.html·sw.js 일치 확인 완료).
 **2-CLI 구성**: 좌측(여기)=**보유종목 분석** / 우측=**신규 종목 발굴**. ⚠️ **배포 클로버 주의** — 재개 시 반드시 `git fetch && merge origin/main → 재빌드 → 배포 → index.html·sw.js 번들 해시 일치 검증`.
 
 **이번 세션 완료**(상세: [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) 2026-06-24~25 세션):
 - 데이터 정합성: 전략 캐시 fingerprint(수량·평단·현재가) + verified_facts 백엔드 실시간 시세 권위화(Phase 1) + 프롬프트 변수바인딩 + 절세 스코프
 - 안정화: `_as_completed_safe`(타임아웃 격리) · 전략 비동기화(524 해소) · Health 로컬 fallback · 리밸런싱 공백 수정
 - 기능: 수동 기준가 · 분기 배당 히스토그램 · 목표 방법론+필요 CAGR · 저점발굴 시계열 매칭 · 편집형 배당 시뮬
-- UI: B3 3장 재배치 · 리스크 진단 카드(R1 준수) · 문장 줄바꿈 · 분석 도출시각/MD KST
+- UI: B3 3장 재배치 · 리스크 진단 카드(R1 준수) · 문장 줄바꿈(CLAUDE.md R6 신설) · 분석 도출시각/MD KST
+- 문서: DEVELOPMENT_LOG·핸드오프 기록 · **가이드 탭 갱신**(분석 섹션 최신화 + 좌측 메뉴와 순서 일치 + 중복 key 정리) · **여정 탭 갱신**(마일스톤 P34~P36 + 채권혼합 verdict→완료). 이후 여정은 월간 클라우드 루틴 자동 갱신.
 
 **재개 시 다음 후보**:
 1. **B2 풀 통합**(상용화): 리스크 카드 Claude 정성진단 1:1 + 스냅샷/액션 섹션 통합
