@@ -65,7 +65,7 @@ export default function AlertsCard({ allHoldings = [], prices = {}, usdKrw = 138
         <div>
           <div className="mono-section-title is-accent">자동 리밸런싱 경고</div>
           <div className="mono-section-sub ko-keep">
-            룰 엔진 — 단일 종목·섹터 집중·큰 손실·중복 노출 자동 감지
+            룰 엔진 — 단일 종목·섹터 집중·큰 손실·중복 노출·고위험 위성 한도 자동 감지
           </div>
         </div>
         <button onClick={() => setShowSettings(s => !s)} className="mono-pill"
@@ -305,9 +305,14 @@ function groupByRule(alerts) {
       hint: '분산 효과를 위해 최소 5종목 이상 보유 권장',
       severityLabel: '주의',
     },
+    satellite_ceiling: {
+      title: '고위험 위성(저점발굴) 한도 초과', category: '위성 자산 비중',
+      hint: '적자 단계 AI·바이오 혁신주(저점발굴)는 변동성이 매우 커 전체 자산의 5% 이내 소액 분산이 원칙입니다. 비중 축소를 검토하세요.',
+      severityLabel: '주의',
+    },
   }
   const order = ['large_loss', 'ticker_concentration', 'sector_concentration',
-                 'overlap_exposure', 'too_few_holdings']
+                 'overlap_exposure', 'satellite_ceiling', 'too_few_holdings']
   const groups = {}
   for (const a of alerts) {
     if (!groups[a.rule]) groups[a.rule] = { rule: a.rule, alerts: [], ...(meta[a.rule] || {

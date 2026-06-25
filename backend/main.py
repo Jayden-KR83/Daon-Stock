@@ -5967,6 +5967,24 @@ def _compute_rebalance_alerts(holdings: list, prices: dict, usd_krw: float,
             'threshold': 5,
         })
 
+    # 2-6) 저점발굴(고위험 '위성') 자산 5% 한도 초과 (로드맵 #6)
+    sat = _check_satellite_ceiling(
+        [{'ticker': e['ticker'], 'value_krw': e['val']} for e in enriched])
+    if sat['over']:
+        pct = sat['ratio'] * 100
+        cap = sat['threshold'] * 100
+        alerts.append({
+            'rule':     'satellite_ceiling',
+            'severity': 'high',
+            'title':    f"고위험 위성(저점발굴) 비중 {pct:.1f}% — {cap:.0f}% 한도 초과",
+            'detail':   f"적자 단계 AI·바이오 혁신주(저점발굴)는 변동성이 매우 커 전체 자산의 "
+                       f"{cap:.0f}% 이내 소액 분산이 원칙입니다. 현재 "
+                       f"{', '.join(sat['satellite_tickers'])} 합산 {pct:.1f}% — 비중 축소를 검토하세요.",
+            'value':    round(pct, 1),
+            'threshold': round(cap),
+            'tickers':  sat['satellite_tickers'],
+        })
+
     # severity 정렬
     sev_order = {'critical': 0, 'high': 1, 'med': 2, 'low': 3}
     alerts.sort(key=lambda a: (sev_order.get(a['severity'], 9),

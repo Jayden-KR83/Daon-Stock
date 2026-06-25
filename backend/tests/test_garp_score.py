@@ -233,6 +233,27 @@ class TestSatelliteCeiling:
         out = main._check_satellite_ceiling([{'ticker': 'NVDA', 'value_krw': 0}])
         assert out['total_value'] == 0 and out['ratio'] == 0.0   # 0으로 나누기 방어
 
+    def test_alert_fires_in_rebalance_engine(self):
+        # #6 UI 연동: 위성 비중 초과 시 리밸런싱 룰 엔진에 satellite_ceiling 경고가 뜬다.
+        sat = self._innov()   # US 혁신주
+        holdings = [
+            {'ticker': sat, 'quantity': 10, 'avg_price': 10, 'sector': 'AI 신약', 'name': sat},
+            {'ticker': '005930', 'quantity': 1, 'avg_price': 1_000_000, 'sector': 'IT', 'name': '삼성'},
+        ]
+        alerts = main._compute_rebalance_alerts(holdings, {}, 1380.0, 30, 50, -20)
+        sa = [a for a in alerts if a['rule'] == 'satellite_ceiling']
+        assert len(sa) == 1 and sat.upper() in sa[0]['tickers'] and sa[0]['severity'] == 'high'
+
+    def test_alert_silent_when_under(self):
+        # 위성 비중이 5% 미만이면 경고 없음.
+        sat = self._innov()
+        holdings = [
+            {'ticker': sat, 'quantity': 1, 'avg_price': 10, 'sector': 'AI 신약', 'name': sat},
+            {'ticker': '005930', 'quantity': 10, 'avg_price': 1_000_000, 'sector': 'IT', 'name': '삼성'},
+        ]
+        alerts = main._compute_rebalance_alerts(holdings, {}, 1380.0, 30, 50, -20)
+        assert not [a for a in alerts if a['rule'] == 'satellite_ceiling']
+
 
 class TestGrowthHelpers:
     def test_ttm_yoy_basic(self):
