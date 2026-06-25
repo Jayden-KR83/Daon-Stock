@@ -1,9 +1,34 @@
 # 다온(Daon) 포트폴리오 앱 — 개발 로그
 
-> 마지막 업데이트: **2026-06-12** (상용 배포 + 로드맵 4건 + 보안)
+> 마지막 업데이트: **2026-06-25** (보유종목 분석 대규모 개선 — 정합성·리스크 카드·CAGR)
 > 모델: claude-opus-4-8
 > 서버: ubuntu@168.107.13.20 | 포트: 8501 (127.0.0.1 전용) · 공개: https://daonwealth.com
 > 로컬: `C:\Users\user\Desktop\쿠든카피 주식앱\`
+
+## 🆕 2026-06-24~25 세션 (보유종목 분석 탭 대규모 개선 — 좌측 CLI)
+
+**한 줄 요약**: 분석 탭 데이터 정합성 근본 수정(캐시 fingerprint·verified_facts 실시간 시세 권위화) + 분석탭 3장 재배치(B3) + 리스크 진단 카드 UI(R1 준수) + 배당/Health/전략 타임아웃 격리 + 전략 비동기화(524 해소) + 목표기반 방법론·필요 CAGR. **2-CLI 동시개발**(좌=보유종목 분석, 우=신규 종목 발굴) — 배포 클로버 방지 절차 확립.
+
+- **한국 비상장 펀드 수동 기준가**: `portfolios.manual_price` 컬럼(ALTER 멱등) + `utils/effPrice`(라이브→수동→평단 우선순위) 전 surface 통일. HoldingsTab 수정 폼 입력칸. (404610 등 yfinance 미커버 대응)
+- **은퇴기간·월납입 단일화**: GoalsCard가 목표시점→은퇴년수·월납입을 localStorage 공유. Portfolio Strategy Report는 중복 입력 제거 → 그 값 읽어 AI 분석만.
+- **AI 리포트 정합성(핵심)**: ① 전략 캐시 `_strategy_fingerprint`에 수량·평단·현재가 포함(stale 리포트 차단, 회귀테스트 7건) ② **verified_facts 백엔드 실시간 시세 직접 조회(Phase 1)** — `_price_fast`/`_kr_price`로 평단가 폴백 deflate(NVDA 23%→5%) 차단, 앱 표와 일치 ③ 프롬프트 변수 바인딩 규칙(임의 숫자 금지) ④ 절세 스코프(US/KR 과세권 분리).
+- **타임아웃 격리(셧다운 방지)**: `_as_completed_safe` 헬퍼로 모든 병렬 루프(배당·Health·전략 metrics, 18곳) 일괄 안전화 — 51종목 일부 미완료 시 TimeoutError로 엔드포인트가 죽던 버그(배당 조회 실패) 차단. Health Score 외부지표 전부 실패 시 분산·섹터집중 로컬 fallback.
+- **전략 리포트 비동기화(524 해소)**: Cloudflare 100s 한도 초과 → POST는 백그라운드 생성 후 즉시 반환(`_strategy_jobs`) + `/strategy/poll` 폴링. 프론트 5초 간격 ~3.5분.
+- **배당 캘린더**: 월별 → **분기 히스토그램(YY/NQ)**, 과거 이력 48개월·events 400건 확대. "현재 수량 기준 환산" 고지.
+- **목표 기반 산정 근거**: `_project_goal` 방법론+학술/업계 레퍼런스(GBM 로그정규·Betterment 10/90·Kasten 2013) + 낙관/비관 80% 신뢰구간 + 쉬운 설명 + 행동 조언 + **목표 달성 필요 CAGR 역산**(`_required_cagr`, 회귀테스트 5건).
+- **저점발굴 시계열 매칭**: `_discovery_candidates_by_horizon` — 단기(런웨이>3·바닥다지기>80)·중기(R&D 집중도)·장기(0% decay). 전략 프롬프트 주입 + 리포트 블록.
+- **UI/UX**: 검증수치 프론트 숨김(백엔드 바인딩용 유지) · 분석탭 전 영역 문장 줄바꿈(BulletList·breakSentences) · 편집형 월배당 시뮬레이터(비중·배당률 즉시 재계산) · 리포트 분석 도출시각 우측 표기 · MD 생성일 KST 보정.
+- **B3 — 분석탭 3장 재배치**: Ⅰ스냅샷(추이·배당·비중) / Ⅱ리스크 진단·건강도(Health·경고·백테스트) / Ⅲ액션&목표(목표기반·AI전략) + 장 구분 헤더.
+- **[제2장] 리스크 진단 카드 UI**: 심각도별 카드(CRITICAL/MEDIUM 배지 + 제목 글자색 + ▪ 마커 + 카테고리). **design.md R1 준수** — Gemini 제안의 좌측 색 보더(border-left)는 R1 절대금지라 배지·글자색으로 대체.
+- **인시던트**: 2026-06-24 Anthropic API 가용성 저하(500/529 + Bash 안전분류기 일시 불가) → [docs/INCIDENT_2026-06-24_anthropic_availability.md](docs/INCIDENT_2026-06-24_anthropic_availability.md). provider-side, 코드 무관.
+- **테스트**: pytest 47 → **52 통과**(strategy_fingerprint 7 + goal_cagr 5 신규).
+- **판단·반박(Gemini 3자 검증)**: ① verified_facts가 진실이라는 전제 반박 — 평단가 폴백이 deflate된 쪽 → 실시간 시세(~23%)로 바로잡음 ② "하드코딩 디커플링 리팩터링" 반박 — 이미 멀티테넌트(개인값 0건), 제안된 파일(config_loader/timeframe_engine 등) 미존재.
+
+### 미결(다음 단계)
+- **B2 풀 통합**(상용화 단계): 리스크 카드에 Claude 정성 진단 1:1 매칭(백엔드 알림↔AI문단 구조화) + 스냅샷/액션 섹션 통합.
+- **SaaS 온보딩**(상용화 단계): `target_markets` 마스킹 + 리스크 성향 토글 → 발굴/추천 동적 연동.
+- **TrendsTab(시장 탭) R1 위반 2건 미수정**: `.tt-index-card-accent`(warn)·`.tt-news-card`(pos) 좌측 색 보더. 분석 탭은 깨끗.
+- **2-CLI 배포 규칙**: 한쪽만 배포하거나, 양쪽 모두 `fetch+merge origin/main → 재빌드 → 배포 → index.html·sw.js 번들 해시 일치 검증` 절차 준수(클로버 방지).
 
 ## 🆕 2026-06 세션 (상용화 + 로드맵 실행 + 보안)
 
