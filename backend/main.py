@@ -6754,6 +6754,30 @@ def get_discover(market: str = 'ALL', min_score: float = 0, sort: str = 'score',
         cnt_row = conn.execute(
             "SELECT COUNT(*) c, MAX(computed_at) mx FROM discovery_scores "
             "WHERE " + " AND ".join(where), params[:len(params) - 2]).fetchone()
+        # 캐시된 AI 심층 분석의 '추천(매수/보유/매도)'을 행에 합류 — 점수와 AI 판단을
+        # 한눈에 화해시키기 위함(정량 점수는 그대로 보존; AI는 별개 신호로 병기).
+        uniq = sorted({r['ticker'].upper() for r in rows})
+        ai_map: dict = {}
+        if uniq:
+            ph = " OR ".join(["cache_key LIKE ?"] * len(uniq))
+            for ar in conn.execute(
+                    "SELECT cache_key, value_json, computed_at FROM ai_cache WHERE " + ph,
+                    [f"stock_v2:{t}:%" for t in uniq]).fetchall():
+                parts = ar['cache_key'].split(':')
+                if len(parts) < 2:
+                    continue
+                tk = parts[1].upper()
+                prev = ai_map.get(tk)
+                if prev is None or ar['computed_at'] > prev[1]:
+                    try:
+                        reco = (json.loads(ar['value_json']) or {}).get('recommendation')
+                    except Exception:
+                        reco = None
+                    ai_map[tk] = (reco, ar['computed_at'])
+        for r in rows:
+            info = ai_map.get(r['ticker'].upper())
+            r['ai_reco'] = info[0] if info else None
+            r['ai_at'] = info[1] if info else None
     return {'items': rows, 'total': cnt_row['c'] if cnt_row else 0,
             'computed_at': cnt_row['mx'] if cnt_row else None}
 

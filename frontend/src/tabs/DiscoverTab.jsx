@@ -31,6 +31,10 @@ const EXCH = { NMS: '나스닥', NGM: '나스닥', NCM: '나스닥', NYQ: 'NYSE'
 const FAIL_KO = { 'PEG>1.5': '성장 대비 비쌈', 'EPS성장≤0': '이익 감소', '부채비율≥200': '빚 과다', '매출 급감': '매출 급감' }
 
 const mktKo = (m) => (m === 'KR' ? '한국' : m === 'US' ? '미국' : m)
+// AI 심층 분석 추천 색상 (매수 긍정 / 매도 부정 / 보유 중립)
+const recoColor = (r) => r === '매수' ? 'var(--m-positive)' : r === '매도' ? 'var(--m-negative)' : 'var(--m-text-secondary)'
+// 임상 단계 바이오 — PSR·런웨이로 못 잡는 이진 임상 이벤트 리스크. 백엔드 _BIO_CLINICAL_CATS와 일치.
+const BIO_CLINICAL = new Set(['AI 신약', 'AI 항체', '유전자편집', '유전자치료', '유전체', '합성생물학'])
 // 종합점수 → 컨빅션 등급 (투자자가 한눈에 강도를 알 수 있게)
 const convLabel = (s) => s >= 80 ? { t: '강력', c: 'var(--m-primary)' }
   : s >= 70 ? { t: '추천', c: 'var(--m-primary)' }
@@ -71,7 +75,7 @@ function CachedAI({ ticker, name, onPick }) {
   })
   const a = data?.cached ? data.data : null
   const aiAgo = data?.computed_at ? agoLabel(data.computed_at) : null
-  const recColor = (r) => r === '매수' ? 'var(--m-positive)' : r === '매도' ? 'var(--m-negative)' : 'var(--m-text-secondary)'
+  const recColor = recoColor
   if (!a) {
     return (
       <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(ticker) }}
@@ -450,9 +454,22 @@ export default function DiscoverTab() {
                               return <span className={v > 0 ? 'num-pos' : v < 0 ? 'num-neg' : ''}
                                 style={v == null ? { color: 'var(--m-text-tertiary)' } : {}}>{fmtPct(v)}</span> })()}
                       </td>
-                      <td style={{ ...td, textAlign: 'right', fontWeight: 900, fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                        {Math.round(row.composite_score)}
-                        <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--m-text-tertiary)', marginLeft: 2 }}>·{row.data_completeness}/{isEtf ? 3 : isInnov ? 4 : 5}</span>
+                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        <div style={{ fontWeight: 900, fontSize: 14 }}>
+                          {Math.round(row.composite_score)}
+                          <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--m-text-tertiary)', marginLeft: 2 }}>·{row.data_completeness}/{isEtf ? 3 : isInnov ? 4 : 5}</span>
+                        </div>
+                        {(row.ai_reco || (isInnov && BIO_CLINICAL.has(row.sector))) && (
+                          <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end', alignItems: 'center', marginTop: 2 }}>
+                            {isInnov && BIO_CLINICAL.has(row.sector) && (
+                              <span title="임상 이벤트 리스크 — PSR·런웨이로 측정 불가. 임상 성패 발표 시 주가가 하루에 ±30% 이상 급변할 수 있습니다."
+                                style={{ fontSize: 9.5, color: 'var(--m-negative)', cursor: 'help', fontWeight: 800 }}>⚠</span>)}
+                            {row.ai_reco && (
+                              <span title={`AI 심층 분석 의견: ${row.ai_reco} — 정량 점수와 별개의 질적 판단입니다. 행을 펼쳐 근거를 확인하세요.`}
+                                style={{ fontSize: 8.5, fontWeight: 800, padding: '0 4px', borderRadius: 2, lineHeight: 1.5,
+                                  color: recoColor(row.ai_reco), border: `1px solid ${recoColor(row.ai_reco)}` }}>AI {row.ai_reco}</span>)}
+                          </div>
+                        )}
                       </td>
                     </tr>
                     {open && (
