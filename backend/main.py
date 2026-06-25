@@ -4677,16 +4677,28 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     def _fetch_strategy_metric(h):
         tkr    = h.get('ticker', '')
         avg    = float(h.get('avg_price', 0))
-        return tkr, _calc_metrics(tkr, avg)
+        is_us  = not re.match(r'^A?\d{6}$', tkr)
+        # 권위 수치(Phase 1): 프론트가 시세를 못 넘겨도 백엔드가 직접 실시간 시세를 조회한다.
+        # 앱 보유 표와 동일 소스(_price_fast/_kr_price) → verified_facts가 표와 일치(평단가 폴백으로
+        # NVDA 23%→5%로 deflate되던 정합성 균열 차단). metrics와 같은 병렬 작업이라 추가 직렬 지연 없음.
+        live = None
+        try:
+            p = (_price_fast(tkr) if is_us else _kr_price(tkr)) or {}
+            live = p.get('current_price')
+        except Exception:
+            live = None
+        return tkr, _calc_metrics(tkr, avg), live
 
-    metrics_map = {}
+    metrics_map, price_map = {}, {}
     holdings_list = req.holdings
     with _cf.ThreadPoolExecutor(max_workers=min(len(holdings_list) or 1, 20)) as ex:
         futs = {ex.submit(_fetch_strategy_metric, h): h for h in holdings_list}
         for fut in _as_completed_safe(futs, timeout=30):
             try:
-                tkr, m = fut.result(timeout=0)
+                tkr, m, live = fut.result(timeout=0)
                 metrics_map[tkr] = m
+                if live:
+                    price_map[tkr] = live
             except Exception:
                 pass
 
@@ -4698,7 +4710,9 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
         sector = h.get('sector', '기타')
         acct   = h.get('account', '')
         is_us  = not re.match(r'^A?\d{6}$', tkr)
-        cur    = float(req.prices.get(tkr, {}).get('current_price') or (h.get('manual_price') or 0) or avg)
+        # 우선순위: 프론트 실시간가 → 백엔드 실시간가(price_map) → 수동 기준가 → 평단가
+        cur    = float(req.prices.get(tkr, {}).get('current_price')
+                       or price_map.get(tkr) or (h.get('manual_price') or 0) or avg)
         mul    = usd_krw if is_us else 1.0
         val    = qty * cur * mul
         pnl    = (cur - avg) / avg * 100 if avg > 0 else 0.0
