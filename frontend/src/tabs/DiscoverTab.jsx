@@ -56,6 +56,11 @@ function valNote(row) {
 const td = { padding: '8px 7px', fontSize: 12, color: 'var(--m-text)', whiteSpace: 'nowrap' }
 const th = { padding: '6px 7px', fontSize: 11, fontWeight: 700, color: 'var(--m-text-secondary)', whiteSpace: 'nowrap' }
 
+// 문장이 끝나면 줄바꿈 — 숫자 소수점($75.2B)·약어는 보존(앞이 숫자/공백이 아닐 때만).
+// ChartTab의 동일 헬퍼와 일치. whiteSpace:'pre-line'과 함께 써야 \n이 렌더됨.
+const breakSentences = (text) =>
+  typeof text === 'string' ? text.replace(/([^\d\s])([.?!])\s+/g, '$1$2\n').trim() : text
+
 // 캐시된 AI 심층 분석 인라인 표시 — 있으면 핵심 요약(추천·촉매·리스크) 자동 노출(무과금 읽기),
 // 없으면 라이브 생성 버튼. CLI 배치로 채워진 ai_cache(stock_v2)를 모든 사용자가 무료 열람.
 function CachedAI({ ticker, name, onPick }) {
@@ -81,13 +86,13 @@ function CachedAI({ ticker, name, onPick }) {
           color: recColor(a.recommendation), border: `1px solid ${recColor(a.recommendation)}` }}>{a.recommendation}</span>}
         {aiAgo && <span style={{ fontSize: 9.5, color: 'var(--m-text-tertiary)', marginLeft: 'auto' }}>분석 {aiAgo}</span>}
       </div>
-      <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)', lineHeight: 1.55 }}>{a.summary}</div>
+      <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>{breakSentences(a.summary)}</div>
       {(a.catalysts_short?.[0] || a.bear?.[0]) && (
         <div style={{ display: 'grid', gap: 4, marginTop: 7 }}>
-          {a.catalysts_short?.[0] && <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-secondary)', lineHeight: 1.5 }}>
-            <b style={{ color: 'var(--m-positive)' }}>촉매</b> {a.catalysts_short[0]}</div>}
-          {a.bear?.[0] && <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-secondary)', lineHeight: 1.5 }}>
-            <b style={{ color: 'var(--m-negative)' }}>리스크</b> {a.bear[0]}</div>}
+          {a.catalysts_short?.[0] && <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+            <b style={{ color: 'var(--m-positive)' }}>촉매</b> {breakSentences(a.catalysts_short[0])}</div>}
+          {a.bear?.[0] && <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+            <b style={{ color: 'var(--m-negative)' }}>리스크</b> {breakSentences(a.bear[0])}</div>}
         </div>
       )}
       <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(ticker) }}
