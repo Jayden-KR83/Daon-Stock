@@ -159,39 +159,56 @@ function SummaryItem({ label, n, klass, color }) {
   )
 }
 
-/* 룰별 그룹: 헤더 + 정렬된 행(종목명 좌 / 값 우). 나열식 대신 표 형태. */
+/* 심각도 → 배지/제목 글자색. design.md R1: 좌측 색띠 금지 → 의미는 글자색·배지로만. */
+const SEV_META = {
+  critical: { badge: 'CRITICAL', color: 'var(--m-negative)', bg: 'rgba(220,38,38,.10)' },
+  high:     { badge: 'HIGH',     color: 'var(--m-negative)', bg: 'rgba(220,38,38,.08)' },
+  med:      { badge: 'MEDIUM',   color: '#D97706',           bg: 'rgba(217,119,6,.12)' },
+  low:      { badge: '관찰',     color: 'var(--m-text-tertiary)', bg: 'var(--m-surface-variant)' },
+}
+
+/* 리스크 진단 카드 — 정량 경고(제목·종목 값) + 정성 진단(하단 문장) 결합.
+   design.md 준수: 4면 hairline 직사각 카드, 좌측 색띠 없음, 심각도=배지+제목 글자색, ▪ 사각 마커. */
 function RuleGroup({ group, nameByTicker = {} }) {
   const topSev = group.alerts[0]?.severity || 'med'
-  const sevClass = `is-${topSev}`
+  const sev = SEV_META[topSev] || SEV_META.med
   // 큰 손실: 손실 큰 순(value 오름차순=가장 음수 먼저), 그 외: 값 내림차순
   const rows = [...group.alerts].sort((a, b) =>
     group.rule === 'large_loss' ? (a.value || 0) - (b.value || 0)
                                 : (b.value || 0) - (a.value || 0))
 
   return (
-    <div style={{ padding: '10px 0', borderBottom: '1px solid var(--m-outline-variant)' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline',
-        justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8,
-          minWidth: 0, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--m-text)' }}>
-            {group.title}
-          </span>
-          <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
-            fontWeight: 600 }}>{group.alerts.length}건</span>
-        </div>
-        <span className={`sev-label ${sevClass}`}>{group.severityLabel}</span>
+    <div style={{ border: '1px solid var(--m-outline-variant)', borderRadius: 4,
+      background: 'var(--m-surface)', padding: '12px 14px', marginBottom: 8 }}>
+      {/* 배지(좌·심각도) + 카테고리(우) — 좌측 색띠 대신 배지로 위험도 표현 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.04em',
+          color: sev.color, background: sev.bg, padding: '2px 7px' }}>{sev.badge}</span>
+        <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)' }}>{group.category || ''}</span>
       </div>
 
-      {/* 정렬된 행 */}
+      {/* ▪ 제목 — 의미는 제목 글자색으로 (design.md) */}
+      <div style={{ display: 'flex', gap: 7, alignItems: 'baseline', marginBottom: 8 }}>
+        <span style={{ flexShrink: 0, width: 5, height: 5, background: sev.color,
+          alignSelf: 'flex-start', marginTop: 6 }} />
+        <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: sev.color, lineHeight: 1.5 }}>
+          {group.title}
+          <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--m-text-tertiary)',
+            marginLeft: 6 }}>{group.alerts.length}건</span>
+        </h3>
+      </div>
+
+      {/* 정량 — 종목·값 행 */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {group.rule === 'overlap_exposure'
           ? rows.map((a, i) => <OverlapRows key={i} alert={a} nameByTicker={nameByTicker} />)
           : rows.map((a, i) => <AlertRow key={i} alert={a} ruleKind={group.rule} nameByTicker={nameByTicker} />)}
       </div>
 
-      <div className="ko-keep" style={{ fontSize: 10.5,
-        color: 'var(--m-text-tertiary)', marginTop: 6, lineHeight: 1.55 }}>
+      {/* 정성 진단 — 본문은 검정(--m-text) 기본 (design.md: 읽는 문장에 회색 금지) */}
+      <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)',
+        lineHeight: 1.6, marginTop: 8 }}>
         {group.hint}
       </div>
     </div>
@@ -264,27 +281,27 @@ function OverlapRows({ alert, nameByTicker = {} }) {
 function groupByRule(alerts) {
   const meta = {
     large_loss: {
-      title: '큰 손실 종목',
+      title: '큰 손실 종목', category: '손실 누적 진단',
       hint: '평단가 대비 손실 임계 초과 — 손절·추가매수·관망 전략 점검',
       severityLabel: '심각',
     },
     ticker_concentration: {
-      title: '단일 종목 과집중',
+      title: '단일 종목 과집중', category: '종목 집중도',
       hint: '단일 종목 권장 한도 초과 — 일부 정리 또는 다른 종목 확대',
       severityLabel: '주의',
     },
     sector_concentration: {
-      title: '단일 섹터 과집중',
+      title: '단일 섹터 과집중', category: '섹터 노출도',
       hint: '단일 섹터 권장 한도 초과 — 타 섹터 분산 권장',
       severityLabel: '주의',
     },
     overlap_exposure: {
-      title: '중복 노출',
+      title: '중복 노출', category: '동조화 리스크',
       hint: 'ETF에 이미 포함된 개별 종목 동시 보유 — 비중 중복 가능',
       severityLabel: '관찰',
     },
     too_few_holdings: {
-      title: '극단적 미분산',
+      title: '극단적 미분산', category: '분산도',
       hint: '분산 효과를 위해 최소 5종목 이상 보유 권장',
       severityLabel: '주의',
     },

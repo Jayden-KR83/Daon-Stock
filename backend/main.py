@@ -4677,16 +4677,28 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     def _fetch_strategy_metric(h):
         tkr    = h.get('ticker', '')
         avg    = float(h.get('avg_price', 0))
-        return tkr, _calc_metrics(tkr, avg)
+        is_us  = not re.match(r'^A?\d{6}$', tkr)
+        # 권위 수치(Phase 1): 프론트가 시세를 못 넘겨도 백엔드가 직접 실시간 시세를 조회한다.
+        # 앱 보유 표와 동일 소스(_price_fast/_kr_price) → verified_facts가 표와 일치(평단가 폴백으로
+        # NVDA 23%→5%로 deflate되던 정합성 균열 차단). metrics와 같은 병렬 작업이라 추가 직렬 지연 없음.
+        live = None
+        try:
+            p = (_price_fast(tkr) if is_us else _kr_price(tkr)) or {}
+            live = p.get('current_price')
+        except Exception:
+            live = None
+        return tkr, _calc_metrics(tkr, avg), live
 
-    metrics_map = {}
+    metrics_map, price_map = {}, {}
     holdings_list = req.holdings
     with _cf.ThreadPoolExecutor(max_workers=min(len(holdings_list) or 1, 20)) as ex:
         futs = {ex.submit(_fetch_strategy_metric, h): h for h in holdings_list}
         for fut in _as_completed_safe(futs, timeout=30):
             try:
-                tkr, m = fut.result(timeout=0)
+                tkr, m, live = fut.result(timeout=0)
                 metrics_map[tkr] = m
+                if live:
+                    price_map[tkr] = live
             except Exception:
                 pass
 
@@ -4698,7 +4710,9 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
         sector = h.get('sector', '기타')
         acct   = h.get('account', '')
         is_us  = not re.match(r'^A?\d{6}$', tkr)
-        cur    = float(req.prices.get(tkr, {}).get('current_price') or (h.get('manual_price') or 0) or avg)
+        # 우선순위: 프론트 실시간가 → 백엔드 실시간가(price_map) → 수동 기준가 → 평단가
+        cur    = float(req.prices.get(tkr, {}).get('current_price')
+                       or price_map.get(tkr) or (h.get('manual_price') or 0) or avg)
         mul    = usd_krw if is_us else 1.0
         val    = qty * cur * mul
         pnl    = (cur - avg) / avg * 100 if avg > 0 else 0.0
@@ -6942,6 +6956,31 @@ def _months_until(date_str: str) -> int:
 # 80% 신뢰구간(10~90 백분위)의 한쪽 z-점수. Φ(1.2816)=0.90.
 _Z_80 = 1.2816
 
+def _required_cagr(current_value: float, monthly: float, months: int, target: float):
+    """목표(target)에 도달하기 위해 필요한 연복리수익률(CAGR)을 역산.
+    적립식 미래가치 FV(현재가·월납입·기간·r)=target 을 만족하는 연수익률 r을 이분법으로 푼다.
+    (FV는 r에 대해 단조증가 → 이분법 안정). 현재가+적립만으로 이미 목표 초과면 음수, 1년 +100%로도
+    불가하면 None. 사용자 입력만으로 계산되는 순수 함수(멀티테넌트 — 개인값 하드코딩 없음)."""
+    if months <= 0 or target <= 0:
+        return None
+    def fv(annual):
+        rm = (1.0 + annual) ** (1.0 / 12.0) - 1.0
+        if abs(rm) < 1e-12:
+            return current_value + monthly * months
+        return current_value * (1.0 + rm) ** months + monthly * (((1.0 + rm) ** months - 1.0) / rm)
+    lo, hi = -0.90, 1.00            # -90% ~ +100%/yr 탐색 범위
+    if fv(hi) < target:
+        return None                 # 연 100%로도 도달 불가
+    if fv(lo) >= target:
+        return lo
+    for _ in range(80):
+        mid = (lo + hi) / 2.0
+        if fv(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return round((lo + hi) / 2.0, 4)
+
 def _project_goal(current_value: float, monthly: float, months: int,
                   annual_return: float, annual_vol: float, target: float) -> dict:
     """목표 달성 궤적·밴드·달성확률 추정 (결정론 + 로그정규 종가 분포).
@@ -7007,6 +7046,7 @@ def _project_goal(current_value: float, monthly: float, months: int,
         'target': round(target),
         'shortfall': round(target - median_final),   # 양수=부족
         'probability': round(prob, 3) if prob is not None else None,
+        'required_cagr': _required_cagr(current_value, monthly, months, target),  # 목표 달성 필요 연수익률
         'status': status,
         'path': path,
         'methodology': {
