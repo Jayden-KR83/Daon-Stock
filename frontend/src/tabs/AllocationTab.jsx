@@ -416,26 +416,17 @@ export default function AllocationTab() {
         </div>
       )}
 
-      {/* Net Worth 추이 — 항상 펼침 (시계열은 한번에 봐야 의미) */}
+      {/* ━━ Ⅰ. 포트폴리오 스냅샷 — 현황 한눈에 ━━ */}
+      <ChapterHeader n="Ⅰ" title="포트폴리오 스냅샷" sub="자산 추이 · 배당 · 비중 구성" />
+
+      {/* Net Worth 추이 */}
       <NetWorthChart />
-
-      {/* 목표 기반 포트폴리오 — Net Worth 바로 아래 (계획 도구 묶음) */}
-      <GoalsCard />
-
-      {/* 핵심 분석: 항상 펼침 — 가장 중요 */}
-      {allHoldings.length > 0 && (
-        <HealthScoreCard allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
-      )}
-
-      {/* 룰 기반 경고 — 항상 펼침 (긴급도 ↑) */}
-      {allHoldings.length > 0 && (
-        <AlertsCard allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
-      )}
 
       {/* 배당금 이력 + 캘린더 */}
       {allHoldings.length > 0 && (
         <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
       )}
+      {/* (이어서 아래에 비중 — 계좌·섹터·종목 분해가 표시됩니다) */}
 
 
       {/* View toggle */}
@@ -665,10 +656,25 @@ export default function AllocationTab() {
         </>
       )}
 
+      {/* ━━ Ⅱ. 리스크 진단 · 건강도 ━━ */}
+      {allHoldings.length > 0 && (
+        <>
+          <ChapterHeader n="Ⅱ" title="리스크 진단 · 건강도"
+            sub="종합 건강 점수 · 자동 리밸런싱 경고 · 백테스트" />
+          <HealthScoreCard allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
+          <AlertsCard allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
+        </>
+      )}
+
       {/* 백테스트 시뮬레이션 */}
       {allHoldings.length > 0 && (
         <BacktestSection allHoldings={allHoldings} />
       )}
+
+      {/* ━━ Ⅲ. 액션 플랜 & 목표 ━━ */}
+      <ChapterHeader n="Ⅲ" title="액션 플랜 & 목표"
+        sub="목표 기반 계획 · AI 시계열 전략 · 리밸런싱 · 액션" />
+      <GoalsCard />
 
       {/* 다온 AI 전략 리포트 — Portfolio Strategy Report 스타일 */}
       {allHoldings.length > 0 && (
@@ -939,6 +945,21 @@ function splitToSentences(text) {
 function breakSentences(text) {
   if (typeof text !== 'string') return text
   return text.replace(/([^\d\s])([.?!。])\s+/g, '$1$2\n').trim()
+}
+
+/* 분석탭 3대 장 구분 헤더 (스냅샷 → 리스크 진단 → 액션). design.md 직사각·무채색 준수. */
+function ChapterHeader({ n, title, sub }) {
+  return (
+    <div style={{ margin: '20px 0 10px', borderTop: '2px solid var(--m-text)', paddingTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 900, color: 'var(--m-primary)' }}>{n}</span>
+        <span style={{ fontSize: 15, fontWeight: 900, color: 'var(--m-text)',
+          letterSpacing: '-.02em' }}>{title}</span>
+      </div>
+      {sub && <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
+        marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
 }
 
 /* 숫자·퍼센트·금액을 글자색+굵게 강조 (음영 X, 직사각형 X). 음수=빨강 / 양수=초록 / 중립=진한글씨 */
