@@ -6932,6 +6932,31 @@ def _months_until(date_str: str) -> int:
 # 80% 신뢰구간(10~90 백분위)의 한쪽 z-점수. Φ(1.2816)=0.90.
 _Z_80 = 1.2816
 
+def _required_cagr(current_value: float, monthly: float, months: int, target: float):
+    """목표(target)에 도달하기 위해 필요한 연복리수익률(CAGR)을 역산.
+    적립식 미래가치 FV(현재가·월납입·기간·r)=target 을 만족하는 연수익률 r을 이분법으로 푼다.
+    (FV는 r에 대해 단조증가 → 이분법 안정). 현재가+적립만으로 이미 목표 초과면 음수, 1년 +100%로도
+    불가하면 None. 사용자 입력만으로 계산되는 순수 함수(멀티테넌트 — 개인값 하드코딩 없음)."""
+    if months <= 0 or target <= 0:
+        return None
+    def fv(annual):
+        rm = (1.0 + annual) ** (1.0 / 12.0) - 1.0
+        if abs(rm) < 1e-12:
+            return current_value + monthly * months
+        return current_value * (1.0 + rm) ** months + monthly * (((1.0 + rm) ** months - 1.0) / rm)
+    lo, hi = -0.90, 1.00            # -90% ~ +100%/yr 탐색 범위
+    if fv(hi) < target:
+        return None                 # 연 100%로도 도달 불가
+    if fv(lo) >= target:
+        return lo
+    for _ in range(80):
+        mid = (lo + hi) / 2.0
+        if fv(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return round((lo + hi) / 2.0, 4)
+
 def _project_goal(current_value: float, monthly: float, months: int,
                   annual_return: float, annual_vol: float, target: float) -> dict:
     """목표 달성 궤적·밴드·달성확률 추정 (결정론 + 로그정규 종가 분포).
@@ -6997,6 +7022,7 @@ def _project_goal(current_value: float, monthly: float, months: int,
         'target': round(target),
         'shortfall': round(target - median_final),   # 양수=부족
         'probability': round(prob, 3) if prob is not None else None,
+        'required_cagr': _required_cagr(current_value, monthly, months, target),  # 목표 달성 필요 연수익률
         'status': status,
         'path': path,
         'methodology': {

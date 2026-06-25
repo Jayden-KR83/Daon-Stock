@@ -211,6 +211,35 @@ export default function GoalsCard() {
             ))}
           </div>
 
+          {/* 목표 달성 필요 수익률(CAGR) — '연 몇 %를 벌어야 하나'를 가정 수익률과 비교 */}
+          <div className="ko-keep" style={{ fontSize: 11.5, lineHeight: 1.6, marginBottom: 10,
+            color: 'var(--m-text-secondary)' }}>
+            {proj.required_cagr == null ? (
+              <span>
+                <strong style={{ color: 'var(--m-negative)' }}>필요 수익률</strong> 현재 기간·적립으로는
+                도달이 어렵습니다(연 100% 초과 필요) — 목표 금액·기간·월 납입 재검토 권장.
+              </span>
+            ) : (() => {
+              const req = proj.required_cagr * 100
+              const assumed = form.return_pct
+              const gap = req - assumed
+              const reqColor = req <= assumed ? 'var(--m-positive)' : '#D97706'
+              return (
+                <>
+                  <strong style={{ color: 'var(--m-text)' }}>목표 달성 필요 수익률</strong>{' '}
+                  <strong style={{ color: reqColor, fontVariantNumeric: 'tabular-nums' }}>
+                    연 {req <= 0 ? '0' : req.toFixed(1)}%
+                  </strong>
+                  <span style={{ color: 'var(--m-text-tertiary)' }}> (가정 {assumed}%)</span>
+                  {' — '}
+                  {req <= 0 ? '이미 목표를 초과한 상태입니다.'
+                    : gap <= 0 ? '가정 수익률 안에서 달성 가능합니다.'
+                    : `가정보다 ${gap.toFixed(1)}%p 높습니다. 월 납입을 늘리거나 기간을 늘리면 필요 수익률이 내려갑니다.`}
+                </>
+              )
+            })()}
+          </div>
+
           {/* 낙관·비관 범위 — best case는 '상위 10% 낙관'이지 기대값이 아님을 명확히 */}
           {proj.optimistic_final != null && (
             <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)',
