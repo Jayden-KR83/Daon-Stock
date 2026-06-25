@@ -127,12 +127,13 @@ function DetailPanel({ row, onPick }) {
               connectNulls isAnimationActive={false} />
           </RadarChart>
         </ResponsiveContainer>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', justifyContent: 'center', fontSize: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10.5, marginTop: 4 }}>
           {AXES.map(ax => {
             const v = axVal(row, ax)
-            return <span key={ax.key} title={ax.desc} style={{ color: 'var(--m-text-secondary)', cursor: 'help' }}>
-              {ax.label} <b style={{ color: v == null ? 'var(--m-text-tertiary)' : 'var(--m-text)' }}>{v == null ? '—' : Math.round(v)}</b>
-            </span>
+            return <div key={ax.key} title={ax.desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: 'var(--m-text-secondary)', cursor: 'help' }}>
+              <span>{ax.label}</span>
+              <b style={{ color: v == null ? 'var(--m-text-tertiary)' : 'var(--m-text)', fontVariantNumeric: 'tabular-nums' }}>{v == null ? '—' : Math.round(v)}</b>
+            </div>
           })}
         </div>
       </div>
@@ -221,12 +222,13 @@ function InnovDetail({ row, onPick }) {
               connectNulls isAnimationActive={false} />
           </RadarChart>
         </ResponsiveContainer>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', justifyContent: 'center', fontSize: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10.5, marginTop: 4 }}>
           {INNOV_AXES.map(ax => {
             const v = axVal(row, ax)
-            return <span key={ax.key} title={ax.desc} style={{ color: 'var(--m-text-secondary)', cursor: 'help' }}>
-              {ax.label} <b style={{ color: v == null ? 'var(--m-text-tertiary)' : 'var(--m-text)' }}>{v == null ? '—' : Math.round(v)}</b>
-            </span>
+            return <div key={ax.key} title={ax.desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: 'var(--m-text-secondary)', cursor: 'help' }}>
+              <span>{ax.label}</span>
+              <b style={{ color: v == null ? 'var(--m-text-tertiary)' : 'var(--m-text)', fontVariantNumeric: 'tabular-nums' }}>{v == null ? '—' : Math.round(v)}</b>
+            </div>
           })}
         </div>
       </div>
@@ -239,8 +241,9 @@ function InnovDetail({ row, onPick }) {
           {kv('52주 위치', row.near_52w_high == null ? '—' : Math.round(row.near_52w_high * 100) + '%', '고점 대비 현재가 위치 — 낮을수록 저점권')}
           {kv('데이터', `${row.data_completeness}/4`, '4개 요소 중 평가에 쓰인 수')}
         </div>
-        <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)', marginTop: 9, lineHeight: 1.5 }}>
-          💡 적자 단계의 AI·바이오 혁신주를 <b>이익(PEG)이 아니라 매출·파이프라인·바닥다지기·생존력</b>으로 평가합니다. PSR이 R&D집중도 대비 낮을수록 “파이프라인이 주가에 덜 반영”된 저점 후보예요.
+        <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)', marginTop: 9, lineHeight: 1.6 }}>
+          💡 적자 단계의 AI·바이오 혁신주를 <b>이익(PEG)이 아니라 매출·파이프라인·바닥다지기·생존력</b>으로 평가합니다.<br />
+          PSR이 R&D집중도 대비 낮을수록 “파이프라인이 주가에 덜 반영”된 저점 후보예요.
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, fontSize: 10.5, color: 'var(--m-text-tertiary)' }}>
           <span>{mktKo(row.market)} · {exch}</span><span>·</span><span>{row.sector}</span>

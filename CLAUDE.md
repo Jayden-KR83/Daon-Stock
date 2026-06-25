@@ -22,7 +22,7 @@
 ## 작업 시작 전 필수 확인
 
 1. **기능 추가 / 큰 변경** — `docs/architecture.md`로 영향 범위 파악 → 필요시 **Plan Mode 선행** (구조 먼저 합의)
-2. **UI 추가/수정** — `design.md` 준수 (특히 **"🟥 AGENT 필수 규칙" R1~R5는 강제** — 둥근 AI-인사이트 카드 금지 / 차트 무채색 금지·CHART_COLORS / 도형 hover 금액 / 버튼 `.btn-primary` 단일 위계 / 머지 전 self-check) + `docs/troubleshooting.md`의 UI 9 체크리스트. **머지 전 R1~R5 정적 grep 자가검증 필수.**
+2. **UI 추가/수정** — `design.md` 준수 (특히 **"🟥 AGENT 필수 규칙" R1~R6은 강제** — 둥근 AI-인사이트 카드 금지 / 차트 무채색 금지·CHART_COLORS / 도형 hover 금액 / 버튼 `.btn-primary` 단일 위계 / **R6 다문장 산문은 문장마다 줄바꿈(breakSentences·pre-line)·점수 나열 세로정렬** / 머지 전 self-check) + `docs/troubleshooting.md`의 UI 9 체크리스트. **머지 전 R1~R6 정적 grep 자가검증 필수.**
 3. **백엔드 endpoint** — `docs/api.md`의 캐시 TTL · 인증 의존성 · 에러 처리 원칙 따름
 4. **배포** — `docs/deployment.md`의 검증 체크리스트 모두 통과 후에만 "완료" 보고
 
