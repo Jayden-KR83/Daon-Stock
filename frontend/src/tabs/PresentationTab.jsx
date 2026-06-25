@@ -205,6 +205,9 @@ const MILESTONES = [
   { phase: 'P31', label: 'Web Push 알림 (V2)',    desc: 'VAPID + service-worker push로 브라우저 종료 시에도 OS 알림 도달. 알림 벨 켜기/끄기·테스트 토글 + cron 푸시 발송.', done: true },
   { phase: 'P32', label: '한국 종목 Fundamentals & Peers', desc: 'Naver 스크래핑으로 KR PER·PBR·ROE·시총·EPS·배당 + 동일업종비교. 종목 탭 게이트(isUs) KR 개방.', done: true },
   { phase: 'P33', label: '모바일 스와이프 + AI 주간 리밸런싱', desc: '좌우 스와이프 탭 전환(충돌 가드) + 매주 월요일 Haiku 리밸런싱 리포트 자동 발송(cron + 푸시).', done: true },
+  { phase: 'P34', label: '분석 리포트 데이터 정합성', desc: '전략 캐시 지문에 수량·평단·현재가 포함 + verified_facts를 백엔드 실시간 시세로 직접 산출(평단가 폴백 방지) + 프롬프트 변수 바인딩 + 절세 스코프(US/KR 과세권 분리). 상단 표와 AI 본문 수치 일치.', done: true },
+  { phase: 'P35', label: '분석 탭 안정화 & 3단 재배치', desc: '병렬 조회 타임아웃 격리(배당·Health·전략 셧다운 방지) + 전략 리포트 비동기화(Cloudflare 524 해소·폴링) + 리스크 진단 카드(심각도 배지·design.md R1 준수) + 스냅샷/리스크/액션 3장 구조.', done: true },
+  { phase: 'P36', label: '목표 기반 고도화 & 한국 펀드 대응', desc: '목표 달성 필요 수익률(CAGR) 역산 + 산정 근거·방법론(로그정규·Betterment·Kasten) + 수동 기준가(시세 미조회 펀드) + 분기 배당 히스토그램(YY/NQ) + 저점발굴 시계열 매칭.', done: true },
   { phase: 'Next', label: '상용화 — 결제·약관·모니터링', desc: '구독 결제 연동 · 이용약관/개인정보처리방침 · 업타임 모니터링/알림 · support@ 이메일 도메인.', done: false },
 ]
 
@@ -231,9 +234,9 @@ const COMPARE_FEATURES = [
 const ROADMAP = [
   { title: '채권 혼합 ETF 데이터 소스 확장', priority: 'High',
     desc: '447180·404610·470000 등 Yahoo/Naver 모두에서 조회 불가한 한국 ETF/펀드 시세. KRX OpenAPI 또는 KIS Developers API 연동 검토.',
-    cost: 'KRX 무료. KIS 일 5천건 무료', devTime: '2~3 세션 (4~6h)',
-    considerations: 'KRX Open API는 인증 토큰 필요. 3종목만 위해 추가 의존성 도입은 비용 대비 효과 낮음.',
-    verdict: '보류 권장', verdictReason: '해당 3종목만 영향. 수동 가격 입력 필드 추가로 해결 가능' },
+    cost: 'KRX 무료. KIS 일 5천건 무료', devTime: '완료 (2026.06 · 수동 기준가 방식)',
+    considerations: 'KRX/KIS API는 인증 토큰 + 추가 의존성 필요(비용 대비 효과 낮음) → 깨지기 쉬운 스크래퍼 대신 수동 입력 채택.',
+    verdict: '완료', verdictReason: '수동 기준가 입력 필드 구현 — 시세 미조회 펀드/일부 ETF를 사용자 입력 참고가로 평가·비중·추이에 반영(라이브 검증). 상장 ETF는 yfinance .KS 자동 유지' },
   { title: 'Web Push 알림 (V2)', priority: 'High',
     desc: 'VAPID + service-worker push로 브라우저를 닫아도 목표가·손절가 도달 알림이 OS로 도착. 알림 벨에 켜기/끄기·테스트 토글.',
     cost: 'Web Push 무료', devTime: '완료 (2026.06)',
