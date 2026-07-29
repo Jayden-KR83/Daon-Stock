@@ -27,7 +27,7 @@
 ### 미결(다음 단계)
 - **B2 풀 통합**(상용화 단계): 리스크 카드에 Claude 정성 진단 1:1 매칭(백엔드 알림↔AI문단 구조화) + 스냅샷/액션 섹션 통합.
 - **SaaS 온보딩**(상용화 단계): `target_markets` 마스킹 + 리스크 성향 토글 → 발굴/추천 동적 연동.
-- **TrendsTab(시장 탭) R1 위반 2건 미수정**: `.tt-index-card-accent`(warn)·`.tt-news-card`(pos) 좌측 색 보더. 분석 탭은 깨끗.
+- ~~**TrendsTab(시장 탭) R1 위반 2건**~~ **✅ 해결(2026-07-27)** — `.tt-index-card-accent`·`.tt-news-card`는 이미 4면 hairline으로 수정돼 있었음. 실제 잔존 위반은 `App.css .m3-card.is-emphasized`의 `border-left:3px m-primary`(미사용 죽은 CSS)였고 4면 accent 보더로 교체. R1 전면 grep 클린(나머지 border-left는 중립 구조선).
 - **2-CLI 배포 규칙**: 한쪽만 배포하거나, 양쪽 모두 `fetch+merge origin/main → 재빌드 → 배포 → index.html·sw.js 번들 해시 일치 검증` 절차 준수(클로버 방지).
 
 ## 🆕 2026-06 세션 (상용화 + 로드맵 실행 + 보안)

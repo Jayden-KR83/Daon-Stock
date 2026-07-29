@@ -528,8 +528,9 @@ table td, table th {
 .m3-card.is-elevated {
   border-color: var(--m-outline);
 }
+/* R1: 좌측 색띠 금지 → 4면 균일 accent 보더로 강조(.is-elevated와 동형) */
 .m3-card.is-emphasized {
-  border-left: 3px solid var(--m-primary);
+  border-color: var(--m-primary);
 }
 
 /* M3 Section Header — 좌측 색띠 + title + action */
