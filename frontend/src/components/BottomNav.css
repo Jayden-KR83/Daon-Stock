@@ -1,51 +1,30 @@
-/* ── BottomNav — DAON Quantum (앱 모드 전용) ── */
-/* 전체 탭을 한 줄 가로 스크롤 — 더보기 시트 폐지(2026-06) + 양 끝 페이드 힌트 */
+/* ── BottomNav — DAON (앱 모드 전용) ── */
+/* 주요 5칸 고정(주요 4탭 + 더보기). 가로 스크롤 탭바 폐지(2026-07) — 발견성↑ */
 .bottom-nav-wrap {
   position: fixed;
   bottom: 0; left: 0; width: 100%;
   z-index: 9999;
   box-shadow: 0 -2px 12px rgba(0,0,0,.06);
-  pointer-events: none;            /* 페이드는 통과 — 실제 클릭은 nav가 받음 */
 }
 .bottom-nav {
-  position: relative;
   display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
   background: var(--clr-surface);
   border-top: 1px solid var(--clr-border-md);
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;            /* Firefox: 스크롤바 숨김 */
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  pointer-events: auto;
 }
-.bottom-nav::-webkit-scrollbar { display: none; }  /* Chrome/Safari */
-
-/* 양 끝 페이드 — 스크롤 여지가 있을 때만(can-left/can-right) 나타남 */
-.nav-fade {
-  position: absolute; top: 0; bottom: 0; width: 28px;
-  pointer-events: none; opacity: 0; transition: opacity .18s ease;
-  z-index: 1;
-}
-.nav-fade-left  { left: 0;  background: linear-gradient(to right, var(--clr-surface), transparent); }
-.nav-fade-right { right: 0; background: linear-gradient(to left,  var(--clr-surface), transparent); }
-.bottom-nav-wrap.can-left  .nav-fade-left  { opacity: 1; }
-.bottom-nav-wrap.can-right .nav-fade-right { opacity: 1; }
 
 .nav-btn {
-  flex: 0 0 auto;
-  min-width: 64px;
+  flex: 1 1 0;
+  min-width: 0;                     /* 5칸이 좁은 폭에서도 균등 분할 */
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  gap: 3px; padding: 8px 6px 10px;
+  gap: 3px; padding: 8px 4px 10px;
   border: none; background: transparent;
   cursor: pointer; color: var(--clr-text-muted);
   font-family: inherit;
   transition: color var(--t-base), background var(--t-base);
   border-top: 2px solid transparent;
-  min-height: 54px;
+  min-height: 54px;                 /* 터치 타겟 ≥48px */
 }
 .nav-btn.active {
   color: var(--clr-info-dark);
@@ -70,7 +49,7 @@
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* 매우 좁은 화면(<340px): 폰트 크기 추가 축소로 라벨 잘림 방지 */
+/* 매우 좁은 화면(<340px): 라벨 축소로 잘림 방지 */
 @media (max-width: 340px) {
   .nav-label { font-size: 9px; letter-spacing: 0; }
   .nav-btn   { padding: 8px 2px 10px; }
@@ -80,3 +59,58 @@
   max-width: 480px; left: 50%;
   transform: translateX(-50%);
 }
+
+/* ── 더보기 바텀 시트 ── */
+.nav-sheet-scrim {
+  position: fixed; inset: 0;
+  z-index: 10000;
+  background: rgba(15,23,42,.42);
+  display: flex; align-items: flex-end; justify-content: center;
+  animation: navScrimIn .16s ease;
+}
+@keyframes navScrimIn { from { opacity: 0 } to { opacity: 1 } }
+
+.nav-sheet {
+  width: 100%; max-width: 480px;
+  background: var(--clr-surface);
+  border-top-left-radius: 4px; border-top-right-radius: 4px;
+  border: 1px solid var(--clr-border-md);
+  box-shadow: 0 -6px 24px rgba(0,0,0,.16);
+  padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  animation: navSheetUp .2s cubic-bezier(.22,.61,.36,1);
+}
+@keyframes navSheetUp { from { transform: translateY(100%) } to { transform: translateY(0) } }
+
+.nav-sheet-handle {
+  width: 36px; height: 4px; border-radius: 2px;
+  background: var(--clr-border-md);
+  margin: 4px auto 10px;
+}
+.nav-sheet-title {
+  font-size: 12px; font-weight: 800;
+  color: var(--clr-text-sub); margin-bottom: 10px; padding-left: 2px;
+}
+.nav-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.nav-sheet-item {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 6px; padding: 12px 4px;
+  min-height: 68px;                 /* 터치 타겟 여유 */
+  border: 1px solid var(--clr-border-md); border-radius: 4px;
+  background: transparent; cursor: pointer;
+  color: var(--clr-text-sub); font-family: inherit;
+  transition: color var(--t-base), background var(--t-base), border-color var(--t-base);
+}
+.nav-sheet-item:hover { background: rgba(0,0,0,.03); }
+.nav-sheet-item.active {
+  color: var(--clr-info-dark);
+  border-color: var(--clr-info-dark);
+  background: rgba(14,165,233,.06);
+}
+.nav-sheet-icon { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+.nav-sheet-icon svg { width: 22px; height: 22px; }
+.nav-sheet-label { font-size: 11px; font-weight: 700; white-space: nowrap; }

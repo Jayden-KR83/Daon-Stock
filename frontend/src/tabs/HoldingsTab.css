@@ -46,7 +46,10 @@
 .holding-row:hover { background: var(--m-surface-variant); border-radius: 4px; }
 
 .holding-row > .h-avatar   { grid-area: avatar; cursor: pointer; }
-.holding-row > .h-identity { grid-area: identity; cursor: pointer; min-width: 0; overflow: hidden; }
+/* flex + min-width:0 — 긴 종목명이 먼저 줄고(ellipsis), 티커는 밀려나지 않게.
+   (inline span에는 text-overflow가 적용되지 않아 '…' 없이 하드 클립되던 것 보완) */
+.holding-row > .h-identity { grid-area: identity; cursor: pointer; min-width: 0; overflow: hidden;
+  display: flex; align-items: baseline; }
 .holding-row > .h-meta     { grid-area: meta; min-width: 0; overflow: hidden; }
 .holding-row > .h-spark    { grid-area: spark; display: flex; align-items: center; justify-content: center; min-width: 0; }
 .holding-row > .h-value    { grid-area: value; text-align: right; min-width: 0; }
@@ -58,8 +61,10 @@
   font-size: 14px; font-weight: 700;
   color: var(--m-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; flex: 0 1 auto;      /* 이름이 먼저 축소되며 '…' 표시 */
 }
 .h-identity-ticker {
+  flex: 0 0 auto;                    /* 티커는 밀려나거나 잘리지 않음 */
   display: inline-block;
   font-size: 10.5px; font-weight: 600;
   color: var(--m-text-tertiary);

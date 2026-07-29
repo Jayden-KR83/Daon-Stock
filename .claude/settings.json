@@ -12,12 +12,16 @@
       "Bash(ssh -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20 \"sudo systemctl restart portfolio && sleep 3 && sudo systemctl is-active portfolio\")",
       "Bash(python -c \"from PIL import Image, ImageDraw, ImageFont; print\\(''PIL OK''\\)\")",
       "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no portfolio.py daon_icon.png ubuntu@168.107.13.20:~/portfolio/)",
-      "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\user\\\\Desktop\\\\쿠든카피 주식앱\\\\portfolio.py\" ubuntu@168.107.13.20:~/portfolio/)",
-      "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\user\\\\Desktop\\\\쿠든카피 주식앱\\\\portfolio.py\" \"C:\\\\Users\\\\user\\\\Desktop\\\\쿠든카피 주식앱\\\\.streamlit\\\\config.toml\" ubuntu@168.107.13.20:~/portfolio/)",
-      "Bash(ssh -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20 \"ls ~/portfolio/.streamlit/ 2>/dev/null || echo ''NO .streamlit DIR''\")"
+      "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\user\\\\AgentDev\\\\daon\\\\portfolio.py\" ubuntu@168.107.13.20:~/portfolio/)",
+      "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\user\\\\AgentDev\\\\daon\\\\portfolio.py\" \"C:\\\\Users\\\\user\\\\AgentDev\\\\daon\\\\.streamlit\\\\config.toml\" ubuntu@168.107.13.20:~/portfolio/)",
+            "Bash(ssh -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20 \"ls ~/portfolio/.streamlit/ 2>/dev/null || echo ''NO .streamlit DIR''\")",
+      "Bash(scp -i \"C:/Users/user/Downloads/oracle-key.key\" -o StrictHostKeyChecking=no *)",
+      "Bash(scp -r -i \"C:/Users/user/Downloads/oracle-key.key\" -o StrictHostKeyChecking=no *)",
+      "Bash(ssh -i \"C:/Users/user/Downloads/oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20*)"
     ],
+
     "additionalDirectories": [
-      "C:\\Users\\user\\Desktop\\쿠든카피 주식앱"
+      "C:\\Users\\user\\AgentDev\\daon"
     ]
   }
 }

@@ -26,7 +26,8 @@
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
-.tt-index-card-accent { border-left: 3px solid var(--clr-warn); }
+/* R1: 좌측 색띠 금지 → 4면 균일 hairline. 의미(주의)는 제목 글자색·배지로만 표현. */
+.tt-index-card-accent { border: 1px solid var(--m-outline-variant); }
 
 .tt-index-name {
   font-size: 11px; font-weight: 700;
@@ -359,7 +360,8 @@
 }
 
 /* ── 상단 뉴스 카드 ── */
-.tt-news-card { border-left: 3px solid var(--clr-pos); }
+/* R1: 좌측 색띠 금지 → 4면 균일 hairline. 의미(속보)는 라이브 도트·제목 색으로만. */
+.tt-news-card { border: 1px solid var(--m-outline-variant); }
 .tt-news-live-dot {
   display: inline-block;
   width: 7px; height: 7px; border-radius: var(--r-full);

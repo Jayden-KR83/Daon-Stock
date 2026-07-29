@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
-import { getStock, getNews, searchStocks, getPortfolio, getFundamentals, getPeers, analyzeStock, getCachedAnalysis, getFinancialsTrend } from '../api'
+import { getStock, getNews, searchStocks, getPortfolio, getFundamentals, getPeers, analyzeStock, getCachedAnalysis, getFinancialsTrend, authMe } from '../api'
 import { useStore } from '../store'
 import { useDragScroll } from '../hooks/useDragScroll'
 import { displayName, isKrTicker } from '../utils/displayName'
@@ -378,7 +378,14 @@ export default function ChartTab() {
   const chartTicker     = useStore(s => s.chartTicker)
   const hasAnthropicKey = useStore(s => s.hasAnthropicKey)
   const currentUser     = useStore(s => s.currentUser)
+  const authToken       = useStore(s => s.authToken)
+  const setAuth         = useStore(s => s.setAuth)
   const aiEnabled       = !!currentUser?.ai_enabled || !!currentUser?.is_admin
+  // Tier 0/1/2: 캐시 열람은 전 유저 무료. 신규 생성은 Tier1 월 쿼터 or Tier2 무제한.
+  const aiQuota         = currentUser?.ai_quota
+  const quotaLeft       = aiQuota?.remaining
+  const canAnalyze      = aiEnabled || !!aiQuota?.unlimited ||
+                          (quotaLeft == null ? true : quotaLeft > 0)
 
   // chartTicker로 즉시 초기화 → 탭 전환 시 쿼리가 첫 렌더부터 발동
   const [inputVal,     setInputVal]     = useState(chartTicker || '')
@@ -565,6 +572,10 @@ export default function ChartTab() {
       setAiResult(result)
       setAiComputedAt(result?._computed_at || (Date.now() / 1000))
       setAiFromCache(!!result?._cached)
+      // 신규 생성(캐시 미스)이면 쿼터가 차감됐으므로 잔여량 갱신
+      if (!result?._cached && !aiEnabled) {
+        try { const me = await authMe(); setAuth(authToken, me) } catch { /* 표시용 — 실패 무시 */ }
+      }
     } catch (e) {
       setAiError(e.response?.data?.detail || e.message || '분석 실패')
     } finally {
@@ -862,7 +873,7 @@ export default function ChartTab() {
               />
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)' }}>◆ AI 투자 분석</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)', display: 'flex', alignItems: 'center', gap: 7 }}><SqMark size={9} /> AI 투자 분석</div>
               <span style={{ fontSize: 10, color: 'var(--clr-text-muted)',
                 background: 'var(--clr-bg)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
                 🌐 실시간 웹 검색
@@ -873,14 +884,19 @@ export default function ChartTab() {
             </div>
             {!hasAnthropicKey && (
               <div style={{ marginBottom: 8, padding: '7px 10px', background: 'var(--clr-warn-bg)',
-                borderRadius: 8, fontSize: 11, color: 'var(--clr-warn-dark)', border: '1px solid #FED7AA' }}>
+                borderRadius: 4, fontSize: 11, color: 'var(--clr-warn-dark)', border: '1px solid #FED7AA' }}>
                 ⚙️ 관리 탭에서 API Key를 먼저 입력해주세요
               </div>
             )}
-            {hasAnthropicKey && !aiEnabled && (
-              <div className="ko-keep" style={{ marginBottom: 8, padding: '7px 10px', background: 'var(--clr-warn-bg)',
-                borderRadius: 8, fontSize: 11, color: 'var(--clr-warn-dark)', border: '1px solid #FED7AA' }}>
-                🔒 AI 분석은 비용이 발생하는 기능입니다 — 관리자에게 사용 권한을 요청해주세요
+            {hasAnthropicKey && !aiEnabled && aiQuota && !aiQuota.unlimited && (
+              <div className="ko-keep" style={{ marginBottom: 8, padding: '7px 10px',
+                background: quotaLeft > 0 ? 'var(--m-surface-variant)' : 'var(--clr-warn-bg)',
+                borderRadius: 4, fontSize: 11,
+                color: quotaLeft > 0 ? 'var(--m-text-secondary)' : 'var(--clr-warn-dark)',
+                border: quotaLeft > 0 ? '1px solid var(--m-outline-variant)' : '1px solid #FED7AA' }}>
+                {quotaLeft > 0
+                  ? `💡 이번 달 무료 AI 종목 분석 ${quotaLeft}/${aiQuota.limit}건 남음 · 이미 분석된 종목 열람은 무제한`
+                  : `🔒 이번 달 무료 AI 종목 분석 한도(${aiQuota.limit}건)를 모두 사용했습니다 — 이미 분석된 종목은 계속 열람 가능 · 무제한은 관리자에게 요청`}
               </div>
             )}
 
@@ -909,15 +925,15 @@ export default function ChartTab() {
                 </div>
                 <button
                   onClick={() => handleAiAnalyze(true)}
-                  disabled={aiLoading || !aiEnabled}
+                  disabled={aiLoading || !canAnalyze}
                   style={{
                     padding: '6px 12px', borderRadius: 2,
                     border: '1px solid var(--m-outline-variant)',
                     background: 'transparent',
                     color: 'var(--m-text-secondary)',
                     fontSize: 11, fontWeight: 700,
-                    cursor: (aiLoading || !aiEnabled) ? 'not-allowed' : 'pointer',
-                    opacity: (aiLoading || !aiEnabled) ? 0.55 : 1,
+                    cursor: (aiLoading || !canAnalyze) ? 'not-allowed' : 'pointer',
+                    opacity: (aiLoading || !canAnalyze) ? 0.55 : 1,
                     fontFamily: 'inherit', whiteSpace: 'nowrap',
                   }}>
                   최신 정보로 업데이트
@@ -925,12 +941,12 @@ export default function ChartTab() {
               </div>
             ) : (
               <button onClick={() => handleAiAnalyze(false)}
-                disabled={aiLoading || !aiEnabled}
+                disabled={aiLoading || !canAnalyze}
                 className="btn-primary" style={{ fontSize: 13 }}>
                 {aiLoading
                   ? '실시간 조사 중… (30~90초)'
-                  : !aiEnabled
-                    ? 'AI 분석 권한 필요'
+                  : !canAnalyze
+                    ? '이번 달 분석 한도 소진'
                     : `${displayName(activeTicker, stockData?.short_name)} 심층 분석`}
               </button>
             )}
@@ -1128,14 +1144,27 @@ function AiStockResult({ data, isUs, cur }) {
             border: '1px solid var(--m-outline-variant)', borderRadius: 4, marginBottom: 8 }}
         >
           <div style={{ fontSize: 10, fontWeight: 800, color: recColor,
-            letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: 5 }}>투자 의견</div>
+            letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}><SqMark color="currentColor" size={7} /> 투자 의견</div>
           <p style={{ ...proseStyle, lineHeight: 1.65 }}>{breakSentences(data.verdict)}</p>
         </motion.div>
       )}
 
+      {/* 분석 근거·한계 (Reference) — 문장 단위 출처는 불가하나 분석 전체의 근거·범위를 명시 (R6: 문장별 줄바꿈) */}
+      <div className="ko-keep" style={{ marginTop: 10, padding: '8px 12px', borderRadius: 4,
+        background: 'var(--clr-bg)', border: '1px solid var(--clr-border-md)',
+        fontSize: 10, color: 'var(--clr-text-muted)', lineHeight: 1.8 }}>
+        <strong style={{ color: 'var(--clr-text-sub)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><SqMark size={7} /> 분석 근거 · 한계 (Reference)</strong><br />
+        이 분석은 <b>위에 표시된 분석 시점</b>에 AI가 웹을 검색해 작성했습니다
+        {sources.length > 0 ? <> — 참조한 문서 <b>{sources.length}건</b>은 아래 "출처 · 보고서"에서 원문을 확인할 수 있습니다.</> : '.'}<br />
+        가격·펀더멘털·애널리스트 컨센서스: <b>Yahoo Finance</b> (한국 종목 가격 보조: <b>네이버 금융</b>).<br />
+        모든 수치는 출처·시점을 함께 적는 것이 원칙이며, 확인되지 않은 항목은 <b>"확인 필요"</b>로 표시됩니다.<br />
+        분석 시점 이후의 뉴스·공시는 반영되어 있지 않습니다 — 최신 정보가 필요하면 재분석하세요.<br />
+        본 내용은 <b>투자 판단의 참고 자료</b>이며 투자 권유가 아닙니다. 최종 판단과 책임은 투자자 본인에게 있습니다.
+      </div>
+
       {/* 출처 — 웹 검색 결과 (클릭하면 새 탭 열림) */}
       {sources.length > 0 && (
-        <Section title={`출처 · 보고서 (${sources.length})`} defaultOpen={false}>
+        <Section title={`출처 · 보고서 (${sources.length})`} defaultOpen={true}>
           {sources.map((s, i) => (
             <a key={i} href={s.url} target="_blank" rel="noreferrer"
               style={{
@@ -1164,9 +1193,14 @@ function AiStockResult({ data, isUs, cur }) {
   )
 }
 
-/* AI 분석 결과 — 접고 펼치는 섹션 카드. 부모 stagger 변형을 따른다. */
-/* 리서치 섹션 — 좌측 3px 색띠 + 타이틀 + 접기. 이모지 없음(디자인 시스템 준수).
-   색띠 색은 의미만 전달(정보=중립, 강세=pos, 리스크=neg). */
+/* 통일 머릿글 마커 — 채워진 작은 네모(■). AI 분석 모든 섹션 제목에 동일 적용. */
+function SqMark({ color = 'var(--clr-text-secondary)', size = 8 }) {
+  return <span aria-hidden="true" style={{ display: 'inline-block', width: size, height: size,
+    background: color, borderRadius: 1, flexShrink: 0 }} />
+}
+
+/* AI 분석 결과 — 접고 펼치는 섹션 카드. 부모 stagger 변형을 따른다.
+   머릿글 = 통일된 ■ 마커(번호·◆ 혼용 폐지). 이모지 없음(디자인 시스템 준수). */
 function Section({ title, num, barColor = 'var(--clr-text-sub)', children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -1183,13 +1217,7 @@ function Section({ title, num, barColor = 'var(--clr-text-sub)', children, defau
           background: 'none', border: 'none', cursor: 'pointer', padding: 0,
           fontFamily: 'inherit', textAlign: 'left',
         }}>
-        {num != null && (
-          <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 900,
-            color: 'var(--clr-text-muted)', fontVariantNumeric: 'tabular-nums',
-            letterSpacing: '.04em', minWidth: 18 }}>
-            {String(num).padStart(2, '0')}
-          </span>
-        )}
+        <SqMark />
         <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--clr-text)',
           letterSpacing: '.02em', textTransform: 'uppercase' }}>{title}</span>
         <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--clr-text-muted)',

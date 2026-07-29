@@ -255,6 +255,36 @@ class TestSatelliteCeiling:
         assert not [a for a in alerts if a['rule'] == 'satellite_ceiling']
 
 
+class TestInsightSlopGuard:
+    """intake 2026-07-05 (Karpathy 지식베이스 §A2 model collapse):
+    AI 인사이트가 상투어로 뭉개지는지 결정론으로 계량하는 가드 회귀 보호.
+    LLM 심판이 아니라 순수함수여야 한다(§B3: LLM 심판은 게이밍당한다)."""
+
+    def test_counts_slop_terms(self):
+        res = {"diagnosis": "전반적으로 견고한 흐름", "risks": "밸류에이션 부담이 견고한 편"}
+        out = main._insight_slop_hits(res)
+        assert out["terms"].get("견고한") == 2          # 두 필드에 걸쳐 누적
+        assert out["terms"].get("전반적으로") == 1
+        assert out["terms"].get("밸류에이션 부담") == 1
+        assert out["total"] == 4 and out["unique"] == 3
+
+    def test_clean_insight_zero(self):
+        # 종목·수치 근거가 뚜렷한 인사이트는 상투어 0
+        res = {"diagnosis": "NVDA 비중 42%로 반도체 편중, TLT로 헤지 부족"}
+        assert main._insight_slop_hits(res)["total"] == 0
+
+    def test_walks_nested_lists(self):
+        # catalysts처럼 리스트/중첩 구조도 훑어야 한다
+        res = {"catalysts": ["장기적으로 매력적인 진입점", "성장 잠재력 주목"]}
+        out = main._insight_slop_hits(res)
+        assert out["total"] >= 3  # 장기적으로 + 매력적인 + 성장 잠재력
+
+    def test_deterministic_no_side_effects(self):
+        # 같은 입력 → 같은 출력(외부호출·무작위 없음)
+        res = {"a": "신중한 접근 필요"}
+        assert main._insight_slop_hits(res) == main._insight_slop_hits(res)
+
+
 class TestGrowthHelpers:
     def test_ttm_yoy_basic(self):
         # 직전 4분기 합 100, 최근 4분기 합 120 → +20%

@@ -80,3 +80,11 @@ desktop.ini
 # ────────────────────────────────────────
 *.xlsx
 *.xls
+
+# ────────────────────────────────────────
+# Pre-analysis generated outputs (스크립트가 생성 — 소스는 scripts/에 커밋)
+# ────────────────────────────────────────
+generated/
+analysis_prompts.jsonl
+analysis_targets.json
+cache_gap_report.json

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import './BottomNav.css'
 
@@ -69,10 +69,16 @@ const icons = {
       <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
     </svg>
   ),
+  more: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>
+    </svg>
+  ),
 }
 
-/* 전체 탭 — 한 줄 가로 스크롤 (더보기 시트 폐지). adminOnly 는 관리자만 노출 */
-// 순서: 포트폴리오·분석·종목·관심·발굴 | 시장·등록·설정·가이드·여정·관리자 (웹 SideNavBar와 통일)
+/* 하단 네비 = 주요 5칸 고정(모바일 UX: 3~5개 권장) — 주요 4탭 + '더보기'.
+ * 나머지 탭은 더보기 시트에. 가로 스크롤 탭바(발견성 낮음)를 5칸 고정으로 교체(2026-07). */
+// adminOnly 는 관리자만 노출
 const ALL_TABS = [
   { label: '포트폴리오', idx: 0, iconKey: 'holdings'   },
   { label: '분석',       idx: 2, iconKey: 'allocation' },
@@ -87,63 +93,82 @@ const ALL_TABS = [
   { label: '관리자',     idx: 9, iconKey: 'admin',   adminOnly: true },
 ]
 
+// 하단바에 고정 노출할 주요 탭(순서 유지). 나머지는 '더보기' 시트로.
+const PRIMARY_IDX = [0, 2, 3, 10]  // 포트폴리오·분석·종목·발굴
+
 export default function BottomNav() {
   const activeTab    = useStore(s => s.activeTab)
   const setActiveTab = useStore(s => s.setActiveTab)
   const currentUser  = useStore(s => s.currentUser)
   const isAdmin = !!currentUser?.is_admin
-  const tabs = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
 
-  const navRef = useRef(null)
-  const activeRef = useRef(null)
-  // 양 끝 페이드 힌트 — 더 스크롤할 게 있을 때만 표시
-  const [edges, setEdges] = useState({ left: false, right: false })
+  const [moreOpen, setMoreOpen] = useState(false)
 
-  function updateEdges() {
-    const el = navRef.current
-    if (!el) return
-    const left = el.scrollLeft > 4
-    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4
-    setEdges(prev => (prev.left === left && prev.right === right) ? prev : { left, right })
-  }
+  const visible   = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
+  const primary   = PRIMARY_IDX.map(idx => visible.find(t => t.idx === idx)).filter(Boolean)
+  const moreTabs  = visible.filter(t => !PRIMARY_IDX.includes(t.idx))
+  const moreActive = moreTabs.some(t => t.idx === activeTab)
 
-  // 스크롤/리사이즈/탭수 변경 시 페이드 상태 갱신
+  // 시트 열림 중 뒤 스크롤 잠금 + ESC 닫기
   useEffect(() => {
-    updateEdges()
-    const el = navRef.current
-    el?.addEventListener('scroll', updateEdges, { passive: true })
-    window.addEventListener('resize', updateEdges)
-    return () => {
-      el?.removeEventListener('scroll', updateEdges)
-      window.removeEventListener('resize', updateEdges)
-    }
-  }, [tabs.length])
+    if (!moreOpen) return
+    const onKey = (e) => { if (e.key === 'Escape') setMoreOpen(false) }
+    document.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow }
+  }, [moreOpen])
 
-  // 활성 탭이 화면 밖이면 가로 스크롤로 가운데 정렬 (스크롤 이벤트가 페이드도 갱신)
-  useEffect(() => {
-    activeRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-  }, [activeTab])
+  const go = (idx) => { setActiveTab(idx); setMoreOpen(false) }
 
   return (
-    <div className={`bottom-nav-wrap${edges.left ? ' can-left' : ''}${edges.right ? ' can-right' : ''}`}>
-      <nav className="bottom-nav" ref={navRef}>
-        {tabs.map(tab => {
-          const active = activeTab === tab.idx
-          return (
-            <button
-              key={tab.idx}
-              ref={active ? activeRef : null}
-              className={`nav-btn ${active ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.idx)}
-            >
-              <span className="nav-icon">{icons[tab.iconKey]}</span>
-              <span className="nav-label">{tab.label}</span>
-            </button>
-          )
-        })}
-      </nav>
-      <div className="nav-fade nav-fade-left" aria-hidden="true" />
-      <div className="nav-fade nav-fade-right" aria-hidden="true" />
-    </div>
+    <>
+      <div className="bottom-nav-wrap">
+        <nav className="bottom-nav" aria-label="주요 메뉴">
+          {primary.map(tab => {
+            const active = activeTab === tab.idx
+            return (
+              <button key={tab.idx}
+                className={`nav-btn ${active ? 'active' : ''}`}
+                aria-current={active ? 'page' : undefined}
+                onClick={() => go(tab.idx)}>
+                <span className="nav-icon">{icons[tab.iconKey]}</span>
+                <span className="nav-label">{tab.label}</span>
+              </button>
+            )
+          })}
+          <button className={`nav-btn ${moreActive ? 'active' : ''}`}
+            aria-haspopup="dialog" aria-expanded={moreOpen}
+            onClick={() => setMoreOpen(v => !v)}>
+            <span className="nav-icon">{icons.more}</span>
+            <span className="nav-label">더보기</span>
+          </button>
+        </nav>
+      </div>
+
+      {moreOpen && (
+        <div className="nav-sheet-scrim" onClick={() => setMoreOpen(false)}>
+          <div className="nav-sheet" role="dialog" aria-modal="true" aria-label="더보기 메뉴"
+            onClick={e => e.stopPropagation()}>
+            <div className="nav-sheet-handle" aria-hidden="true" />
+            <div className="nav-sheet-title">더보기</div>
+            <div className="nav-sheet-grid">
+              {moreTabs.map(tab => {
+                const active = activeTab === tab.idx
+                return (
+                  <button key={tab.idx}
+                    className={`nav-sheet-item ${active ? 'active' : ''}`}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => go(tab.idx)}>
+                    <span className="nav-sheet-icon">{icons[tab.iconKey]}</span>
+                    <span className="nav-sheet-label">{tab.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

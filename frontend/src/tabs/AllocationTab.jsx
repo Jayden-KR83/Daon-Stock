@@ -4,6 +4,7 @@ import { motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, pollPortfolioStrategy, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
 import { useStore } from '../store'
 import LogoCircle from '../components/LogoCircle'
+import InfoTip from '../components/InfoTip'
 import BorderBeam from '../components/BorderBeam'
 import BacktestSection from '../components/BacktestSection'
 import NetWorthChart from '../components/NetWorthChart'
@@ -798,6 +799,37 @@ export default function AllocationTab() {
   )
 }
 
+// 주식 초보자용 지표 용어 해설 — 마우스 hover(title)로 노출.
+// 문구는 backend `_calc_metrics`의 실제 계산식과 1:1로 맞춤(설명과 구현 불일치 금지).
+// R6: 문장마다 줄바꿈(\n) — title 속성은 개행을 그대로 렌더한다.
+const METRIC_HELP = {
+  return: [
+    '수익률 — 내가 산 가격 대비 지금 얼마나 벌었나(%).',
+    '계산: (현재가 − 내 평균단가) ÷ 평균단가.',
+    '주의: 최근 1년 주가 상승률이 아니라 "내 매수단가" 기준입니다.',
+    '같은 종목이라도 언제 샀는지에 따라 사람마다 다릅니다.',
+  ].join('\n'),
+  mdd: [
+    'MDD(최대낙폭) — 최근 1년 중 고점에서 가장 크게 떨어졌던 폭(%).',
+    '계산: 1년 일별 종가에서 (그때까지의 최고가 − 현재가) ÷ 최고가 의 최댓값.',
+    '읽는 법: 숫자가 클수록 마음고생이 심한 종목입니다.',
+    '예: -30%면 한때 고점 대비 30%까지 빠진 적이 있다는 뜻입니다.',
+    '내 손실이 아니라 "종목 자체의 출렁임" 크기입니다.',
+  ].join('\n'),
+  sharpe: [
+    '샤프지수 — 위험을 감수한 만큼 잘 벌었나(효율).',
+    '계산: (연율화 수익률 − 무위험수익률 4%) ÷ 연율화 변동성.',
+    '1년 일별 등락으로 계산하며, 클수록 좋습니다.',
+    '읽는 법: 1 이상이면 우수, 0 미만이면 예금만도 못한 셈입니다.',
+    '같은 수익이라도 덜 출렁이며 벌었으면 점수가 높아집니다.',
+  ].join('\n'),
+}
+
+// 라벨 옆 ⓘ — hover·탭·키보드 모두 지원(InfoTip). 네이티브 title(마우스 전용) 대체.
+function HelpMark({ tip, label }) {
+  return <InfoTip text={tip} label={label} size={11} />
+}
+
 function MetricsResult({ data, holdings }) {
   const { metrics, summary } = data
   const holdingMap = Object.fromEntries(holdings.map(h => [h.ticker, h]))
@@ -828,14 +860,16 @@ function MetricsResult({ data, holdings }) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
             {[
-              { label: '평균 수익률', value: fmt(summary.avg_return, 'return'), color: colorFor(summary.avg_return, 'return') },
-              { label: '평균 MDD', value: fmt(summary.avg_mdd, 'mdd'), color: colorFor(summary.avg_mdd, 'mdd') },
-              { label: '평균 샤프', value: fmt(summary.avg_sharpe, 'sharpe'), color: colorFor(summary.avg_sharpe, 'sharpe') },
+              { label: '평균 수익률', value: fmt(summary.avg_return, 'return'), color: colorFor(summary.avg_return, 'return'), tip: METRIC_HELP.return },
+              { label: '평균 MDD', value: fmt(summary.avg_mdd, 'mdd'), color: colorFor(summary.avg_mdd, 'mdd'), tip: METRIC_HELP.mdd },
+              { label: '평균 샤프', value: fmt(summary.avg_sharpe, 'sharpe'), color: colorFor(summary.avg_sharpe, 'sharpe'), tip: METRIC_HELP.sharpe },
             ].map(item => (
               <div key={item.label} style={{ textAlign: 'center', padding: '8px 4px',
-                background: 'var(--clr-surface)', borderRadius: 8, border: '1px solid var(--clr-border-md)' }}>
+                background: 'var(--clr-surface)', borderRadius: 4, border: '1px solid var(--clr-border-md)' }}>
                 <div style={{ fontSize: 18, fontWeight: 800, color: item.color }}>{item.value}</div>
-                <div style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginTop: 2 }}>{item.label}</div>
+                <div style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginTop: 2, whiteSpace: 'nowrap' }}>
+                  {item.label}<HelpMark tip={item.tip} label={item.label} />
+                </div>
               </div>
             ))}
           </div>
@@ -862,9 +896,16 @@ function MetricsResult({ data, holdings }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--clr-border-md)' }}>
-              {['종목', '계좌', '수익률', 'MDD', '샤프'].map(h => (
+              {[
+                { h: '종목' }, { h: '계좌' },
+                { h: '수익률', tip: METRIC_HELP.return },
+                { h: 'MDD',    tip: METRIC_HELP.mdd },
+                { h: '샤프',   tip: METRIC_HELP.sharpe },
+              ].map(({ h, tip }) => (
                 <th key={h} style={{ padding: '6px 8px', textAlign: h === '종목' ? 'left' : 'right',
-                  color: 'var(--clr-text-sub)', fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>
+                  color: 'var(--clr-text-sub)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  {h}{tip && <HelpMark tip={tip} label={h} />}
+                </th>
               ))}
             </tr>
           </thead>
@@ -899,13 +940,22 @@ function MetricsResult({ data, holdings }) {
         </table>
       </div>
 
-      {/* 범례 */}
-      <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--clr-bg)', borderRadius: 8,
+      {/* 범례 + 계산 근거·출처 (R6: 문장마다 줄바꿈) */}
+      <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--clr-bg)', borderRadius: 4,
+        border: '1px solid var(--clr-border-md)',
         fontSize: 10, color: 'var(--clr-text-muted)', lineHeight: 1.8 }}>
-        <strong style={{ color: 'var(--clr-text-sub)' }}>지표 해석 가이드</strong><br />
-        수익률: 평균단가 기준 현재 손익률<br />
+        <strong style={{ color: 'var(--clr-text-sub)' }}>지표 해석 가이드</strong>
+        <span style={{ marginLeft: 4, opacity: 0.7 }}>(각 지표 라벨에 마우스를 올리면 상세 설명)</span><br />
+        수익률: 평균단가 기준 현재 손익률 — (현재가 − 내 평균단가) ÷ 평균단가<br />
         MDD: 1년 내 최고점 대비 최대 낙폭 — 낮을수록 안정적 (10% 이하 ✅, 25% 초과 ⚠️)<br />
-        샤프: 위험 대비 초과수익 — 1 이상 우수, 0 미만 비효율 (무위험률 4% 적용)
+        샤프: 위험 대비 초과수익 — 1 이상 우수, 0 미만 비효율 (무위험률 4% 적용)<br />
+        <span style={{ color: 'var(--clr-text-sub)', fontWeight: 700 }}>계산 근거 · 출처</span><br />
+        가격 데이터: 최근 1년 일별 종가 — 미국 Yahoo Finance, 한국 Yahoo Finance(.KS/.KQ).<br />
+        MDD·샤프는 이 1년 종가로 계산하며, 내 매수 시점·수량과 무관한 <b>종목 자체의 위험 지표</b>입니다.<br />
+        샤프 = (연율화 수익률 − 무위험 4%) ÷ 연율화 변동성 (일간 등락 기준, 연율화 계수 252일).<br />
+        무위험수익률 4%는 고정 가정값이며, 실제 국채 금리 변동은 반영되지 않습니다.<br />
+        수익률만 내 평균단가 기준이라 사람마다 다르고, 나머지 두 지표는 모두에게 동일합니다.<br />
+        방법론: 샤프지수(Sharpe, 1966) · 최대낙폭(MDD)은 표준 정의를 따릅니다.
       </div>
     </div>
   )

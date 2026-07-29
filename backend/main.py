@@ -1219,6 +1219,49 @@ def _demo_ai_budget_ok() -> bool:
     _demo_ai_calls.append(time())
     return True
 
+# ─── Tier 0/1/2 종목분석 게이팅 ────────────────────────────────────────
+# Tier 0 (승인된 전 유저): 이미 분석된 종목 열람 = 무료·무제한 (비용 0 — /analyze/cached)
+# Tier 1 (일반 승인 유저): 신규 종목 분석/재분석 = 월 STOCK_ANALYZE_FREE_QUOTA건 무료
+#                          (캐시 미스 = 실제 생성 비용 발생분만 차감)
+# Tier 2 (ai_enabled=1 / 관리자 / 데모): 무제한
+STOCK_ANALYZE_FREE_QUOTA = 30
+
+def _month_start_epoch() -> float:
+    """이번 달 1일 0시(로컬)의 epoch — 월 단위 쿼터 리셋 기준."""
+    n = datetime.now()
+    return datetime(n.year, n.month, 1).timestamp()
+
+def _monthly_fresh_analyze_count(user_id: str) -> int:
+    """이번 달 해당 유저의 '신규 종목분석 생성' 횟수. 캐시 미스만 ai_call로 기록되므로
+    캐시 열람(Tier 0)은 집계에 잡히지 않는다."""
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM audit_log "
+                "WHERE user_id=? AND event_type='ai_call' AND ts>=? "
+                "AND details LIKE '%stock_analyze%'",
+                (user_id, _month_start_epoch())
+            ).fetchone()
+        return int(row['c']) if row else 0
+    except Exception:
+        return 0
+
+def _stock_analyze_tier(cu: dict) -> str:
+    """종목분석 티어: 'unlimited'(admin/ai_enabled/demo) | 'quota'(일반 승인 유저)."""
+    if cu.get('is_admin') or cu.get('ai_enabled') or _is_demo(cu):
+        return 'unlimited'
+    return 'quota'
+
+def _ai_quota_status(cu: dict) -> dict:
+    """프론트 표시용 종목분석 쿼터 현황."""
+    if _stock_analyze_tier(cu) == 'unlimited':
+        return {'tier': 'unlimited', 'unlimited': True, 'used': 0,
+                'limit': STOCK_ANALYZE_FREE_QUOTA, 'remaining': None}
+    used = _monthly_fresh_analyze_count(cu['user_id'])
+    return {'tier': 'quota', 'unlimited': False, 'used': used,
+            'limit': STOCK_ANALYZE_FREE_QUOTA,
+            'remaining': max(0, STOCK_ANALYZE_FREE_QUOTA - used)}
+
 def _seed_demo_user():
     """데모 유저 생성 + 샘플 포트폴리오로 리셋. 승인됨·AI 체험 on·비관리자 (안전한 샌드박스).
     AI는 캐시 우선 + 24h 롤링 한도로 비용 상한 (force_refresh 무시)."""
@@ -1302,7 +1345,17 @@ def auth_logout(authorization: Optional[str] = Header(None)):
 
 @app.get("/api/auth/me")
 def auth_me(current_user: dict = Depends(get_current_user)):
-    return current_user
+    out = dict(current_user)
+    try:
+        out['ai_quota'] = _ai_quota_status(current_user)
+    except Exception:
+        pass
+    return out
+
+@app.get("/api/ai/quota")
+def ai_quota(cu: dict = Depends(require_approved)):
+    """현재 유저의 종목분석 티어/월 쿼터 현황 (프론트 버튼 게이팅용)."""
+    return _ai_quota_status(cu)
 
 # ─── 관리자 암호 (절대 권한) ─────────────────────────────────────────
 # admin 암호로 잠금 해제한 세션만 관리 기능 접근 가능
@@ -2028,6 +2081,42 @@ def _parse_claude_json(text: str) -> dict:
             pass
 
     raise ValueError(f"JSON 파싱 실패 (text[:80]={text[:80]!r})")
+
+# ─── AI 인사이트 품질 가드 (결정론) ────────────────────────────────────
+# Karpathy 지식베이스 §A2(model collapse): LLM 출력은 좁은 분포로 수렴 —
+# "농담 10개 요청 → 같은 3개". 금융 인사이트에서는 종목마다 같은 상투어로
+# 뭉개져 신뢰를 잃는다. 이 가드는 LLM 심판이 아니라 *결정론 규칙*으로
+# slop을 계량한다(§B3: LLM 심판은 게이밍당한다 — dhdhdhdh). 응답을 막지
+# 않고 관측만 한다(_log_event로 축적) → 시간에 따라 붕괴 추세를 감지.
+_INSIGHT_SLOP_TERMS = (
+    "견고한", "견조한", "주목할 만한", "주목할만한", "장기적으로", "장기적 관점",
+    "긍정적", "부정적", "신중한 접근", "지속적인 관심", "면밀히", "예의주시",
+    "밸류에이션 부담", "매력적인", "성장 잠재력", "리스크 관리", "변동성 확대",
+    "펀더멘털", "모멘텀", "전반적으로", "다각화", "균형 잡힌",
+)
+
+def _insight_slop_hits(res: dict) -> dict:
+    """AI 인사이트 dict의 모든 문자열 값을 훑어 상투어 출현 횟수를 센다.
+    반환: {"total": 총출현, "unique": 서로 다른 상투어 수, "terms": {term: n}}.
+    결정론(외부 호출·무작위 없음) → pytest로 회귀 보호 가능."""
+    text_parts = []
+    def _walk(v):
+        if isinstance(v, str):
+            text_parts.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                _walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                _walk(x)
+    _walk(res)
+    blob = " ".join(text_parts)
+    hits = {}
+    for term in _INSIGHT_SLOP_TERMS:
+        n = blob.count(term)
+        if n:
+            hits[term] = n
+    return {"total": sum(hits.values()), "unique": len(hits), "terms": hits}
 
 # ─── Data Functions ───────────────────────────────────────────────────
 @ttl_cache(300)
@@ -4062,6 +4151,12 @@ def analyze(req: AnalyzeReq, cu: dict = Depends(require_ai_enabled)):
         "3. rebalance: 구체적인 비중 조정 추천 (확대/축소 종목)\n"
         "4. positioning: 현재 글로벌 매크로 환경 대비 포지셔닝 평가\n"
         "5. outlook: 단기(1-3개월) 및 중기(6-12개월) 방향 제시\n\n"
+        # ── 상투어 붕괴 방지(Karpathy §A2 model collapse) ──
+        "[작성 규칙]\n"
+        "- 이 포트폴리오의 *실제 종목·비중·섹터*를 근거로 구체적으로 쓰세요. 어떤 포트폴리오에도 들어맞을 일반론 금지.\n"
+        "- 각 항목은 반드시 위 보유 종목의 티커를 최소 1개 이상 직접 언급하세요.\n"
+        "- 상투어 금지: '견고한/주목할 만한/장기적으로/신중한 접근/전반적으로/균형 잡힌' 류의 채워넣기 표현.\n"
+        "- 숫자는 위에 주어진 값만 사용하고 새 수치를 지어내지 마세요.\n\n"
         'JSON만 응답: {"diagnosis":"...","risks":"...","rebalance":"...","positioning":"...","outlook":"..."}'
     )
     try:
@@ -4070,6 +4165,12 @@ def analyze(req: AnalyzeReq, cu: dict = Depends(require_ai_enabled)):
             res = _parse_claude_json(text)
         except Exception:
             res = {"diagnosis": text, "risks":"", "rebalance":"", "positioning":"", "outlook":""}
+        # 결정론 slop 가드 — 응답은 막지 않고 품질 지표만 축적(§A2/§B3)
+        _slop = _insight_slop_hits(res)
+        if _slop["total"]:
+            _log_event(cu['user_id'], 'ai_quality',
+                       {'kind': 'portfolio_analyze', 'slop_total': _slop["total"],
+                        'slop_unique': _slop["unique"]})
         _set_ai_cache(cache_key, res)
         return res
     except HTTPException:
@@ -4092,8 +4193,9 @@ class StockAnalyzeReq(BaseModel):
 
 
 @app.get("/api/stock/{ticker}/analyze/cached")
-def get_cached_analysis(ticker: str, name: str = ''):
-    """캐시된 분석이 있으면 반환, 없으면 cached=False. 분석 자동 트리거 안 함."""
+def get_cached_analysis(ticker: str, name: str = '', cu: dict = Depends(require_approved)):
+    """Tier 0 — 캐시된 분석이 있으면 반환, 없으면 cached=False. 분석 자동 트리거 안 함.
+    승인된 전 유저에게 무료·무제한 개방 (비용 0)."""
     # 티커 기준 조회 (이름 무시 + TTL 무시) — 한 번 분석한 종목은 날짜와 함께 기존 결과를 기본 표시
     cached, ts = _get_stock_cache_by_ticker(ticker)
     if cached is None:
@@ -4104,8 +4206,168 @@ def get_cached_analysis(ticker: str, name: str = ''):
         "computed_at": ts,   # epoch seconds
     }
 
+def _build_stock_analysis_prompt(ticker: str, name_hint: str):
+    """종목 심층분석 프롬프트 조립 — 컨텍스트(가격/펀더멘털/뉴스) 수집 + daon JSON 스키마 지침.
+    analyze_stock 엔드포인트와 구독-생성 배치가 '동일 프롬프트'를 공유하도록 추출한 단일 소스.
+    반환: (prompt, company_name). 종목 없음/이름 조회 실패 시 HTTPException(404/503) 그대로 raise."""
+    # ── 1) 컨텍스트 데이터 수집 (가격/펀더멘털/뉴스/애널리스트) ──────────
+    if is_kr(ticker):
+        p = _kr_price(ticker)
+        cur = p.get('current_price', 0) if p else 0
+        chg = p.get('change_pct', 0) if p else 0
+
+        kr_name = name_hint
+        if not kr_name:
+            try:
+                code = kr_code(ticker)
+                r = _session.get(f'https://finance.naver.com/item/main.naver?code={code}',
+                                 headers={'User-Agent': 'Mozilla/5.0'}, timeout=4)
+                if r.status_code == 200:
+                    soup = BeautifulSoup(r.text, 'html.parser')
+                    el = soup.select_one('.wrap_company h2 a')
+                    if el and el.get_text(strip=True):
+                        kr_name = el.get_text(strip=True)
+            except Exception:
+                pass
+        if not kr_name:
+            raise HTTPException(503,
+                f"종목명을 조회할 수 없습니다 ({ticker}). 환각 방지를 위해 분석을 중단합니다.")
+
+        etf_brands = ['TIGER', 'ACE', 'KODEX', 'RISE', 'KBSTAR', 'HANARO', 'ARIRANG',
+                      'PLUS', '히어로즈', '파워', 'KOSEF', 'SOL', '미래에셋', 'KOACT', 'TIMEFOLIO']
+        up = kr_name.upper()
+        is_etf = any(b.upper() in up for b in etf_brands) or 'ETF' in up
+        asset_class = 'ETF' if is_etf else '주식'
+        company_name = kr_name
+        ticker_str   = f"{ticker} (KRX)"
+        price_str    = f"₩{cur:,.0f} ({chg:+.2f}%)"
+        fundamentals_str = ""
+        target_str   = ""
+        extra_guidance = (
+            f"\n[중요 — 환각 방지 지침]\n"
+            f"- '종목명: {kr_name}' 만이 정확한 식별 정보입니다.\n"
+            f"- 종목코드 '{ticker}'는 KRX 식별자입니다. 숫자를 보고 다른 회사로 오인하지 마세요.\n"
+            f"- {('ETF는 추종 지수/테마, 보수율, 분배 정책 관점에서 분석하세요.' if is_etf else '회사의 사업 모델·산업 동향·실적 관점에서 분석하세요.')}\n"
+            f"- 회사명이 익숙하지 않다면 web_search로 정확히 확인 후 분석하세요.\n"
+        )
+    else:
+        d = _stock_full(ticker.upper())
+        if not d:
+            raise HTTPException(404, "Not found")
+        fnd = _stock_fundamentals(ticker.upper())
+        cur = d.get('current_price', 0)
+        chg = d.get('change_pct', 0)
+        company_name = d.get('short_name', ticker.upper())
+        ticker_str   = f"{ticker.upper()} (US)"
+        price_str    = f"${cur:.2f} ({chg:+.2f}%)"
+        fundamentals_str = (
+            f"P/E: {fnd.get('trailing_pe') or 'N/A'} | Forward P/E: {fnd.get('forward_pe') or 'N/A'} | "
+            f"PEG: {fnd.get('peg_ratio') or 'N/A'}\n"
+            f"시가총액: ${(fnd.get('market_cap') or 0)/1e9:.1f}B | "
+            f"섹터: {d.get('sector','N/A')}\n"
+            f"이익률: {fnd.get('profit_margin') or 'N/A'}% | ROE: {fnd.get('roe') or 'N/A'}% | "
+            f"FCF: ${(fnd.get('free_cash_flow') or 0)/1e9:.2f}B\n"
+            f"매출(TTM): ${(fnd.get('revenue') or 0)/1e9:.2f}B | EPS: {fnd.get('diluted_eps') or 'N/A'}"
+        )
+        tm = d.get('target_mean')
+        tlow = d.get('target_low')
+        thigh = d.get('target_high')
+        rec_yh = d.get('recommendation', '')
+        n_an = d.get('num_analysts', 0)
+        if tm:
+            target_str = (
+                f"애널리스트 컨센서스 (Yahoo Finance/Refinitiv 기준):\n"
+                f"  목표가 평균: ${tm:.2f} | 범위: ${tlow:.2f}~${thigh:.2f} | "
+                f"추천: {rec_yh} ({n_an}명 참여)"
+            )
+        else:
+            target_str = ""
+        extra_guidance = ""
+
+    # 최근 뉴스 (최대 5개)
+    news_lines: list[str] = []
+    try:
+        news_data = _stock_news(ticker.upper())
+        for n in (news_data.get('news') or [])[:5]:
+            line = f"- {n.get('title','')} ({n.get('publisher','')}{', ' + n['date'] if n.get('date') else ''})"
+            news_lines.append(line)
+    except Exception:
+        pass
+    news_block = "\n".join(news_lines) if news_lines else "(최근 뉴스 데이터 없음)"
+
+    # ── 2) 프롬프트 작성 ─────────────────────────────────────────
+    from datetime import date as _date
+    today = _date.today().isoformat()
+
+    # 종목별 가변 데이터(가격/펀더멘털/뉴스/공시) — 너무 크면 API가 거절하므로
+    # 상위(최신) 내용만 남기고 50,000자 내외로 자른다. 고정 지침은 별도로 뒤에 붙여 보존.
+    context_block = _truncate_head(
+        f"오늘 날짜: {today}\n"
+        f"분석 대상: {company_name}\n"
+        f"티커: {ticker_str}\n"
+        f"현재가: {price_str}\n"
+        + (f"{fundamentals_str}\n" if fundamentals_str else "")
+        + (f"{target_str}\n" if target_str else "")
+        + extra_guidance
+        + f"\n[수집된 최근 뉴스 헤드라인 (참고용)]\n{news_block}\n",
+        MAX_STOCK_PAYLOAD_CHARS,
+    )
+
+    prompt = (
+        context_block
+        + (
+            "\n[작업 절차]\n"
+            "STEP 0 (섹터 판별 후 분기): 먼저 종목의 섹터·비즈니스 모델을 판별하라.\n"
+            "  ▶ TechBio/바이오 플랫폼(AI 기반 신약 발굴 등 임상단계 신약개발사 — 예: RXRX, SDGR, EXAI)인 경우 아래를 반드시 반영:\n"
+            "     (a) 경영진 변경 해석: 공동창업자의 이사회 퇴임 + 전문경영인(신약개발·상업화 전문가)의 경영 전담을 "
+            "'단순 경영진 불확실성 리스크'로 기계적 분류하지 말 것. '연구 단계 → 상업화·파트너십/계약 단계로의 전환'이라는 중립~긍정 맥락으로 해석하라.\n"
+            "     (b) 재무지표: 제조업식 '수주 잔고/백로그' 조사를 강제하지 말 것. 대신 '잠재 마일스톤(Potential Milestones) 총액'과 "
+            "'기술수출(License-out) 계약 잠재력'(파트너십당 개발·규제 마일스톤 잠재 규모, 선급금·로열티 구조)을 우선 추적하라.\n"
+            "     (c) 동종업계(Peer): 'AI' 키워드만으로 데이터센터(APLD)·로봇(SERV) 등 이종 섹터를 비교군에 넣지 말 것. "
+            "SDGR·EXAI 등 'AI 기반 신약개발 플랫폼' 기업으로만 비교하라.\n"
+            "  ▶ 그 외 섹터(제조·반도체·SW·소비재 등)는 STEP 1 표준 절차를 그대로 따른다.\n"
+            "STEP 1: web_search로 다음을 충분히 조사하세요 (총 4회 이내, 실적·호재·애널리스트·전략 위주):\n"
+            "  ① 회사 최근 사업 진행, 신사업 진출, 미래 전략 (최근 3-6개월)\n"
+            "  ② CEO/경영진의 최근 발언, 인터뷰, IR/투자자 컨퍼런스\n"
+            "  ③ 가장 최근 분기 실적: 매출·영업이익·EPS (컨센서스 대비)·가이던스\n"
+            "  ④ 단기 호재 (1-3M): 신제품·규제승인·수주·파트너십 — 반드시 정량 수치\n"
+            "  ⑤ 중기 호재 (3-12M): 신사업 매출 기여·시장 확장·캐파 증설 — 정량\n"
+            "  ⑥ (제조·SW형) 수주 잔고/백로그·RPO·Deferred Revenue / (TechBio형) 잠재 마일스톤 총액·기술수출(License-out) 잠재력 — 섹터에 맞는 지표만\n"
+            "  ⑦ 최근 1-2개월 애널리스트 보고서 (기관·목표가·의견 변경)\n"
+            "  ⑧ 무료 다운로드 가능한 보고서/IR 페이지 URL\n\n"
+            "STEP 2: 모든 조사가 끝나면, 다음 JSON을 한국어로 작성하여 단일 메시지로 응답하세요.\n"
+            "[중요] 응답 메시지에는 절대로 사전 설명·검색 노트·영어 narration을 넣지 마세요.\n"
+            "메시지의 처음과 끝은 '{' 와 '}' 여야 합니다. 내부 모든 텍스트는 한국어.\n\n"
+            "[JSON 스키마 — 정확히 이 키들만 사용]\n"
+            "{\n"
+            '  "recommendation": "매수" | "보유" | "매도",\n'
+            '  "priceTarget": null 또는 숫자 (USD 또는 KRW 단위, 표시 통화에 맞게),\n'
+            '  "summary": "한국어 3-4문장. 투자 논거의 핵심을 서술형으로.",\n'
+            '  "company_overview": "한국어 5-7줄 상세 서술. 사업 구조·최근 동향·신사업·미래 전략을 인과관계와 핵심 수치로 설명. 단어 나열 금지, 완결된 문장으로.",\n'
+            '  "earnings_ir": "한국어 5-7줄 상세. 최근 분기 매출/영업이익/EPS를 컨센서스·전년동기 대비 수치로, 가이던스와 CEO 발언의 함의까지 서술.",\n'
+            '  "catalysts_short": ["단기 호재 3개 — 각 항목을 1-2문장으로 근거·정량 수치·시점과 함께 서술 (단어 나열 금지)"],\n'
+            '  "catalysts_medium": ["중기 호재 3개 — 각 항목을 1-2문장으로 근거·정량 수치와 함께 서술"],\n'
+            '  "backlog": "한국어 2-3줄. (제조·SW형) 수주 잔고/백로그/RPO 현황·추이. (TechBio/바이오 플랫폼) 대신 잠재 마일스톤 총액·기술수출(License-out) 계약 잠재력을 서술. 해당 없으면 빈 문자열",\n'
+            '  "analyst_views": "한국어 4-5줄 상세. 최근 애널리스트 보고서를 기관명·목표가·의견 변동과 그 논거까지 서술.",\n'
+            '  "bull": ["강세 논거 3개 — 각 항목을 1-2문장으로 근거와 함께 서술 (단어 조각 금지)"],\n'
+            '  "bear": ["리스크 3개 — 각 항목을 1-2문장으로 근거·발생 가능성과 함께 서술"],\n'
+            '  "verdict": "한국어 2-3문장 최종 의견 — 매수/보유/매도 판단의 핵심 근거와 조건."\n'
+            "}\n"
+            "[규칙]\n"
+            "- 【분량·깊이 필수】 company_overview·earnings_ir·analyst_views·backlog 각 필드는 **최소 4문장 이상** 상세 서술. "
+            "catalysts/bull/bear의 각 항목도 **완결된 1-2문장(근거+구체 수치)**. "
+            "'Azure 고성장', 'Copilot 채택 확대' 같은 **키워드·단어 나열식 짧은 답변은 거부됨** — 반드시 '왜·얼마나·언제'를 문장으로 풀어쓸 것.\n"
+            "- 모든 string 값은 한국어로 작성. 회사명·티커·통화기호·전문용어 약어는 영어 그대로 OK.\n"
+            "- 확인되지 않은 항목은 정확히 \"확인 필요\" 라고만 적고, 추측 절대 금지.\n"
+            "- 모든 수치는 출처·시점을 함께 명시 (예: 'Q1 FY26 매출 $200.3M (YoY +63.5%, 2026-05-08 발표)').\n"
+            "- 본문 외 어떤 prefix·suffix·주석·markdown도 금지.\n"
+        )
+    )
+    return prompt, company_name
+
+
 @app.post("/api/stock/{ticker}/analyze")
-def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_ai_enabled)):
+def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_approved)):
     api_key = req.api_key or _stored_api_key()
     if not api_key:
         raise HTTPException(400, "API key required")
@@ -4123,6 +4385,16 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
             out["_cached"] = True
             out["_computed_at"] = ts
             return out
+    # ── 여기부터는 캐시 미스 = 실제 생성 비용(Sonnet+web_search) 발생 지점 ──
+    # Tier 1(일반 승인 유저): 월 무료 쿼터 초과 시 차단. Tier 2(admin/ai_enabled)·데모는 통과.
+    # (캐시 열람은 위에서 이미 반환됐으므로 이 검사는 신규 생성에만 걸린다.)
+    if _stock_analyze_tier(cu) == 'quota':
+        used = _monthly_fresh_analyze_count(cu['user_id'])
+        if used >= STOCK_ANALYZE_FREE_QUOTA:
+            raise HTTPException(
+                429,
+                f"이번 달 무료 AI 종목 분석 한도({STOCK_ANALYZE_FREE_QUOTA}건)를 모두 사용했습니다. "
+                f"이미 분석된 종목은 계속 열람할 수 있으며, 무제한 이용은 관리자에게 요청해주세요.")
     # 데모: 미캐시 티커는 라이브 생성 — 24h 롤링 한도 초과 시 차단(비용 상한)
     if _is_demo(cu) and not _demo_ai_budget_ok():
         raise HTTPException(429,
@@ -4132,159 +4404,8 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
     _bump_ai_call(cu['user_id'])
 
     try:
-        # ── 1) 컨텍스트 데이터 수집 (가격/펀더멘털/뉴스/애널리스트) ──────────
-        if is_kr(ticker):
-            p = _kr_price(ticker)
-            cur = p.get('current_price', 0) if p else 0
-            chg = p.get('change_pct', 0) if p else 0
-
-            kr_name = name_hint
-            if not kr_name:
-                try:
-                    code = kr_code(ticker)
-                    r = _session.get(f'https://finance.naver.com/item/main.naver?code={code}',
-                                     headers={'User-Agent': 'Mozilla/5.0'}, timeout=4)
-                    if r.status_code == 200:
-                        soup = BeautifulSoup(r.text, 'html.parser')
-                        el = soup.select_one('.wrap_company h2 a')
-                        if el and el.get_text(strip=True):
-                            kr_name = el.get_text(strip=True)
-                except Exception:
-                    pass
-            if not kr_name:
-                raise HTTPException(503,
-                    f"종목명을 조회할 수 없습니다 ({ticker}). 환각 방지를 위해 분석을 중단합니다.")
-
-            etf_brands = ['TIGER', 'ACE', 'KODEX', 'RISE', 'KBSTAR', 'HANARO', 'ARIRANG',
-                          'PLUS', '히어로즈', '파워', 'KOSEF', 'SOL', '미래에셋', 'KOACT', 'TIMEFOLIO']
-            up = kr_name.upper()
-            is_etf = any(b.upper() in up for b in etf_brands) or 'ETF' in up
-            asset_class = 'ETF' if is_etf else '주식'
-            company_name = kr_name
-            ticker_str   = f"{ticker} (KRX)"
-            price_str    = f"₩{cur:,.0f} ({chg:+.2f}%)"
-            fundamentals_str = ""
-            target_str   = ""
-            extra_guidance = (
-                f"\n[중요 — 환각 방지 지침]\n"
-                f"- '종목명: {kr_name}' 만이 정확한 식별 정보입니다.\n"
-                f"- 종목코드 '{ticker}'는 KRX 식별자입니다. 숫자를 보고 다른 회사로 오인하지 마세요.\n"
-                f"- {('ETF는 추종 지수/테마, 보수율, 분배 정책 관점에서 분석하세요.' if is_etf else '회사의 사업 모델·산업 동향·실적 관점에서 분석하세요.')}\n"
-                f"- 회사명이 익숙하지 않다면 web_search로 정확히 확인 후 분석하세요.\n"
-            )
-        else:
-            d = _stock_full(ticker.upper())
-            if not d:
-                raise HTTPException(404, "Not found")
-            fnd = _stock_fundamentals(ticker.upper())
-            cur = d.get('current_price', 0)
-            chg = d.get('change_pct', 0)
-            company_name = d.get('short_name', ticker.upper())
-            ticker_str   = f"{ticker.upper()} (US)"
-            price_str    = f"${cur:.2f} ({chg:+.2f}%)"
-            fundamentals_str = (
-                f"P/E: {fnd.get('trailing_pe') or 'N/A'} | Forward P/E: {fnd.get('forward_pe') or 'N/A'} | "
-                f"PEG: {fnd.get('peg_ratio') or 'N/A'}\n"
-                f"시가총액: ${(fnd.get('market_cap') or 0)/1e9:.1f}B | "
-                f"섹터: {d.get('sector','N/A')}\n"
-                f"이익률: {fnd.get('profit_margin') or 'N/A'}% | ROE: {fnd.get('roe') or 'N/A'}% | "
-                f"FCF: ${(fnd.get('free_cash_flow') or 0)/1e9:.2f}B\n"
-                f"매출(TTM): ${(fnd.get('revenue') or 0)/1e9:.2f}B | EPS: {fnd.get('diluted_eps') or 'N/A'}"
-            )
-            tm = d.get('target_mean')
-            tlow = d.get('target_low')
-            thigh = d.get('target_high')
-            rec_yh = d.get('recommendation', '')
-            n_an = d.get('num_analysts', 0)
-            if tm:
-                target_str = (
-                    f"애널리스트 컨센서스 (Yahoo Finance/Refinitiv 기준):\n"
-                    f"  목표가 평균: ${tm:.2f} | 범위: ${tlow:.2f}~${thigh:.2f} | "
-                    f"추천: {rec_yh} ({n_an}명 참여)"
-                )
-            else:
-                target_str = ""
-            extra_guidance = ""
-
-        # 최근 뉴스 (최대 5개)
-        news_lines: list[str] = []
-        try:
-            news_data = _stock_news(ticker.upper())
-            for n in (news_data.get('news') or [])[:5]:
-                line = f"- {n.get('title','')} ({n.get('publisher','')}{', ' + n['date'] if n.get('date') else ''})"
-                news_lines.append(line)
-        except Exception:
-            pass
-        news_block = "\n".join(news_lines) if news_lines else "(최근 뉴스 데이터 없음)"
-
-        # ── 2) 프롬프트 작성 ─────────────────────────────────────────
-        from datetime import date as _date
-        today = _date.today().isoformat()
-
-        # 종목별 가변 데이터(가격/펀더멘털/뉴스/공시) — 너무 크면 API가 거절하므로
-        # 상위(최신) 내용만 남기고 50,000자 내외로 자른다. 고정 지침은 별도로 뒤에 붙여 보존.
-        context_block = _truncate_head(
-            f"오늘 날짜: {today}\n"
-            f"분석 대상: {company_name}\n"
-            f"티커: {ticker_str}\n"
-            f"현재가: {price_str}\n"
-            + (f"{fundamentals_str}\n" if fundamentals_str else "")
-            + (f"{target_str}\n" if target_str else "")
-            + extra_guidance
-            + f"\n[수집된 최근 뉴스 헤드라인 (참고용)]\n{news_block}\n",
-            MAX_STOCK_PAYLOAD_CHARS,
-        )
-
-        prompt = (
-            context_block
-            + (
-                "\n[작업 절차]\n"
-                "STEP 0 (섹터 판별 후 분기): 먼저 종목의 섹터·비즈니스 모델을 판별하라.\n"
-                "  ▶ TechBio/바이오 플랫폼(AI 기반 신약 발굴 등 임상단계 신약개발사 — 예: RXRX, SDGR, EXAI)인 경우 아래를 반드시 반영:\n"
-                "     (a) 경영진 변경 해석: 공동창업자의 이사회 퇴임 + 전문경영인(신약개발·상업화 전문가)의 경영 전담을 "
-                "'단순 경영진 불확실성 리스크'로 기계적 분류하지 말 것. '연구 단계 → 상업화·파트너십/계약 단계로의 전환'이라는 중립~긍정 맥락으로 해석하라.\n"
-                "     (b) 재무지표: 제조업식 '수주 잔고/백로그' 조사를 강제하지 말 것. 대신 '잠재 마일스톤(Potential Milestones) 총액'과 "
-                "'기술수출(License-out) 계약 잠재력'(파트너십당 개발·규제 마일스톤 잠재 규모, 선급금·로열티 구조)을 우선 추적하라.\n"
-                "     (c) 동종업계(Peer): 'AI' 키워드만으로 데이터센터(APLD)·로봇(SERV) 등 이종 섹터를 비교군에 넣지 말 것. "
-                "SDGR·EXAI 등 'AI 기반 신약개발 플랫폼' 기업으로만 비교하라.\n"
-                "  ▶ 그 외 섹터(제조·반도체·SW·소비재 등)는 STEP 1 표준 절차를 그대로 따른다.\n"
-                "STEP 1: web_search로 다음을 충분히 조사하세요 (총 4회 이내, 실적·호재·애널리스트·전략 위주):\n"
-                "  ① 회사 최근 사업 진행, 신사업 진출, 미래 전략 (최근 3-6개월)\n"
-                "  ② CEO/경영진의 최근 발언, 인터뷰, IR/투자자 컨퍼런스\n"
-                "  ③ 가장 최근 분기 실적: 매출·영업이익·EPS (컨센서스 대비)·가이던스\n"
-                "  ④ 단기 호재 (1-3M): 신제품·규제승인·수주·파트너십 — 반드시 정량 수치\n"
-                "  ⑤ 중기 호재 (3-12M): 신사업 매출 기여·시장 확장·캐파 증설 — 정량\n"
-                "  ⑥ (제조·SW형) 수주 잔고/백로그·RPO·Deferred Revenue / (TechBio형) 잠재 마일스톤 총액·기술수출(License-out) 잠재력 — 섹터에 맞는 지표만\n"
-                "  ⑦ 최근 1-2개월 애널리스트 보고서 (기관·목표가·의견 변경)\n"
-                "  ⑧ 무료 다운로드 가능한 보고서/IR 페이지 URL\n\n"
-                "STEP 2: 모든 조사가 끝나면, 다음 JSON을 한국어로 작성하여 단일 메시지로 응답하세요.\n"
-                "[중요] 응답 메시지에는 절대로 사전 설명·검색 노트·영어 narration을 넣지 마세요.\n"
-                "메시지의 처음과 끝은 '{' 와 '}' 여야 합니다. 내부 모든 텍스트는 한국어.\n\n"
-                "[JSON 스키마 — 정확히 이 키들만 사용]\n"
-                "{\n"
-                '  "recommendation": "매수" | "보유" | "매도",\n'
-                '  "priceTarget": null 또는 숫자 (USD 또는 KRW 단위, 표시 통화에 맞게),\n'
-                '  "summary": "한국어 3-4문장. 투자 논거의 핵심을 서술형으로.",\n'
-                '  "company_overview": "한국어 5-7줄 상세 서술. 사업 구조·최근 동향·신사업·미래 전략을 인과관계와 핵심 수치로 설명. 단어 나열 금지, 완결된 문장으로.",\n'
-                '  "earnings_ir": "한국어 5-7줄 상세. 최근 분기 매출/영업이익/EPS를 컨센서스·전년동기 대비 수치로, 가이던스와 CEO 발언의 함의까지 서술.",\n'
-                '  "catalysts_short": ["단기 호재 3개 — 각 항목을 1-2문장으로 근거·정량 수치·시점과 함께 서술 (단어 나열 금지)"],\n'
-                '  "catalysts_medium": ["중기 호재 3개 — 각 항목을 1-2문장으로 근거·정량 수치와 함께 서술"],\n'
-                '  "backlog": "한국어 2-3줄. (제조·SW형) 수주 잔고/백로그/RPO 현황·추이. (TechBio/바이오 플랫폼) 대신 잠재 마일스톤 총액·기술수출(License-out) 계약 잠재력을 서술. 해당 없으면 빈 문자열",\n'
-                '  "analyst_views": "한국어 4-5줄 상세. 최근 애널리스트 보고서를 기관명·목표가·의견 변동과 그 논거까지 서술.",\n'
-                '  "bull": ["강세 논거 3개 — 각 항목을 1-2문장으로 근거와 함께 서술 (단어 조각 금지)"],\n'
-                '  "bear": ["리스크 3개 — 각 항목을 1-2문장으로 근거·발생 가능성과 함께 서술"],\n'
-                '  "verdict": "한국어 2-3문장 최종 의견 — 매수/보유/매도 판단의 핵심 근거와 조건."\n'
-                "}\n"
-                "[규칙]\n"
-                "- 【분량·깊이 필수】 company_overview·earnings_ir·analyst_views·backlog 각 필드는 **최소 4문장 이상** 상세 서술. "
-                "catalysts/bull/bear의 각 항목도 **완결된 1-2문장(근거+구체 수치)**. "
-                "'Azure 고성장', 'Copilot 채택 확대' 같은 **키워드·단어 나열식 짧은 답변은 거부됨** — 반드시 '왜·얼마나·언제'를 문장으로 풀어쓸 것.\n"
-                "- 모든 string 값은 한국어로 작성. 회사명·티커·통화기호·전문용어 약어는 영어 그대로 OK.\n"
-                "- 확인되지 않은 항목은 정확히 \"확인 필요\" 라고만 적고, 추측 절대 금지.\n"
-                "- 모든 수치는 출처·시점을 함께 명시 (예: 'Q1 FY26 매출 $200.3M (YoY +63.5%, 2026-05-08 발표)').\n"
-                "- 본문 외 어떤 prefix·suffix·주석·markdown도 금지.\n"
-            )
-        )
+        # ── 1~2) 컨텍스트 수집 + 프롬프트 조립 (배치와 공유하는 단일 소스) ──
+        prompt, company_name = _build_stock_analysis_prompt(ticker, name_hint)
 
         # ── 3) Claude Sonnet 4.6 + web_search 호출 ────────────────────
         text, citations = _call_claude_with_search(

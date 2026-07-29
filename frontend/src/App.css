@@ -180,6 +180,33 @@
   background: var(--clr-border);
   border-radius: var(--r-md); padding: 2px; gap: 1px;
 }
+/* 필터 축 라벨 — 같은 단어('전체')가 여러 축에 쓰일 때 축을 명시 (시장/등급) */
+.filter-axis-label {
+  font-size: 10px; font-weight: 700; color: var(--clr-text-muted);
+  white-space: nowrap; flex-shrink: 0;
+}
+
+/* 접근 가능한 도움말 툴팁 (InfoTip) — hover·탭·키보드 모두 지원 */
+.infotip-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; min-height: 18px; padding: 0 2px;
+  border: none; background: transparent; cursor: help;
+  color: var(--clr-text-muted); opacity: .6; line-height: 1;
+  font-family: inherit; vertical-align: middle;
+}
+.infotip-btn:hover, .infotip-btn:focus-visible { opacity: 1; color: var(--clr-info-dark); }
+.infotip-btn:focus-visible { outline: 2px solid var(--clr-info-dark); outline-offset: 1px; border-radius: 2px; }
+.infotip-pop {
+  z-index: 10001;
+  background: var(--clr-surface);
+  color: var(--clr-text);
+  border: 1px solid var(--clr-border-md); border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.16);
+  padding: 8px 10px;
+  font-size: 11px; line-height: 1.6; font-weight: 500;
+  white-space: pre-line;            /* METRIC_HELP 등 \n 문장 줄바꿈(R6) */
+  text-align: left;
+}
 .seg-btn {
   flex: 1; padding: 5px 10px;
   border-radius: var(--r-sm); border: none;
