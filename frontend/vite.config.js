@@ -7,7 +7,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+      // icon-badge.png는 manifest.icons에 없어 자동 프리캐시 대상이 아니다.
+      // 알림 표시 시점에 네트워크가 불안정해도 상태바 아이콘이 뜨도록 명시 포함.
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icons/icon-badge.png'],
       manifest: {
         name: '다온 포트폴리오',
         short_name: '다온',

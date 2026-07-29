@@ -6,7 +6,9 @@ import {
   listNotifications, markNotificationRead, markAllNotificationsRead,
   listAlerts, deleteAlert, getMovePrefs, saveMovePrefs,
 } from '../api'
-import { pushSupported, getPushState, enablePush, disablePush } from '../pushClient'
+import {
+  pushSupported, getPushState, enablePush, disablePush, syncAppBadge,
+} from '../pushClient'
 import { sendTestPush } from '../api'
 import { useStore } from '../store'
 
@@ -42,6 +44,12 @@ export default function NotificationsBell() {
   })
 
   const unread = notif?.unread_count || 0
+
+  // 미확인 수 → 홈 화면 앱 아이콘 뱃지 (60초 폴링마다 자동 동기화)
+  useEffect(() => {
+    if (notif?.unread_count == null) return
+    syncAppBadge(notif.unread_count)
+  }, [notif?.unread_count])
 
   // ESC 키로 시트 닫기
   useEffect(() => {
@@ -90,6 +98,7 @@ export default function NotificationsBell() {
   }
   async function onReadAll() {
     try { await markAllNotificationsRead() } catch {}
+    syncAppBadge(0)          // 재조회를 기다리지 않고 즉시 뱃지 제거
     qc.invalidateQueries({ queryKey: ['notifications'] })
   }
   async function onDeleteAlert(id) {

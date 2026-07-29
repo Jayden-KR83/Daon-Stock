@@ -7099,9 +7099,15 @@ def _get_vapid() -> tuple[str, str]:
                      ('vapid_public', pub))
     return priv, pub
 
-def _send_push(user_id: str, title: str, body: str, url: str = '/') -> int:
+def _send_push(user_id: str, title: str, body: str, url: str = '/',
+               tag: str = '') -> int:
     """user_id의 모든 구독에 푸시 발송. 만료 구독(404/410)은 정리. 발송 성공 수 반환.
-    실패해도 호출부(알림 INSERT 등)에 영향 없도록 전부 격리."""
+    실패해도 호출부(알림 INSERT 등)에 영향 없도록 전부 격리.
+
+    payload.badge = 미확인 알림 수 → SW가 navigator.setAppBadge()로 앱 아이콘에 표시.
+    payload.tag  = 알림 그룹 키. 종목별로 다르게 주어야 여러 건이 겹치지 않고 쌓인다
+                   (같은 tag면 OS가 이전 알림을 '교체' → 안드로이드 런처 뱃지가 1에서 안 늘어남).
+    """
     try:
         from pywebpush import webpush, WebPushException
     except Exception:
@@ -7115,9 +7121,14 @@ def _send_push(user_id: str, title: str, body: str, url: str = '/') -> int:
             "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?",
             (user_id,)
         ).fetchall()
-    if not subs:
-        return 0
-    payload = json.dumps({'title': title, 'body': body, 'url': url})
+        if not subs:
+            return 0
+        badge = conn.execute(
+            "SELECT COUNT(*) AS n FROM notifications "
+            "WHERE user_id=? AND read_at IS NULL", (user_id,)
+        ).fetchone()['n']
+    payload = json.dumps({'title': title, 'body': body, 'url': url,
+                          'badge': int(badge), 'tag': tag or 'daon-push'})
     sent, dead = 0, []
     for s in subs:
         try:
@@ -7461,7 +7472,7 @@ def cron_check_alerts(req: TriggerReq):
             prices[tkr] = float(cur)
 
     triggered = 0
-    pushed: list = []   # (user_id, msg) — 커밋 후 Web Push 발송 대상
+    pushed: list = []   # (user_id, ticker, msg) — 커밋 후 Web Push 발송 대상
     with _db() as conn:
         for r in rows:
             cur = prices.get(r['ticker'])
@@ -7488,11 +7499,12 @@ def cron_check_alerts(req: TriggerReq):
                 (now, r['id'])
             )
             triggered += 1
-            pushed.append((r['user_id'], msg))
+            pushed.append((r['user_id'], r['ticker'], msg))
 
     # 인앱 알림 INSERT 후 Web Push 발송 (DB 커밋 이후, 실패해도 격리)
-    for uid, msg in pushed:
-        _send_push(uid, '다온 가격 알림', msg, '/')
+    # tag는 종목별로 분리 — 같은 tag면 OS가 알림을 교체해 뱃지가 안 쌓인다
+    for uid, tkr, msg in pushed:
+        _send_push(uid, '다온 가격 알림', msg, '/', tag=f'target-{tkr}')
 
     move = _run_move_scan(now, quotes)
     return {'checked': len(rows), 'triggered': triggered,
@@ -7600,11 +7612,11 @@ def _run_move_scan(now: float, quotes: dict) -> dict:
                         "(user_id, ticker, last_kind, last_pct, fired_at) "
                         "VALUES (?,?,?,?,?)", (uid, tkr, kind, float(pct), now))
                     triggered += 1
-                    pushed.append((uid, kind, msg))
+                    pushed.append((uid, tkr, kind, msg))
 
-        for uid, kind, msg in pushed:
+        for uid, tkr, kind, msg in pushed:
             _send_push(uid, '다온 급등 알림' if kind == 'surge' else '다온 급락 알림',
-                       msg, '/')
+                       msg, '/', tag=f'move-{tkr}')
 
         out = {'users': len(watch), 'tickers': len(universe), 'triggered': triggered}
         if truncated:
@@ -7671,7 +7683,7 @@ def _weekly_rebalance_for_user(uid: str, api_key: str) -> int:
         )
     _bump_ai_call(uid)
     _send_push(uid, '다온 주간 리밸런싱',
-               msg[:110] + ('…' if len(msg) > 110 else ''), '/')
+               msg[:110] + ('…' if len(msg) > 110 else ''), '/', tag='weekly-rebalance')
     return 1
 
 @app.post("/api/cron/weekly_rebalance")
