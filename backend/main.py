@@ -204,15 +204,34 @@ def _init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_alerts_user ON price_alerts(user_id, enabled);
         CREATE INDEX IF NOT EXISTS idx_alerts_ticker ON price_alerts(ticker);
+        -- 급등락 알림(일간 변동률 ±N%) — 종목별 등록 없이 보유·관심 전체에 자동 적용.
+        -- 행이 없는 사용자는 MOVE_ALERT_DEFAULTS(켜짐·5%·보유+관심)로 동작한다.
+        CREATE TABLE IF NOT EXISTS move_alert_prefs (
+            user_id       TEXT PRIMARY KEY,
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            threshold_pct REAL    NOT NULL DEFAULT 5.0,   -- 절대값 임계 (예: 5.0 = ±5%)
+            scope         TEXT    NOT NULL DEFAULT 'both',-- 'both'|'holdings'|'watchlist'
+            updated_at    REAL    NOT NULL DEFAULT 0
+        );
+        -- 재발화 제어용 상태. |변동률|<임계로 돌아오면 행을 지워 '재무장'한다.
+        CREATE TABLE IF NOT EXISTS move_alert_state (
+            user_id   TEXT NOT NULL,
+            ticker    TEXT NOT NULL,
+            last_kind TEXT NOT NULL,          -- 'surge' | 'plunge'
+            last_pct  REAL NOT NULL,          -- 마지막 발화 시점의 변동률
+            fired_at  REAL NOT NULL,
+            PRIMARY KEY(user_id, ticker)
+        );
         CREATE TABLE IF NOT EXISTS notifications (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id       TEXT NOT NULL,
             ticker        TEXT NOT NULL,
             name          TEXT NOT NULL DEFAULT '',
-            kind          TEXT NOT NULL,          -- 'high' | 'low' | 'info'
+            kind          TEXT NOT NULL,          -- 'high'|'low'|'info'|'surge'|'plunge'
             target_price  REAL,
             current_price REAL,
             message       TEXT NOT NULL DEFAULT '',
+            change_pct    REAL,                   -- surge/plunge 발화 시 일간 변동률
             created_at    REAL NOT NULL,
             read_at       REAL                    -- NULL이면 미확인
         );
@@ -344,6 +363,10 @@ def _migrate_schema():
         pf_cols = {row['name'] for row in conn.execute("PRAGMA table_info(portfolios)").fetchall()}
         if pf_cols and 'manual_price' not in pf_cols:
             conn.execute("ALTER TABLE portfolios ADD COLUMN manual_price REAL NOT NULL DEFAULT 0")
+        # 급등락 알림: 기존 notifications 테이블에 변동률 컬럼 추가
+        nt_cols = {row['name'] for row in conn.execute("PRAGMA table_info(notifications)").fetchall()}
+        if nt_cols and 'change_pct' not in nt_cols:
+            conn.execute("ALTER TABLE notifications ADD COLUMN change_pct REAL")
         # 마이그레이션 직후, 기존 사용자(이미 가입된 자)는 자동 approved + ai_enabled (legacy compat)
         if added_status:
             conn.execute(
@@ -6733,6 +6756,81 @@ def delete_alert(alert_id: int, cu: dict = Depends(require_approved)):
                      (alert_id, cu['user_id']))
     return {'ok': True}
 
+
+# ─── 급등락 알림 (일간 변동률 ±N%) ──────────────────────────────────
+# 목표가/손절가와 달리 종목별 등록이 필요 없다. 보유·관심 전체를 cron이 훑어
+# |일간 변동률| >= 임계인 종목을 알린다. "자기 전 / 눈 뜨자마자" 확인 흐름 대응.
+MOVE_ALERT_DEFAULTS = {'enabled': True, 'threshold_pct': 5.0, 'scope': 'both'}
+MOVE_SCAN_INTERVAL  = 900          # 15분 — 5분 cron 중 3회에 1회만 전체 스캔(시세 호출 비용)
+MOVE_SCAN_MAX_TICKERS = 200        # 폭주 방지 상한
+
+def _decide_move_alert(change_pct, threshold: float, state: dict | None) -> str | None:
+    """급등락 발화 판정 — 순수함수(pytest 대상).
+
+    - |변동률| < 임계 → None. 호출부가 상태 행을 지워 '재무장'한다.
+    - 상태 없음 → 발화.
+    - 방향 전환(급등↔급락) → 발화.
+    - 같은 방향 → 임계만큼 더 벌어졌을 때만 재발화(-5% 알림 후 -10%에서 한 번 더).
+    날짜 경계가 아니라 '변동률 되돌림'을 기준으로 하므로, 장 마감 후 같은 값이
+    유지되는 미국장에서 자정마다 중복 발화하지 않는다.
+    """
+    if change_pct is None or threshold <= 0:
+        return None
+    try:
+        pct = float(change_pct)
+    except (TypeError, ValueError):
+        return None
+    if abs(pct) < threshold:
+        return None
+    kind = 'surge' if pct > 0 else 'plunge'
+    if not state:
+        return kind
+    if state.get('last_kind') != kind:
+        return kind
+    if abs(pct) >= abs(float(state.get('last_pct') or 0)) + threshold:
+        return kind
+    return None
+
+def _move_prefs_row(conn, user_id: str) -> dict:
+    """행이 없으면 기본값(켜짐·5%·보유+관심)을 반환 — 무설정으로도 동작."""
+    row = conn.execute(
+        "SELECT enabled, threshold_pct, scope FROM move_alert_prefs WHERE user_id=?",
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return dict(MOVE_ALERT_DEFAULTS)
+    return {'enabled': bool(row['enabled']),
+            'threshold_pct': float(row['threshold_pct']),
+            'scope': row['scope'] or 'both'}
+
+class MovePrefsReq(BaseModel):
+    enabled:       bool  = True
+    threshold_pct: float = 5.0
+    scope:         str   = 'both'
+
+@app.get("/api/alerts/move")
+def get_move_prefs(cu: dict = Depends(require_approved)):
+    with _db() as conn:
+        return {'prefs': _move_prefs_row(conn, cu['user_id']),
+                'defaults': dict(MOVE_ALERT_DEFAULTS)}
+
+@app.post("/api/alerts/move")
+def set_move_prefs(req: MovePrefsReq, cu: dict = Depends(require_approved)):
+    if req.scope not in ('both', 'holdings', 'watchlist'):
+        raise HTTPException(400, "scope는 both|holdings|watchlist")
+    if not (1.0 <= req.threshold_pct <= 50.0):
+        raise HTTPException(400, "임계는 1~50% 사이")
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO move_alert_prefs "
+            "(user_id, enabled, threshold_pct, scope, updated_at) VALUES (?,?,?,?,?)",
+            (cu['user_id'], 1 if req.enabled else 0,
+             float(req.threshold_pct), req.scope, time())
+        )
+        # 임계·범위가 바뀌면 이전 발화 상태는 의미가 없다 → 재무장
+        conn.execute("DELETE FROM move_alert_state WHERE user_id=?", (cu['user_id'],))
+    return {'ok': True}
+
 @app.get("/api/notifications")
 def list_notifications(unread_only: bool = False,
                        limit: int = 50,
@@ -6740,7 +6838,7 @@ def list_notifications(unread_only: bool = False,
     """알림 목록 (최신순). unread_only=true면 미확인만."""
     with _db() as conn:
         q = ("SELECT id, ticker, name, kind, target_price, current_price, "
-             "       message, created_at, read_at "
+             "       message, change_pct, created_at, read_at "
              "FROM notifications WHERE user_id=?")
         params = [cu['user_id']]
         if unread_only:
@@ -7347,23 +7445,20 @@ def cron_check_alerts(req: TriggerReq):
             (cutoff,)
         ).fetchall()
 
+    quotes: dict = {}          # ticker -> 시세 dict (목표가 스캔·급등락 스캔 공용)
+
     if not rows:
-        return {'checked': 0, 'triggered': 0}
+        move = _run_move_scan(now, quotes)
+        return {'checked': 0, 'triggered': 0, 'move': move}
 
     # 티커별 그룹핑하여 가격 일괄 조회
     tickers = sorted({r['ticker'] for r in rows})
     prices: dict = {}
     for tkr in tickers:
-        try:
-            if re.match(r'^A?\d{6}$', tkr):
-                p = _kr_price(tkr) or {}
-            else:
-                p = _price_fast(tkr) or {}
-            cur = p.get('current_price')
-            if cur is not None:
-                prices[tkr] = float(cur)
-        except Exception:
-            pass
+        p = _quote_for_alert(tkr, quotes)
+        cur = p.get('current_price')
+        if cur is not None:
+            prices[tkr] = float(cur)
 
     triggered = 0
     pushed: list = []   # (user_id, msg) — 커밋 후 Web Push 발송 대상
@@ -7399,8 +7494,124 @@ def cron_check_alerts(req: TriggerReq):
     for uid, msg in pushed:
         _send_push(uid, '다온 가격 알림', msg, '/')
 
+    move = _run_move_scan(now, quotes)
     return {'checked': len(rows), 'triggered': triggered,
-            'unique_tickers': len(tickers)}
+            'unique_tickers': len(tickers), 'move': move}
+
+
+def _quote_for_alert(ticker: str, cache: dict) -> dict:
+    """알림 스캔용 시세 1건 (KR/US 분기 + 호출 내 메모이즈). 실패는 빈 dict."""
+    if ticker in cache:
+        return cache[ticker]
+    q: dict = {}
+    try:
+        q = (_kr_price(ticker) if re.match(r'^A?\d{6}$', ticker)
+             else _price_fast(ticker)) or {}
+    except Exception:
+        q = {}
+    cache[ticker] = q
+    return q
+
+
+def _run_move_scan(now: float, quotes: dict) -> dict:
+    """보유·관심 종목의 일간 변동률이 사용자 임계(기본 ±5%)를 넘으면 알림.
+
+    5분 cron 중 MOVE_SCAN_INTERVAL(15분)마다 1회만 실제 스캔 — 시세 호출 비용 억제.
+    실패해도 목표가 알림에 영향 없도록 전체를 격리한다.
+    """
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='move_scan_at'").fetchone()
+            last = float(row['value']) if row and row['value'] else 0.0
+            if now - last < MOVE_SCAN_INTERVAL:
+                return {'skipped': 'throttled'}
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)",
+                ('move_scan_at', str(now)))
+
+        # 1) 사용자별 감시 대상 수집 (보유 quantity>0 + 관심)
+        with _db() as conn:
+            users = [r['user_id'] for r in conn.execute(
+                "SELECT user_id FROM users WHERE status='approved'").fetchall()]
+            watch: dict = {}          # user_id -> {ticker: (name, origin)}
+            for uid in users:
+                prefs = _move_prefs_row(conn, uid)
+                if not prefs['enabled']:
+                    continue
+                items: dict = {}
+                if prefs['scope'] in ('both', 'holdings'):
+                    for r in conn.execute(
+                        "SELECT ticker, name FROM portfolios "
+                        "WHERE user_id=? AND quantity>0", (uid,)).fetchall():
+                        items[r['ticker']] = (r['name'] or r['ticker'], '보유')
+                if prefs['scope'] in ('both', 'watchlist'):
+                    for r in conn.execute(
+                        "SELECT ticker, name FROM watchlist WHERE user_id=?",
+                        (uid,)).fetchall():
+                        items.setdefault(r['ticker'], (r['name'] or r['ticker'], '관심'))
+                if items:
+                    watch[uid] = {'prefs': prefs, 'items': items}
+
+        if not watch:
+            return {'users': 0, 'triggered': 0}
+
+        # 2) 티커 합집합 1회 조회 (목표가 스캔에서 이미 받은 건 재사용)
+        universe = sorted({t for w in watch.values() for t in w['items']})
+        truncated = 0
+        if len(universe) > MOVE_SCAN_MAX_TICKERS:
+            truncated = len(universe) - MOVE_SCAN_MAX_TICKERS
+            universe = universe[:MOVE_SCAN_MAX_TICKERS]
+        for tkr in universe:
+            _quote_for_alert(tkr, quotes)
+
+        # 3) 판정 + 알림 INSERT
+        triggered, pushed = 0, []
+        with _db() as conn:
+            for uid, w in watch.items():
+                thr = w['prefs']['threshold_pct']
+                states = {r['ticker']: dict(r) for r in conn.execute(
+                    "SELECT ticker, last_kind, last_pct FROM move_alert_state "
+                    "WHERE user_id=?", (uid,)).fetchall()}
+                for tkr, (nm, origin) in w['items'].items():
+                    q = quotes.get(tkr) or {}
+                    pct, cur = q.get('change_pct'), q.get('current_price')
+                    if pct is None or cur is None:
+                        continue
+                    kind = _decide_move_alert(pct, thr, states.get(tkr))
+                    if kind is None:
+                        if abs(float(pct)) < thr and tkr in states:
+                            conn.execute(
+                                "DELETE FROM move_alert_state "
+                                "WHERE user_id=? AND ticker=?", (uid, tkr))
+                        continue
+                    is_kr = bool(re.match(r'^A?\d{6}$', tkr))
+                    price_s = (f"₩{int(round(float(cur))):,}" if is_kr
+                               else f"${float(cur):,.2f}")
+                    msg = (f"[{origin}] {nm} {float(pct):+.1f}% "
+                           f"{'급등' if kind == 'surge' else '급락'} · 현재 {price_s}")
+                    conn.execute(
+                        "INSERT INTO notifications (user_id, ticker, name, kind, "
+                        "       target_price, current_price, message, change_pct, "
+                        "       created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (uid, tkr, nm, kind, thr, float(cur), msg, float(pct), now))
+                    conn.execute(
+                        "INSERT OR REPLACE INTO move_alert_state "
+                        "(user_id, ticker, last_kind, last_pct, fired_at) "
+                        "VALUES (?,?,?,?,?)", (uid, tkr, kind, float(pct), now))
+                    triggered += 1
+                    pushed.append((uid, kind, msg))
+
+        for uid, kind, msg in pushed:
+            _send_push(uid, '다온 급등 알림' if kind == 'surge' else '다온 급락 알림',
+                       msg, '/')
+
+        out = {'users': len(watch), 'tickers': len(universe), 'triggered': triggered}
+        if truncated:
+            out['truncated'] = truncated   # 상한 초과로 스캔에서 제외된 티커 수
+        return out
+    except Exception as e:
+        return {'error': str(e)[:200]}
 
 
 # ─── AI 주간 리밸런싱 리포트 (cron, 주 1회) ────────────────────────

@@ -77,10 +77,16 @@ def endpoint(cu: dict = Depends(require_approved)):
 - `GET /api/sector/heatmap/{market}` (S&P500, KOSPI)
 - `GET /api/volume/{market}` (거래량 Top)
 
-### 6.5 가격 알림 (V1 인앱)
-- `GET/POST/DELETE /api/alerts` — 사용자 알림 규칙
+### 6.5 가격 알림 (V1 인앱 + V2 Web Push)
+- `GET/POST/DELETE /api/alerts` — 종목별 목표가·손절가 규칙
+- `GET/POST /api/alerts/move` — **급등락 알림 설정**(사용자 1행). `{enabled, threshold_pct(1~50), scope: both|holdings|watchlist}`. 행이 없으면 `MOVE_ALERT_DEFAULTS`(켜짐·5%·both)로 동작 — 무설정 기본 ON. 저장 시 `move_alert_state` 삭제(재무장).
 - `GET /api/notifications` (unread_only=bool) · `POST /api/notifications/{id}/read` · `POST /api/notifications/read_all`
-- `POST /api/cron/check_alerts` — cron_secret 검증, 5분 간격
+  - `kind`: `high`|`low`(목표가/손절가) · `surge`|`plunge`(급등락) · `info`. `change_pct`는 surge/plunge에만 채워짐.
+- `POST /api/cron/check_alerts` — cron_secret 검증, 5분 간격. 내부에서 두 스캔 수행:
+  1. **목표가 스캔** — 등록된 `price_alerts` 전수, 24h 재발화 방지
+  2. **급등락 스캔**(`_run_move_scan`) — approved 사용자별 보유(quantity>0)+관심 합집합의 일간 `change_pct` 대 임계 비교. **15분 스로틀**(`settings.move_scan_at`)이라 5분 cron 3회 중 1회만 실제 조회. 티커 상한 `MOVE_SCAN_MAX_TICKERS=200`(초과분은 응답 `move.truncated`에 표시). 시세는 `quotes` dict로 두 스캔이 공유해 중복 호출 없음. 전체 try/except 격리 — 실패해도 목표가 알림에 영향 없음.
+  - 재발화 규칙(`_decide_move_alert`, 순수함수·pytest 12건): 최초 돌파 발화 → 같은 방향은 임계만큼 더 벌어질 때만(−5% 후 −10%) → 방향 전환은 즉시 → `|변동률|<임계`로 되돌아오면 `move_alert_state` 행 삭제해 재무장. **날짜 경계가 아닌 되돌림 기준**이라 장 마감 후 값이 고정된 미국장에서 자정마다 중복 발화하지 않음.
+- `GET /api/push/public_key` · `POST /api/push/subscribe|unsubscribe|test` — Web Push(VAPID 자동 생성). 앱이 닫혀 있어도 도달.
 
 ### 6.6 자산 추이
 - `POST /api/cron/snapshot` — 일별 평가액 자동 저장

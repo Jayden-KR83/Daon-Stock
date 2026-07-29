@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   listNotifications, markNotificationRead, markAllNotificationsRead,
-  listAlerts, deleteAlert,
+  listAlerts, deleteAlert, getMovePrefs, saveMovePrefs,
 } from '../api'
 import { pushSupported, getPushState, enablePush, disablePush } from '../pushClient'
 import { sendTestPush } from '../api'
@@ -191,7 +191,7 @@ export default function NotificationsBell() {
                       : push === 'denied'
                       ? '브라우저 설정에서 알림 권한이 차단됨 — 권한 허용 후 다시 시도'
                       : push === 'on'
-                      ? '앱을 닫아도 목표가·손절가 도달 시 알림이 도착합니다'
+                      ? '앱을 닫아도 급등락·목표가·손절가 알림이 도착합니다'
                       : '켜면 앱을 닫아도 알림을 받습니다'}
                   </div>
                 </div>
@@ -249,7 +249,7 @@ export default function NotificationsBell() {
                 {tab === 'notif' && (
                   (notif?.notifications?.length || 0) === 0 ? (
                     <EmptyState title="알림 없음"
-                      desc="설정에서 종목별 목표가/손절가를 등록하면, 도달 시 알림이 표시됩니다." />
+                      desc={'보유·관심 종목이 하루 ±5% 넘게 움직이면 자동으로 알립니다.\n종목별 목표가·손절가는 설정 탭에서 등록하세요.'} />
                   ) : (
                     notif.notifications.map(n => (
                       <div key={n.id} onClick={() => onItemClick(n)}
@@ -261,12 +261,17 @@ export default function NotificationsBell() {
                         }}>
                         <div style={{ display: 'flex', alignItems: 'baseline',
                           justifyContent: 'space-between', gap: 8 }}>
-                          <span className={n.kind === 'high' ? 'sev-label is-critical'
-                                              : n.kind === 'low' ? 'sev-label is-high'
-                                              : 'sev-label is-med'}>
-                            {n.kind === 'high' ? '목표가' : n.kind === 'low' ? '손절가' : '안내'}
+                          <span className={KIND_META[n.kind]?.cls || 'sev-label is-med'}>
+                            {KIND_META[n.kind]?.label || '안내'}
                           </span>
-                          <span style={{ fontSize: 10, color: 'var(--m-text-tertiary)' }}>
+                          <span style={{ fontSize: 10, color: 'var(--m-text-tertiary)',
+                            fontVariantNumeric: 'tabular-nums' }}>
+                            {n.change_pct != null && (
+                              <strong className={n.change_pct >= 0 ? 'num-pos' : 'num-neg'}
+                                style={{ marginRight: 8 }}>
+                                {n.change_pct >= 0 ? '+' : ''}{n.change_pct.toFixed(1)}%
+                              </strong>
+                            )}
                             {fmtRelTime(n.created_at)}
                           </span>
                         </div>
@@ -279,9 +284,11 @@ export default function NotificationsBell() {
                   )
                 )}
 
+                {tab === 'rules' && <MoveAlertSettings open={open} />}
+
                 {tab === 'rules' && (
                   (alerts?.alerts?.length || 0) === 0 ? (
-                    <EmptyState title="등록된 알림 없음"
+                    <EmptyState title="등록된 종목별 알림 없음"
                       desc="종목 상세(차트 탭)에서 목표가/손절가를 등록할 수 있습니다." />
                   ) : (
                     alerts.alerts.map(a => (
@@ -337,13 +344,172 @@ export default function NotificationsBell() {
   )
 }
 
+/** 알림 종류별 라벨·의미색 — surge/plunge는 급등락 스캔(cron)이 만든다. */
+const KIND_META = {
+  high:   { label: '목표가', cls: 'sev-label is-critical' },
+  low:    { label: '손절가', cls: 'sev-label is-high' },
+  surge:  { label: '급등',   cls: 'sev-label is-critical' },
+  plunge: { label: '급락',   cls: 'sev-label is-high' },
+  info:   { label: '안내',   cls: 'sev-label is-med' },
+}
+
+const SCOPE_LABELS = [
+  ['both', '보유+관심'], ['holdings', '보유만'], ['watchlist', '관심만'],
+]
+
+/**
+ * 급등락 알림 설정 — 종목별 등록 없이 보유·관심 전체에 적용되는 단일 규칙.
+ * 서버 기본값은 켜짐·±5%·보유+관심이라, 아무것도 안 해도 동작한다.
+ */
+function MoveAlertSettings({ open }) {
+  const qc = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ['move-prefs'],
+    queryFn: getMovePrefs,
+    staleTime: 60_000,
+    enabled: open,
+  })
+  const [draft, setDraft] = useState(null)
+  const [busy, setBusy]   = useState(false)
+  const [err, setErr]     = useState('')
+
+  useEffect(() => { if (data?.prefs) setDraft(data.prefs) }, [data])
+
+  if (!draft) return null
+
+  const saved = data?.prefs || {}
+  const dirty = ['enabled', 'threshold_pct', 'scope']
+    .some(k => String(draft[k]) !== String(saved[k]))
+
+  async function commit(next) {
+    setErr(''); setBusy(true)
+    try {
+      await saveMovePrefs({
+        enabled: next.enabled,
+        threshold_pct: Number(next.threshold_pct),
+        scope: next.scope,
+      })
+      qc.invalidateQueries({ queryKey: ['move-prefs'] })
+    } catch (e) {
+      setErr(e.response?.data?.detail || '저장 실패')
+    } finally { setBusy(false) }
+  }
+
+  const thrOk = Number(draft.threshold_pct) >= 1 && Number(draft.threshold_pct) <= 50
+
+  return (
+    <div style={{
+      padding: '12px 12px 10px', margin: '6px 0 14px', borderRadius: 4,
+      border: '1px solid var(--m-outline-variant)',
+      background: 'var(--m-surface-variant)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--m-text)' }}>
+            급등락 알림
+          </div>
+          <div className="ko-keep" style={{ fontSize: 10, marginTop: 2,
+            color: 'var(--m-text-tertiary)', lineHeight: 1.55,
+            whiteSpace: 'pre-line' }}>
+            {'보유·관심 종목 전체에 자동 적용 — 종목별 등록이 필요 없습니다.\n하루 변동률이 임계를 넘으면 알립니다.'}
+          </div>
+        </div>
+        <button
+          onClick={() => { const n = { ...draft, enabled: !draft.enabled }
+            setDraft(n); commit(n) }}
+          disabled={busy}
+          style={{
+            flexShrink: 0, padding: '5px 12px', borderRadius: 2,
+            background: draft.enabled ? 'transparent' : 'var(--m-text)',
+            border: `1px solid ${draft.enabled ? 'var(--m-outline-variant)' : 'var(--m-text)'}`,
+            color: draft.enabled ? 'var(--m-text-secondary)' : 'var(--m-surface)',
+            fontSize: 11, fontWeight: 800, fontFamily: 'inherit',
+            cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1,
+          }}>{busy ? '...' : draft.enabled ? '끄기' : '켜기'}</button>
+      </div>
+
+      {draft.enabled && (
+        <>
+          {/* 임계 — 프리셋 + 직접 입력 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6,
+            marginTop: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em',
+              color: 'var(--m-text-tertiary)', textTransform: 'uppercase',
+              marginRight: 2 }}>임계 ±</span>
+            {[3, 5, 7, 10].map(v => (
+              <button key={v} title={`하루 ±${v}% 이상 움직이면 알림`}
+                onClick={() => setDraft({ ...draft, threshold_pct: v })}
+                style={{
+                  padding: '3px 9px', borderRadius: 2,
+                  background: Number(draft.threshold_pct) === v ? 'var(--m-text)' : 'transparent',
+                  border: `1px solid ${Number(draft.threshold_pct) === v ? 'var(--m-text)' : 'var(--m-outline-variant)'}`,
+                  color: Number(draft.threshold_pct) === v ? 'var(--m-surface)' : 'var(--m-text-secondary)',
+                  fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                  fontFamily: 'inherit', fontVariantNumeric: 'tabular-nums',
+                }}>{v}%</button>
+            ))}
+            <input type="number" min="1" max="50" step="0.5"
+              value={draft.threshold_pct}
+              onChange={e => setDraft({ ...draft, threshold_pct: e.target.value })}
+              aria-label="임계 변동률(%)"
+              className="input"
+              style={{ width: 62, padding: '3px 6px', borderRadius: 2,
+                fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums' }} />
+          </div>
+
+          {/* 대상 범위 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em',
+              color: 'var(--m-text-tertiary)', textTransform: 'uppercase',
+              marginRight: 2 }}>대상</span>
+            {SCOPE_LABELS.map(([v, label]) => (
+              <button key={v} onClick={() => setDraft({ ...draft, scope: v })}
+                style={{
+                  padding: '3px 9px', borderRadius: 2,
+                  background: draft.scope === v ? 'var(--m-text)' : 'transparent',
+                  border: `1px solid ${draft.scope === v ? 'var(--m-text)' : 'var(--m-outline-variant)'}`,
+                  color: draft.scope === v ? 'var(--m-surface)' : 'var(--m-text-secondary)',
+                  fontSize: 11, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                }}>{label}</button>
+            ))}
+          </div>
+
+          {err && (
+            <div style={{ marginTop: 8, padding: 6, fontSize: 10.5, borderRadius: 2,
+              border: '1px solid var(--m-negative)', color: 'var(--m-negative)' }}>
+              {err}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            <button onClick={() => commit(draft)} disabled={busy || !dirty || !thrOk}
+              style={{
+                padding: '5px 14px', borderRadius: 2, border: 'none',
+                background: 'var(--m-text)', color: 'var(--m-surface)',
+                fontSize: 11, fontWeight: 800, fontFamily: 'inherit',
+                cursor: (busy || !dirty || !thrOk) ? 'default' : 'pointer',
+                opacity: (busy || !dirty || !thrOk) ? 0.4 : 1,
+              }}>{busy ? '저장 중…' : dirty ? '저장' : '저장됨'}</button>
+            <span className="ko-keep" style={{ fontSize: 9.5,
+              color: 'var(--m-text-tertiary)', lineHeight: 1.5 }}>
+              약 15분 간격 스캔 · 되돌아왔다 다시 넘으면 재알림
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function EmptyState({ title, desc }) {
   return (
     <div className="ko-keep" style={{ padding: '40px 16px', textAlign: 'center',
       color: 'var(--m-text-tertiary)' }}>
       <div style={{ fontSize: 13, fontWeight: 800,
         color: 'var(--m-text-secondary)', marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 11, lineHeight: 1.7 }}>{desc}</div>
+      {/* R6: 다문장 안내는 문장마다 줄바꿈 */}
+      <div style={{ fontSize: 11, lineHeight: 1.7, whiteSpace: 'pre-line' }}>{desc}</div>
     </div>
   )
 }

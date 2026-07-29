@@ -13,7 +13,7 @@
 | 배포 · cron · systemd | [docs/deployment.md](docs/deployment.md) | 빌드/배포/cron 작업 시 |
 | 트러블슈팅 + 검증 체크리스트 | [docs/troubleshooting.md](docs/troubleshooting.md) | 변경 후 검증 + 함정 회피 |
 | 시간순 변경 이력 | [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | "언제 무엇이 바뀌었나" 추적 |
-| 세션 핸드오프 | [SESSION_HANDOFF.md](SESSION_HANDOFF.md) | 세션 중단 복구 시 |
+| 세션 핸드오프 | [SESSION_HANDOFF.md](SESSION_HANDOFF.md) | **새 세션 시작 시 가장 먼저** — 맨 위 "복구 순서" 5단계 |
 
 ## 절대 수정 금지 파일
 - `daon.db` — 운영 SQLite DB. 코드로 직접 조작 금지. 백업 후 스키마 변경.
@@ -48,5 +48,6 @@
 - 사용자 발견 전에 정적 검증으로 잡아내기
 
 ## 마지막 대규모 작업
-2026-05-29 — PWA 활성화 + 가격 알림 V1 인앱 + 배당금 카드 + 코드 스플릿(manualChunks + lazy) + KR 가격 stale-while-revalidate + 알림 시트 portal 수정 + **CLAUDE.md 모듈화 (이번)**.
+2026-07-29 — **급등락 알림**(보유·관심 일간 ±5% 자동 감지 → 인앱 + Web Push, 기존 5분 cron 편승·15분 스로틀). pytest 111 통과.
+2026-05-29 — PWA 활성화 + 가격 알림 V1 인앱 + 배당금 카드 + 코드 스플릿(manualChunks + lazy) + KR 가격 stale-while-revalidate + 알림 시트 portal 수정 + CLAUDE.md 모듈화.
 이전 이력은 [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md).

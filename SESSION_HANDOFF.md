@@ -1,5 +1,43 @@
 # 세션 핸드오프 노트
 
+> **새 CLI 세션은 이 파일부터 읽는다.** 아래 "복구 순서"가 세션 연속성의 정본.
+
+## 🔁 복구 순서 (CLI가 닫혔거나 새로 열었을 때)
+
+1. `git status` · `git log --oneline -5` · `git rev-list --left-right --count origin/main...HEAD`
+   → **미푸시 커밋 수**가 곧 "지난 세션이 어디까지 갔나". 작업트리가 dirty면 그게 중단 지점.
+2. 이 파일의 **최신 세션 블록**(맨 위) 읽기 → 무엇을 했고 다음 후보가 뭔지.
+3. [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) 최신 세션 항목 → 왜 그렇게 했는지(설계 근거·트레이드오프).
+4. 배포 상태 확인: `backend/static/index.html`과 `sw.js`가 같은 번들 해시를 가리키는지 → 다르면 재빌드.
+5. 재개 전 `git fetch && git merge origin/main` (다른 기기/CLI 작업분 클로버 방지).
+
+**세션 종료 시 남길 것(다음 세션이 복구하는 근거)**: ① 이 파일 맨 위에 세션 블록 추가 ② DEVELOPMENT_LOG에 상세 ③ 로컬 커밋(+ 가능하면 `git push`) ④ 미결 항목을 "다음 후보"로 명시.
+⚠️ 대화 원문(transcript)은 저장하지 않는다 — 토큰만 먹고 검색이 안 된다. **결론·근거·다음 할 일**만 위 3곳에 남긴다. 직전 대화 자체를 되살리려면 CLI에서 `claude --continue`(마지막 세션) / `claude --resume`(목록에서 선택).
+
+---
+
+## ✅ 세션 (2026-07-29) — 급등락 알림 ±5% [현재]
+
+**상태**: 코드·문서·빌드 완료 · pytest 111 통과 · **미배포**(서버 배포는 오너 확인 후).
+**한 일**: 보유·관심 종목 일간 변동률이 임계(기본 ±5%)를 넘으면 인앱+Web Push 알림. 기존 5분 cron에 편승(cron 추가 없음, 15분 스로틀). 상세는 [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) 2026-07-29 항목.
+**변경 파일**: `backend/main.py`(스키마 2테이블+컬럼1 · `_decide_move_alert` · `_run_move_scan` · `/api/alerts/move`) · `backend/tests/test_move_alerts.py`(신규 12건) · `frontend/src/api.js` · `frontend/src/components/NotificationsBell.jsx` · `docs/api.md`.
+**빌드**: `index-DmmO9TTn.js` (index.html·sw.js 해시 일치 확인).
+**PWA**: 이미 2026-05-29부터 활성(manifest·sw·InstallPrompt·Web Push 전부 존재) — 이번 세션 변경 없음.
+
+**배포 명령**(오너 확인 후 실행):
+```powershell
+scp -i "C:\Users\user\Downloads\oracle-key.key" -r `
+  "c:\Users\user\AgentDev\daon\backend\static\*" ubuntu@168.107.13.20:~/portfolio/backend/static/
+scp -i "C:\Users\user\Downloads\oracle-key.key" `
+  "c:\Users\user\AgentDev\daon\backend\main.py" ubuntu@168.107.13.20:~/portfolio/backend/
+ssh -i "C:\Users\user\Downloads\oracle-key.key" ubuntu@168.107.13.20 "sudo systemctl restart portfolio"
+```
+배포 후 검증: 알림 벨 → 설정 탭에 "급등락 알림" 카드 표시 · 푸시 "테스트" 버튼 도달 · 다음 cron(≤15분) 후 `move.triggered` 확인.
+
+**다음 후보**: (아래 2026-06-25 블록의 B2 풀통합 · SaaS 온보딩 그대로 유효)
+
+---
+
 ## ✅ 세션 종료 (2026-06-24~25) — 보유종목 분석 탭 개선 [좌측 CLI]
 
 **상태**: ✅ 종료(사용자 마무리 선언). 모든 작업 배포·푸시 완료. 작업트리 clean · origin/main 동기화. 다음 작업은 새 CLI로.

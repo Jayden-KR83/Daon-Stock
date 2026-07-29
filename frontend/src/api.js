@@ -177,6 +177,12 @@ export const upsertAlert = (body) =>
   api.post('/alerts', body).then(r => r.data)
 export const deleteAlert = (id) =>
   api.delete(`/alerts/${id}`).then(r => r.data)
+
+// 급등락 알림 (보유·관심 전체, 일간 변동률 ±N%)
+export const getMovePrefs = () =>
+  api.get('/alerts/move').then(r => r.data)
+export const saveMovePrefs = (body) =>
+  api.post('/alerts/move', body).then(r => r.data)
 export const listNotifications = (unreadOnly = false, limit = 50) =>
   api.get('/notifications', { params: { unread_only: unreadOnly, limit } }).then(r => r.data)
 export const markNotificationRead = (id) =>
