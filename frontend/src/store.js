@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 
-const savedAppMode  = localStorage.getItem('appMode') || 'web'
+/* 레이아웃 모드 — 'auto' | 'web' | 'app'
+   'auto' = 화면 폭으로 결정(모바일 768px 미만이면 앱, 그 이상은 웹).
+   사용자가 명시적으로 고르면 폭과 무관하게 그 선택을 따른다 —
+   이전 appMode('web'|'app')는 'web'이 기본값이라 "명시적 웹 선호"와 구분되지 않아
+   모바일에서 웹 레이아웃을 고를 수 없었다. 기존 'app' 저장값만 선호로 승계. */
+const savedLayout = localStorage.getItem('layoutMode')
+  || (localStorage.getItem('appMode') === 'app' ? 'app' : 'auto')
 const savedToken    = localStorage.getItem('authToken') || null
 // 프라이버시 모드 — 페이지 로드 시 항상 가림 (true). 본문 클릭 시에만 표시. 새로고침 시 다시 가려짐.
 const savedPrivacy  = true
@@ -45,9 +51,9 @@ export const useStore = create((set, get) => ({
   currencyMode: 'KRW', // 'KRW' | 'USD'
   setCurrencyMode: (v) => set({ currencyMode: v }),
 
-  // Web/App display mode (persisted)
-  appMode: savedAppMode, // 'web' | 'app'
-  setAppMode: (v) => { localStorage.setItem('appMode', v); set({ appMode: v }) },
+  // Web/App 레이아웃 (persisted) — 'auto' | 'web' | 'app'
+  layoutMode: savedLayout,
+  setLayoutMode: (v) => { localStorage.setItem('layoutMode', v); set({ layoutMode: v }) },
 
   // USD/KRW rate
   usdKrw: 1300,

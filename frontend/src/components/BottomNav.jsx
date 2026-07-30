@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import './BottomNav.css'
 
@@ -76,8 +76,13 @@ const icons = {
   ),
 }
 
-/* 하단 네비 = 주요 5칸 고정(모바일 UX: 3~5개 권장) — 주요 4탭 + '더보기'.
- * 나머지 탭은 더보기 시트에. 가로 스크롤 탭바(발견성 낮음)를 5칸 고정으로 교체(2026-07). */
+/* 하단 네비 = 전체 탭을 담은 가로 스크롤 스트립 + 오른쪽에 고정된 '전체' 버튼.
+ *
+ * 이력: 가로 스크롤 탭바 → 5칸 고정(2026-07, 발견성) → 다시 스크롤 스트립(2026-07-30).
+ * 5칸 고정의 문제는 나머지 7개 탭이 점 3개 뒤에 완전히 숨어, 스와이프로 탭을 넘겨도
+ * 하단바는 그대로여서 "지금 어디에 있는지"가 안 보였다는 것.
+ * 이제 활성 탭이 바뀌면 스트립이 그 탭을 가운데로 스크롤해, 안 보였던 탭이 자연히 드러난다.
+ * '전체' 버튼은 스크롤 밖에 고정해 5칸 고정이 노렸던 발견성도 유지한다. */
 // adminOnly 는 관리자만 노출
 const ALL_TABS = [
   { label: '포트폴리오', idx: 0, iconKey: 'holdings'   },
@@ -93,21 +98,35 @@ const ALL_TABS = [
   { label: '관리자',     idx: 9, iconKey: 'admin',   adminOnly: true },
 ]
 
-// 하단바에 고정 노출할 주요 탭(순서 유지). 나머지는 '더보기' 시트로.
-const PRIMARY_IDX = [0, 2, 3, 10]  // 포트폴리오·분석·종목·발굴
+/* 스와이프 전환 순서 = 하단바에 보이는 순서. App.jsx가 이걸 그대로 쓰므로
+   두 곳이 어긋날 수 없다(예전에는 배열을 각자 하드코딩해 동기화가 수동이었다). */
+export function navTabOrder(isAdmin) {
+  return ALL_TABS.filter(t => !t.adminOnly || isAdmin).map(t => t.idx)
+}
 
 export default function BottomNav() {
-  const activeTab    = useStore(s => s.activeTab)
-  const setActiveTab = useStore(s => s.setActiveTab)
-  const currentUser  = useStore(s => s.currentUser)
+  const activeTab     = useStore(s => s.activeTab)
+  const setActiveTab  = useStore(s => s.setActiveTab)
+  const currentUser   = useStore(s => s.currentUser)
+  const setLayoutMode = useStore(s => s.setLayoutMode)
   const isAdmin = !!currentUser?.is_admin
 
   const [moreOpen, setMoreOpen] = useState(false)
+  const stripRef = useRef(null)
+  const btnRefs  = useRef({})
 
-  const visible   = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
-  const primary   = PRIMARY_IDX.map(idx => visible.find(t => t.idx === idx)).filter(Boolean)
-  const moreTabs  = visible.filter(t => !PRIMARY_IDX.includes(t.idx))
-  const moreActive = moreTabs.some(t => t.idx === activeTab)
+  const visible = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
+
+  // 활성 탭을 스트립 가운데로 — scrollIntoView는 페이지 전체를 함께 스크롤할 수 있어
+  // 컨테이너 기준으로 직접 계산한다.
+  useEffect(() => {
+    const box = stripRef.current
+    const el  = btnRefs.current[activeTab]
+    if (!box || !el) return
+    const target = el.offsetLeft - (box.clientWidth - el.clientWidth) / 2
+    const max = box.scrollWidth - box.clientWidth
+    box.scrollTo({ left: Math.max(0, Math.min(target, max)), behavior: 'smooth' })
+  }, [activeTab, isAdmin])
 
   // 시트 열림 중 뒤 스크롤 잠금 + ESC 닫기
   useEffect(() => {
@@ -125,35 +144,39 @@ export default function BottomNav() {
     <>
       <div className="bottom-nav-wrap">
         <nav className="bottom-nav" aria-label="주요 메뉴">
-          {primary.map(tab => {
-            const active = activeTab === tab.idx
-            return (
-              <button key={tab.idx}
-                className={`nav-btn ${active ? 'active' : ''}`}
-                aria-current={active ? 'page' : undefined}
-                onClick={() => go(tab.idx)}>
-                <span className="nav-icon">{icons[tab.iconKey]}</span>
-                <span className="nav-label">{tab.label}</span>
-              </button>
-            )
-          })}
-          <button className={`nav-btn ${moreActive ? 'active' : ''}`}
+          {/* data-noswipe: 탭 전환 스와이프가 이 스트립의 가로 스크롤을 삼키지 않도록 */}
+          <div className="nav-strip" ref={stripRef} data-noswipe>
+            {visible.map(tab => {
+              const active = activeTab === tab.idx
+              return (
+                <button key={tab.idx}
+                  ref={el => { btnRefs.current[tab.idx] = el }}
+                  className={`nav-btn ${active ? 'active' : ''}`}
+                  aria-current={active ? 'page' : undefined}
+                  onClick={() => go(tab.idx)}>
+                  <span className="nav-icon">{icons[tab.iconKey]}</span>
+                  <span className="nav-label">{tab.label}</span>
+                </button>
+              )
+            })}
+          </div>
+          <button className="nav-btn nav-btn-more"
             aria-haspopup="dialog" aria-expanded={moreOpen}
             onClick={() => setMoreOpen(v => !v)}>
             <span className="nav-icon">{icons.more}</span>
-            <span className="nav-label">더보기</span>
+            <span className="nav-label">전체</span>
           </button>
         </nav>
       </div>
 
       {moreOpen && (
         <div className="nav-sheet-scrim" onClick={() => setMoreOpen(false)}>
-          <div className="nav-sheet" role="dialog" aria-modal="true" aria-label="더보기 메뉴"
+          <div className="nav-sheet" role="dialog" aria-modal="true" aria-label="전체 메뉴"
             onClick={e => e.stopPropagation()}>
             <div className="nav-sheet-handle" aria-hidden="true" />
-            <div className="nav-sheet-title">더보기</div>
+            <div className="nav-sheet-title">전체 메뉴</div>
             <div className="nav-sheet-grid">
-              {moreTabs.map(tab => {
+              {visible.map(tab => {
                 const active = activeTab === tab.idx
                 return (
                   <button key={tab.idx}
@@ -166,6 +189,18 @@ export default function BottomNav() {
                 )
               })}
             </div>
+            <button className="nav-sheet-wide"
+              onClick={() => { setLayoutMode('web'); setMoreOpen(false) }}>
+              <span className="nav-sheet-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+              </span>
+              웹(데스크톱) 화면으로 보기
+            </button>
           </div>
         </div>
       )}

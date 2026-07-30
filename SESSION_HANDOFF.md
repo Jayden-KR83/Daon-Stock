@@ -17,7 +17,28 @@
 
 ---
 
-## ✅ 세션 (2026-07-29) — 급등락 알림 ±5% [현재]
+## ✅ 세션 (2026-07-30) — 모바일 UX 7건 + 아이콘 확정 [현재]
+
+**상태**: 코드·문서·빌드 완료 · pytest 111 · **Puppeteer 스모크 21/21** · **미배포**(오너 확인 후).
+**한 일**: 로고 흰테두리 제거 · L2 비중 링 아이콘 4종 교체(maskable 안전영역 버그 동시 수정) · 하단 네비 스크롤 스트립 + 활성탭 센터링 · 지수 배너 ◀▶ · 모바일↔웹 뷰 전환(`layoutMode`) · 발굴탭 산정방식 접힘 · 지표 설명 18종(초보자용). 상세: [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) 2026-07-30.
+**함께 고친 잠복 버그**: ① React #310 흰 화면(App.jsx 훅이 조기 반환 아래에 있어 같은 세션 로그인 시 크래시) ② `.app-top-controls`(fixed z-9999)가 마켓바를 덮어 ▶ 버튼이 눌리지 않던 문제.
+**변경 파일**: `frontend/src/`{App.jsx, App.css, store.js, components/{LogoCircle,BottomNav.jsx/.css,MarketBar.jsx/.css,TopNavBar,SideNavBar}, tabs/{ChartTab,DiscoverTab}} · 아이콘 4종×2경로 · `scripts/smoke-2026-07-30.js`(신규).
+
+**스모크 재실행 방법**(로컬):
+```powershell
+# 1) 백엔드 (반드시 backend/ 에서 — main:app 임포트 경로)
+Start-Process python -ArgumentList "-m","uvicorn","main:app","--host","127.0.0.1","--port","8501" -WorkingDirectory "<repo>\backend"
+# 2) 스모크 (Chrome 필요)
+cd scripts; node smoke-2026-07-30.js     # 21/21 PASS = exit 0
+```
+⚠️ 좌표 클릭은 ChangelogModal 스크림(z-9999)이 삼킨다 → 스크립트가 `daon_last_seen_version='dismissed'` sentinel을 먼저 심는다.
+⚠️ 리포 루트 `daon.db`는 **개발용**(전 계정 test/demo). 운영 DB는 Oracle 서버.
+
+**다음 후보**: 아이콘 확정 반영 후 배포 → 급등락 알림(2026-07-29분)과 함께 1회 배포.
+
+---
+
+## ✅ 세션 (2026-07-29) — 급등락 알림 ±5%
 
 **상태**: 코드·문서·빌드 완료 · pytest 111 통과 · **미배포**(서버 배포는 오너 확인 후).
 **한 일**: 보유·관심 종목 일간 변동률이 임계(기본 ±5%)를 넘으면 인앱+Web Push 알림. 기존 5분 cron에 편승(cron 추가 없음, 15분 스로틀). 상세는 [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) 2026-07-29 항목.

@@ -5,7 +5,7 @@ import { useStore } from './store'
 import { useSwipeNav } from './useSwipeNav'
 import { getUsdKrw, getApiKeyStatus, authMe, getAdminStatus, getAccounts, getPortfolio, getPricesBatch, captureNetWorthSnapshot } from './api'
 import MarketBar from './components/MarketBar'
-import BottomNav from './components/BottomNav'
+import BottomNav, { navTabOrder } from './components/BottomNav'
 import TopNavBar from './components/TopNavBar'
 import SideNavBar from './components/SideNavBar'
 import RightPanel from './components/RightPanel'
@@ -50,8 +50,8 @@ export default function App() {
   const setActiveTab       = useStore(s => s.setActiveTab)
   const setUsdKrw          = useStore(s => s.setUsdKrw)
   const setHasAnthropicKey = useStore(s => s.setHasAnthropicKey)
-  const appMode            = useStore(s => s.appMode)
-  const setAppMode         = useStore(s => s.setAppMode)
+  const layoutMode         = useStore(s => s.layoutMode)
+  const setLayoutMode      = useStore(s => s.setLayoutMode)
   const authToken          = useStore(s => s.authToken)
   const currentUser        = useStore(s => s.currentUser)
   const setAuth            = useStore(s => s.setAuth)
@@ -190,20 +190,29 @@ export default function App() {
   })
   useEffect(() => { if (adminData) setAdminStatus(adminData) }, [adminData])
 
+  // 'auto'는 화면 폭으로 결정. 사용자가 직접 고른 'web'/'app'은 폭과 무관하게 존중한다
+  // (모바일에서도 웹 레이아웃을 볼 수 있어야 한다는 요구 — 좁은 화면은 가로 스크롤로 감당).
+  const isApp = layoutMode === 'app' || (layoutMode === 'auto' && isMobile)
+
+  // 앱/모바일 좌우 스와이프 탭 전환 — 순서는 BottomNav에서 직접 가져온다.
+  // (예전엔 배열을 여기 하드코딩해 하단바와 어긋날 수 있었다)
+  //
+  // ⚠️ 이 훅들은 아래 `if (!authToken)` 조기 반환보다 반드시 위에 있어야 한다.
+  // 아래에 두면 로그아웃 상태(훅 N개) → 로그인 직후(훅 N+2개)로 개수가 바뀌어
+  // React #310("Rendered more hooks than during the previous render")로 흰 화면이 된다.
+  // 저장된 토큰으로 새로고침하면 첫 렌더부터 개수가 같아 드러나지 않던 잠복 버그였고,
+  // 같은 세션에서 로그인/데모 진입할 때만 재현됐다.
+  const appMainRef = useRef(null)
+  const isAdminUser = !!currentUser?.is_admin
+  const swipeOrder = React.useMemo(() => navTabOrder(isAdminUser), [isAdminUser])
+  useSwipeNav(appMainRef, {
+    order: swipeOrder, active: activeTab, onChange: setActiveTab,
+    enabled: isApp && !!authToken,
+  })
+
   if (!authToken) return <LoginPage />
 
   const TabComponent = TABS[activeTab] || HoldingsTab
-  // 모바일에서는 사용자 설정과 무관하게 항상 앱 레이아웃 사용 (사이드바·우측패널 압축 방지)
-  const isApp = appMode === 'app' || isMobile
-
-  // 앱/모바일 좌우 스와이프 탭 전환 — BottomNav 순서 미러링 (admin은 여정·관리자 포함)
-  const appMainRef = useRef(null)
-  const isAdminUser = !!currentUser?.is_admin
-  // BottomNav 순서와 동일하게 (포트폴리오·분석·종목·관심·발굴·시장·등록·설정·가이드·여정·관리자)
-  const swipeOrder = isAdminUser ? [0,2,3,1,10,4,5,6,7,8,9] : [0,2,3,1,10,4,5,6,7]
-  useSwipeNav(appMainRef, {
-    order: swipeOrder, active: activeTab, onChange: setActiveTab, enabled: isApp,
-  })
 
   /* 탭 전환 시 페이드+슬라이드 모션. mode="wait"로 이전 탭 exit 후 새 탭 enter.
      ErrorBoundary로 한 탭 crash 시 흰화면 대신 명확한 안내 표시.
@@ -257,18 +266,17 @@ export default function App() {
       <div className="app-top-controls">
         <NotificationsBell />
         <ThemeQuickToggle />
-        {/* 모바일에서는 웹 모드 강제 차단 — 버튼 숨김 */}
-        {!isMobile && (
-          <button className="app-web-hint" onClick={() => setAppMode('web')} title="웹 모드로 전환">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-              <rect x="2" y="3" width="20" height="14" rx="2"/>
-              <line x1="8" y1="21" x2="16" y2="21"/>
-              <line x1="12" y1="17" x2="12" y2="21"/>
-            </svg>
-            웹
-          </button>
-        )}
+        {/* 모바일에서도 웹 레이아웃으로 전환 가능 (이전에는 버튼을 숨겨 되돌릴 수 없었다) */}
+        <button className="app-web-hint" onClick={() => setLayoutMode('web')}
+          title="웹(데스크톱) 화면으로 전환">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+          웹
+        </button>
       </div>
       <MarketBar />
       <main className="app-main" ref={appMainRef}>

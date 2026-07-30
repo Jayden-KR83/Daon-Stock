@@ -53,11 +53,12 @@ function MethodBlock({ title, children }) {
 
 function ScoringMethodology({ qtype }) {
   return (
-    <details className="mono-card ko-keep" open style={{ marginBottom: 10 }}>
+    // 기본 접힘 — 매번 펼쳐져 있으면 결과 목록이 아래로 밀린다. 필요할 때만 펼쳐 본다.
+    <details className="mono-card ko-keep" style={{ marginBottom: 10 }}>
       <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--m-text)' }}>
         점수 산정 방식 · 데이터 출처
         <span style={{ marginLeft: 6, fontWeight: 600, color: 'var(--m-text-tertiary)', fontSize: 11 }}>
-          (어떻게 계산했는지 전부 공개합니다)
+          (눌러서 펼치기 — 어떻게 계산했는지 전부 공개합니다)
         </span>
       </summary>
       <div style={{ fontSize: 11, color: 'var(--m-text-secondary)', lineHeight: 1.75, marginTop: 8 }}>

@@ -1312,27 +1312,124 @@ function AnalystBar({ cur, low, high, avg, rec, analysts }) {
   )
 }
 
-/* ── Valuation + Financials (hover 툴팁 포함) ── */
-const METRIC_TIPS = {
-  'Market Cap': '현재 주가 × 발행 주식수. 기업의 시장 총가치',
-  'Ent. Value': '시총 + 부채 - 현금. M&A시 실제 인수 비용',
-  'Trailing P/E': '현재가 ÷ 지난 12개월 EPS. 낮을수록 저평가 가능성',
-  'Forward P/E': '현재가 ÷ 예상 EPS. 미래 성장성 반영',
-  'PEG Ratio': 'P/E ÷ 성장률. 1 미만이면 성장대비 저평가',
-  'P/S (ttm)': '주가 ÷ 매출. 수익이 없는 성장주 평가에 유용',
-  'P/B (mrq)': '주가 ÷ 장부가. 1 미만이면 자산 대비 저평가',
-  'EV/Revenue': '기업가치 ÷ 매출. 업종간 비교에 유용',
-  'EV/EBITDA': '기업가치 ÷ EBITDA. 수익성과 부채 함께 고려',
-  'Profit Margin': '순이익 ÷ 매출. 높을수록 수익성 우수',
-  'ROA (ttm)': '순이익 ÷ 총자산. 자산 활용 효율성',
-  'ROE (ttm)': '순이익 ÷ 자기자본. 주주 자본 수익률',
-  'Revenue (ttm)': '지난 12개월 총 매출액',
-  'Net Income': '지난 12개월 순이익 (세후)',
-  'EPS (ttm)': '주당순이익. 높을수록 주주 수익 양호',
-  'Total Cash': '현금 및 단기 투자자산 보유액',
-  'D/E (mrq)': '부채 ÷ 자기자본. 낮을수록 재무 안정성 높음',
-  'Free CF (ttm)': '영업현금흐름 - 설비투자. 진정한 기업 현금 창출력',
+/* ── Valuation + Financials ──
+ * 지표명을 누르면 초보자용 설명이 펼쳐진다(모바일에서 hover title은 동작 안 함).
+ * what=한 줄 정의 / how=계산식(용어 없이) / read=숫자를 어떻게 해석하나 / eg=비유·예시 */
+const METRIC_HELP = {
+  'Market Cap': {
+    ko: '시가총액',
+    what: '이 회사를 지금 통째로 사려면 얼마가 필요한지를 나타내는 값입니다.',
+    how: '현재 주가 × 발행된 주식 총수.',
+    read: '클수록 큰 회사입니다. 대형주는 안정적이지만 성장 여력이 작고, 소형주는 그 반대입니다.',
+    eg: '주가 10만원인 회사가 주식 100만 주를 발행했다면 시가총액은 1,000억원입니다.',
+  },
+  'Ent. Value': {
+    ko: '기업가치(EV)',
+    what: '회사를 인수할 때 실제로 들어가는 돈입니다. 빚까지 갚아줘야 하니까요.',
+    how: '시가총액 + 갚아야 할 빚 − 회사가 가진 현금.',
+    read: '시가총액보다 크면 빚이 많은 회사, 작으면 현금이 많은 회사입니다.',
+    eg: '시총 1,000억 + 빚 300억 − 현금 100억 = 기업가치 1,200억원.',
+  },
+  'Trailing P/E': {
+    ko: '주가수익비율 (과거 실적 기준)',
+    what: '지금 주가가 회사가 버는 돈의 몇 배인지 보여줍니다. 가장 많이 쓰는 "비싼가 싼가" 지표입니다.',
+    how: '현재 주가 ÷ 지난 1년간 주당 순이익(EPS).',
+    read: '숫자가 낮으면 이익 대비 주가가 싼 편, 높으면 비싼 편입니다. 다만 같은 업종끼리만 비교해야 의미가 있습니다.',
+    eg: 'P/E 15배 = 회사가 지금처럼 벌면 투자금을 회수하는 데 15년 걸린다는 뜻입니다.',
+  },
+  'Forward P/E': {
+    ko: '주가수익비율 (예상 실적 기준)',
+    what: '앞으로 1년간 벌 것으로 예상되는 이익을 기준으로 계산한 P/E입니다.',
+    how: '현재 주가 ÷ 앞으로 1년 예상 주당순이익.',
+    read: '과거 기준 P/E보다 낮으면 이익이 늘어날 것으로 전망된다는 뜻입니다. 애널리스트 추정치라 틀릴 수 있습니다.',
+  },
+  'PEG Ratio': {
+    ko: '주가수익성장비율',
+    what: 'P/E가 비싸 보여도 회사가 빠르게 성장 중이면 정당할 수 있습니다. PEG는 그 성장 속도까지 감안해서 비싼지 판단하는 지표입니다.',
+    how: 'P/E ÷ 연간 이익 성장률(%). 성장률의 % 기호는 떼고 숫자만 씁니다.',
+    read: '1보다 낮으면 성장 속도에 비해 주가가 싸다는 신호, 1보다 꽤 높으면 성장을 감안해도 비싸다는 신호로 봅니다.',
+    eg: 'P/E 30배는 비싸 보이지만 이익이 매년 30% 늘고 있다면 PEG = 30 ÷ 30 = 1.0으로 적정 수준입니다. 반대로 P/E 30배인데 성장률이 5%뿐이면 PEG = 6.0으로 매우 비쌉니다.',
+  },
+  'P/S (ttm)': {
+    ko: '주가매출비율',
+    what: '이익이 아니라 매출을 기준으로 주가가 비싼지 봅니다. 아직 적자인 회사를 평가할 때 씁니다.',
+    how: '시가총액 ÷ 지난 1년 매출액.',
+    read: '적자 기업은 P/E를 계산할 수 없어서(이익이 마이너스) 이 지표를 대신 씁니다. 낮을수록 매출 대비 싼 편입니다.',
+  },
+  'P/B (mrq)': {
+    ko: '주가순자산비율',
+    what: '회사가 지금 문을 닫고 재산을 다 팔았을 때의 가치와 주가를 비교합니다.',
+    how: '주가 ÷ 주당 순자산(전체 자산 − 전체 부채).',
+    read: '1보다 낮으면 장부상 재산보다 주가가 싸다는 뜻입니다. 은행·제조업에서 특히 유용하고, 자산이 적은 IT 기업엔 잘 안 맞습니다.',
+  },
+  'EV/Revenue': {
+    ko: '기업가치 대비 매출',
+    what: '빚까지 포함한 회사 값어치가 매출의 몇 배인지 봅니다.',
+    how: '기업가치(EV) ÷ 지난 1년 매출액.',
+    read: 'P/S와 비슷하지만 부채까지 반영해서 더 보수적입니다. 부채 구조가 다른 회사끼리 비교할 때 공정합니다.',
+  },
+  'EV/EBITDA': {
+    ko: '기업가치 대비 영업현금이익',
+    what: '세금·이자·감가상각 같은 회계 차이를 걷어내고, 영업으로 실제 벌어들이는 힘과 회사 값어치를 비교합니다.',
+    how: '기업가치(EV) ÷ EBITDA(영업이익 + 감가상각비).',
+    read: '국가·업종별 세금 차이를 지워주기 때문에 해외 기업 비교에 자주 쓰입니다. 낮을수록 싼 편입니다.',
+  },
+  'Profit Margin': {
+    ko: '순이익률',
+    what: '매출 100원을 팔아서 최종적으로 얼마가 남는지입니다.',
+    how: '순이익 ÷ 매출액 × 100.',
+    read: '높을수록 남기는 장사를 잘한다는 뜻입니다. 소프트웨어는 20~30%대, 유통·마트는 1~3%대가 흔합니다.',
+  },
+  'ROA (ttm)': {
+    ko: '총자산이익률',
+    what: '회사가 가진 자산을 얼마나 효율적으로 굴려 이익을 내는지입니다.',
+    how: '순이익 ÷ 총자산 × 100.',
+    read: '같은 자산으로 더 많이 벌면 높습니다. 5% 이상이면 양호한 편으로 봅니다.',
+  },
+  'ROE (ttm)': {
+    ko: '자기자본이익률',
+    what: '주주가 넣은 돈으로 얼마를 벌어다 주는지입니다. 워런 버핏이 중요하게 보는 지표입니다.',
+    how: '순이익 ÷ 자기자본 × 100.',
+    read: '높을수록 좋고 15% 이상을 우량하게 봅니다. 단, 빚을 많이 내면 인위적으로 높아지므로 D/E와 같이 봐야 합니다.',
+  },
+  'Revenue (ttm)': {
+    ko: '매출액 (최근 1년)',
+    what: '회사가 물건이나 서비스를 팔아 벌어들인 총액입니다. 비용을 빼기 전 금액입니다.',
+    how: '최근 4개 분기 매출을 합친 값.',
+    read: '회사의 규모와 성장 추세를 보는 출발점입니다. 매년 늘고 있는지가 중요합니다.',
+  },
+  'Net Income': {
+    ko: '순이익 (최근 1년)',
+    what: '매출에서 인건비·재료비·이자·세금까지 모두 빼고 최종적으로 남은 돈입니다.',
+    how: '매출액 − 모든 비용 − 세금.',
+    read: '마이너스면 적자입니다. 이 값이 주가수익비율(P/E)의 기준이 됩니다.',
+  },
+  'EPS (ttm)': {
+    ko: '주당순이익',
+    what: '내가 가진 주식 1주가 1년에 얼마를 벌어다 줬는지입니다.',
+    how: '순이익 ÷ 발행 주식수.',
+    read: '꾸준히 늘어나는 회사가 좋습니다. 주가를 EPS로 나누면 P/E가 됩니다.',
+  },
+  'Total Cash': {
+    ko: '보유 현금',
+    what: '회사 통장에 든 현금과 바로 현금화할 수 있는 자산입니다.',
+    how: '현금 + 단기 금융상품.',
+    read: '많으면 불황을 견디고 투자·배당을 할 여력이 큽니다. 적자 기업이라면 "얼마나 버틸 수 있나"의 핵심입니다.',
+  },
+  'D/E (mrq)': {
+    ko: '부채비율',
+    what: '주주 돈에 비해 빌린 돈이 얼마나 많은지입니다. 회사의 안전벨트 역할을 봅니다.',
+    how: '총부채 ÷ 자기자본. (100을 곱해 %로 표시하는 곳도 있습니다)',
+    read: '낮을수록 안전합니다. 높으면 금리가 오를 때 이자 부담으로 흔들릴 수 있습니다. 은행·통신처럼 원래 부채가 많은 업종은 기준이 다릅니다.',
+  },
+  'Free CF (ttm)': {
+    ko: '잉여현금흐름',
+    what: '영업으로 번 현금에서 공장·설비 유지비를 뺀, 회사가 자유롭게 쓸 수 있는 실제 현금입니다.',
+    how: '영업활동 현금흐름 − 설비투자(CAPEX).',
+    read: '회계상 이익은 조정이 가능하지만 현금은 속이기 어려워서, 순이익보다 신뢰도가 높다고 봅니다. 배당·자사주 매입의 재원입니다.',
+  },
 }
+
 
 const PEER_COL_TIPS = {
   '시가총액': '현재가 × 발행주식수. T=조, B=십억 달러',
@@ -1343,14 +1440,64 @@ const PEER_COL_TIPS = {
 }
 
 function MetricRow({ label, value }) {
+  const [open, setOpen] = useState(false)
+  const help = METRIC_HELP[label]
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0',
-      borderBottom: '1px solid #F8FAFC', fontSize: 12 }}>
-      <span style={{ color: 'var(--clr-text-sub)', cursor: 'help', borderBottom: '1px dotted #CBD5E1' }}
-        title={METRIC_TIPS[label] || label}>{label}</span>
-      <span style={{ fontWeight: 700, color: 'var(--clr-text-strong)' }}>{value ?? '—'}</span>
+    <div style={{ borderBottom: '1px solid var(--m-outline-variant)' }}>
+      <button
+        type="button"
+        onClick={() => help && setOpen(v => !v)}
+        aria-expanded={help ? open : undefined}
+        style={{
+          width: '100%', display: 'flex', justifyContent: 'space-between',
+          alignItems: 'center', gap: 8, padding: '6px 0', fontSize: 12,
+          background: 'none', border: 'none', fontFamily: 'inherit',
+          cursor: help ? 'pointer' : 'default', textAlign: 'left',
+        }}>
+        <span style={{ color: 'var(--m-text-secondary)', display: 'flex',
+          alignItems: 'center', gap: 4, minWidth: 0 }}>
+          <span style={{ borderBottom: help ? '1px dotted var(--m-outline)' : 'none' }}>
+            {label}
+          </span>
+          {help && (
+            <span aria-hidden="true" style={{
+              fontSize: 9, color: 'var(--m-text-tertiary)', flexShrink: 0,
+              transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s',
+            }}>▾</span>
+          )}
+        </span>
+        <span style={{ fontWeight: 700, color: 'var(--m-text)',
+          fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{value ?? '—'}</span>
+      </button>
+
+      {open && help && (
+        <div className="ko-keep" style={{
+          padding: '9px 10px 11px', marginBottom: 7, borderRadius: 4,
+          background: 'var(--m-surface-variant)',
+          border: '1px solid var(--m-outline-variant)',
+          fontSize: 11.5, lineHeight: 1.7, color: 'var(--m-text-secondary)',
+        }}>
+          <div style={{ fontWeight: 800, color: 'var(--m-text)', fontSize: 12,
+            marginBottom: 5 }}>{help.ko}</div>
+          {/* R6: 항목별로 줄을 나눠 한 덩어리 산문이 되지 않게 */}
+          <div style={{ marginBottom: 6 }}>{help.what}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr',
+            gap: '3px 8px', alignItems: 'start' }}>
+            <b style={HELP_K}>계산</b><span>{help.how}</span>
+            <b style={HELP_K}>읽는 법</b><span>{help.read}</span>
+            {help.eg && (<><b style={HELP_K}>예시</b><span>{help.eg}</span></>)}
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+const HELP_K = {
+  fontSize: 9.5, fontWeight: 800, letterSpacing: '.05em',
+  color: 'var(--m-text-tertiary)', textTransform: 'uppercase',
+  whiteSpace: 'nowrap', paddingTop: 2,
 }
 
 function FundamentalsView({ data, isKr = false }) {
@@ -1373,7 +1520,10 @@ function FundamentalsView({ data, isKr = false }) {
     ? (isKr ? `₩${Math.round(data.diluted_eps).toLocaleString()}` : data.diluted_eps.toFixed(2))
     : '—'
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+    // 좁은 폭(≈400px)에서는 1열로 떨어진다 — 2열 고정이면 지표 설명이 반쪽 칸에 갇혀
+    // 한 줄에 4~5자씩 끊긴다(design.md R5 앱폭 점검).
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+      gap: 16 }}>
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--clr-text-sub)', marginBottom: 6,
           textTransform: 'uppercase', letterSpacing: '.06em' }}>Valuation</div>

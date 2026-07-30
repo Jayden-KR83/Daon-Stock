@@ -74,7 +74,7 @@ const SIDE_TABS = [
 export default function SideNavBar() {
   const activeTab    = useStore(s => s.activeTab)
   const setActiveTab = useStore(s => s.setActiveTab)
-  const setAppMode   = useStore(s => s.setAppMode)
+  const setLayoutMode = useStore(s => s.setLayoutMode)
   const currentUser  = useStore(s => s.currentUser)
 
   return (
@@ -142,7 +142,7 @@ export default function SideNavBar() {
       <div className="side-nav-footer">
         <button
           className="side-nav-btn"
-          onClick={() => setAppMode('app')}
+          onClick={() => setLayoutMode('app')}
         >
           <span className="side-nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"

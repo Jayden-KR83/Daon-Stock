@@ -1,14 +1,27 @@
-/* ── MarketBar — 우→좌 마퀴 ── */
+/* ── MarketBar — 우→좌 흐름 + 좌우 이동 버튼 ── */
 .mbar {
   position: sticky;
   top: 0;
   z-index: 100;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  display: flex;
+  align-items: stretch;
   background: var(--clr-surface);
   border-bottom: 1px solid var(--clr-border-md);
 }
+
+/* 실제 스크롤 컨테이너 — 버튼·터치·트랙패드가 모두 여기에 작용한다 */
+.mbar-view {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
+}
+.mbar-view::-webkit-scrollbar { display: none; }
 
 /* 좌우 끝 fade-out 마스크 — Safari/Chrome/FF 모두 지원 */
 .mbar-fade {
@@ -20,32 +33,40 @@
   );
 }
 
-.mbar-empty { min-height: 44px; }
+.mbar-empty { min-height: 44px; display: block; }
 
 .mbar-track {
   display: flex;
   flex-wrap: nowrap;
   width: max-content;
-  animation-name: mbar-flow;
-  animation-duration: 30s;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  animation-fill-mode: none;
-  will-change: transform;
-  transform: translateX(0%);
-}
-.mbar:hover .mbar-track,
-.mbar:active .mbar-track {
-  animation-play-state: paused;
 }
 
-/* 동일한 transform 함수(translateX)로 보간 모호성 제거 */
-@keyframes mbar-flow {
-  from { transform: translateX(0%); }
-  to   { transform: translateX(-50%); }
+/* 좌우 이동 버튼 — 테이프 위에 겹치지 않고 양옆을 차지해 항상 누를 수 있다 */
+.mbar-nav {
+  flex: 0 0 auto;
+  width: 26px;
+  border: none;
+  background: var(--clr-surface);
+  color: var(--clr-text-muted);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 1;
+  transition: background var(--t-base), color var(--t-base);
 }
+.mbar-nav:hover  { background: rgba(14,165,233,.10); color: var(--clr-text-strong); }
+.mbar-nav:active { background: rgba(14,165,233,.18); }
+.mbar-nav-prev { border-right: 1px solid var(--clr-border); }
+.mbar-nav-next { border-left:  1px solid var(--clr-border); }
+.mbar-nav:focus-visible { outline: 2px solid var(--clr-info-dark); outline-offset: -2px; }
 
-/* 마퀴는 OS의 prefers-reduced-motion 설정과 무관하게 항상 작동
+/* 자동 흐름은 OS의 prefers-reduced-motion 설정과 무관하게 작동
    (사용자가 명시적으로 요청한 기능 — 다른 전환·페이드는 OS 설정 존중) */
 
 .mi {

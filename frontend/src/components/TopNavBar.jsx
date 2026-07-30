@@ -7,7 +7,7 @@ import './TopNavBar.css'
 
 export default function TopNavBar() {
   const setChartTicker = useStore(s => s.setChartTicker)
-  const setAppMode     = useStore(s => s.setAppMode)
+  const setLayoutMode  = useStore(s => s.setLayoutMode)
   const currentUser    = useStore(s => s.currentUser)
   const [searchVal, setSearchVal] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
@@ -102,7 +102,7 @@ export default function TopNavBar() {
 
         <ThemeQuickBtn />
 
-        <button className="top-nav-app-btn" onClick={() => setAppMode('app')} title="앱 모드로 전환">
+        <button className="top-nav-app-btn" onClick={() => setLayoutMode('app')} title="앱 모드로 전환">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
             strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
             <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
@@ -154,7 +154,9 @@ function ThemeQuickBtn() {
   const icon = theme === 'light' ? '☀️' : theme === 'dark' ? '🌙' : '📈'
   const label = theme === 'light' ? '화이트' : theme === 'dark' ? '다크' : '프로'
   return (
-    <button className="top-nav-app-btn" onClick={cycleTheme}
+    // 스타일은 앱 전환 버튼과 공유하되 클래스는 분리 — 같은 클래스만 쓰면
+    // .top-nav-app-btn 선택이 모호해진다(테마 버튼이 먼저 잡힘)
+    <button className="top-nav-app-btn top-nav-theme-btn" onClick={cycleTheme}
       title={`테마: ${label} (탭하여 변경)`}
       style={{ fontSize: 14, lineHeight: 1 }}>
       <span style={{ fontSize: 14 }}>{icon}</span>
