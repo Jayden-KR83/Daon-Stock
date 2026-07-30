@@ -24,8 +24,21 @@
 - **▶ 버튼 클릭 불가**: `.app-top-controls`가 `position:fixed; z-index:9999`로 마켓바 **위에** 떠 있어, 오른쪽 끝 ▶ 버튼이 덮여 좌표 클릭이 전부 삼켜졌다(DOM `.click()`은 동작 → 핸들러는 정상). 흐르는 지수 텍스트가 버튼 아래로 지나가 읽기 어렵던 문제도 같은 원인. 흐름 안의 한 줄로 되돌림.
 - 부수: `.top-nav-app-btn` 클래스를 테마 버튼과 앱전환 버튼이 **공유**해 선택이 모호했다 → 테마 쪽에 `.top-nav-theme-btn` 추가.
 
+### 배포 (2026-07-30 14:0x KST) — 급등락 알림 + 아이콘 뱃지 + UX 7건 일괄
+- 운영 DB 사전 백업(`backup/daon-predeploy-20260730-1403.db`) → 정적/아이콘/main.py 업로드 → `systemctl restart`.
+- 서버 마이그레이션 자동 적용 확인: `move_alert_prefs`·`move_alert_state` 생성, `notifications.change_pct` 추가, `integrity_check=ok`, 데이터 무손상(users 10 / portfolios 61 / watchlist 11).
+- sha256 로컬=원격 일치 · 번들 `index-BxmZSJRw.js`(index.html·sw.js·공개도메인 3곳 일치) · 아이콘 3종 서버=로컬 일치 + **maskable ≠ 일반**(예전 동일본 버그 재발 없음).
+- **공개 도메인(daonwealth.com)에서 스모크 21/21 PASS** — 로컬뿐 아니라 실서비스에서 재검증.
+- 엔드포인트 200: `/api/market`(2.3s) `/api/stock/AAPL`(4.5s) `/api/discover`(0.1s). 재기동 후 에러 로그 0건.
+
+#### 배포 직후 운영에서 발견·수정한 A접두 중복 버그
+첫 급등락 스캔이 **18건 발화**(오너 14 + 데모 4 — 티커 중복은 사용자 간 분리라 정상). 그 과정에서 오너 데이터에 **`381170`과 `A381170`이 함께 등록**돼 있음을 확인. `_run_move_scan`이 raw 티커를 키로 쓰고 있어 같은 종목이 2건으로 갈라질 상태였다(시세도 2회 조회). → `kr_code()` 정규화 키로 합침(`items` = 정규화키 → (대표티커, 이름, 출처), `move_alert_state`도 정규화 키).
+- 회귀테스트 3건 추가(`TestKrTickerDedup`) + 로컬 통합 재현 검증(2건 → 1건, 상태행 1개).
+- 재배포 후 재스캔에서 **3건 재발화** — 기존 상태행이 raw 키(`A003670`·`A051910`·`A373220`)라 조회가 빗나간 1회성 마이그레이션 비용. 해당 죽은 행 3개 삭제 후 3회차 스캔 `triggered:0` 으로 안정화 확인.
+- 오너 체감: 이날 급등락 알림 21건 도달(18 최초무장 + 3 마이그레이션). 다음 스캔부터는 임계 재돌파 시에만 발화.
+
 ### 검증
-- pytest **111 통과**(백엔드 무변경).
+- pytest **114 통과**(급등락 12 + A접두 dedup 3 신규).
 - **Puppeteer 스모크 `scripts/smoke-2026-07-30.js` 21/21 PASS** — 390×844 데모 모드에서 네비 스트립·센터링·◀▶ 이동·**버튼 피복 여부(elementFromPoint)**·로고 스타일·발굴탭 접힘·PEG 4요소·뷰 전환 왕복·JS 에러 0건.
   - ⚠️ 좌표 클릭 테스트는 ChangelogModal 스크림(z-9999)이 삼키므로 `daon_last_seen_version='dismissed'` sentinel 선행 필요.
 - 다크모드 스크린샷으로 로고 흰테두리 소멸 육안 확인. 빌드 `index.html`·`sw.js` 해시 일치.

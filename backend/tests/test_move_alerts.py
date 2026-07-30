@@ -58,7 +58,28 @@ class TestRefire:
         assert D(6.0, 5.0, st) is None           # 여전히 임계 위지만 축소 → 재알림 X
 
 
-class TestPrefsDefaults:
+class TestKrTickerDedup:
+    """A접두 유무가 다른 같은 KR 종목이 두 건으로 갈라지지 않아야 한다.
+
+    실제 사용자 데이터에 '381170'과 'A381170'이 함께 있었고, 정규화 없이 raw 티커를
+    키로 쓰면 같은 종목 알림이 2건 발송되고 시세도 2번 조회된다(2026-07-30 운영 발견).
+    """
+    def test_kr_code_strips_a_prefix(self):
+        assert main.kr_code('A381170') == '381170'
+        assert main.kr_code('381170') == '381170'
+
+    def test_us_ticker_untouched(self):
+        for t in ('AAPL', 'MSFT', 'SOXX', 'BRK-B'):
+            assert main.kr_code(t) == t
+
+    def test_both_forms_collapse_to_one_key(self):
+        # _run_move_scan 이 items 를 만드는 방식과 동일한 키 생성
+        items = {}
+        for tkr, name, origin in (('A381170', 'KODEX', '보유'),
+                                  ('381170', 'KODEX', '관심')):
+            items.setdefault(main.kr_code(tkr), (tkr, name, origin))
+        assert len(items) == 1, 'A접두 유무가 다른 같은 종목이 2건으로 남았다'
+        assert '381170' in items
     def test_defaults_are_on_5pct_both(self):
         d = main.MOVE_ALERT_DEFAULTS
         assert d['enabled'] is True

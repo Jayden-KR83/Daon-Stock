@@ -17,9 +17,13 @@
 
 ---
 
-## ✅ 세션 (2026-07-30) — 모바일 UX 7건 + 아이콘 확정 [현재]
+## ✅ 세션 (2026-07-30) — 모바일 UX 7건 + 아이콘 확정 + **배포 완료** [현재]
 
-**상태**: 코드·문서·빌드 완료 · pytest 111 · **Puppeteer 스모크 21/21** · **미배포**(오너 확인 후).
+**상태**: 🚀 **배포 완료**(2026-07-30 14:0x KST). pytest 114 · **공개 도메인 스모크 21/21 PASS**.
+**배포분**: 급등락 알림(7/29) + 앱 아이콘 뱃지 + UX 7건 + L2 아이콘 **일괄**.
+**배포 후속**: 첫 스캔 18건 발화(정상 — 최초 무장) → A접두 중복 버그 발견·수정·재배포 → 재스캔 3건(상태키 마이그레이션 1회성) → 죽은 상태행 3개 삭제 → 3회차 `triggered:0` 안정화.
+**서버 상태**: 번들 `index-BxmZSJRw.js` · main.py sha `dccbfa0c…` · `move_alert_state` 18행 · integrity ok · 백업 `backup/daon-predeploy-20260730-1403.db`.
+⚠️ **오너 확인 필요**: `381170`과 `A381170`이 둘 다 등록돼 있다(관심/보유). 이제 알림은 1건으로 합쳐지지만, **보유·관심 목록 자체의 중복 정리**는 오너가 직접 해야 한다.
 **한 일**: 로고 흰테두리 제거 · L2 비중 링 아이콘 4종 교체(maskable 안전영역 버그 동시 수정) · 하단 네비 스크롤 스트립 + 활성탭 센터링 · 지수 배너 ◀▶ · 모바일↔웹 뷰 전환(`layoutMode`) · 발굴탭 산정방식 접힘 · 지표 설명 18종(초보자용). 상세: [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) 2026-07-30.
 **함께 고친 잠복 버그**: ① React #310 흰 화면(App.jsx 훅이 조기 반환 아래에 있어 같은 세션 로그인 시 크래시) ② `.app-top-controls`(fixed z-9999)가 마켓바를 덮어 ▶ 버튼이 눌리지 않던 문제.
 **변경 파일**: `frontend/src/`{App.jsx, App.css, store.js, components/{LogoCircle,BottomNav.jsx/.css,MarketBar.jsx/.css,TopNavBar,SideNavBar}, tabs/{ChartTab,DiscoverTab}} · 아이콘 4종×2경로 · `scripts/smoke-2026-07-30.js`(신규).

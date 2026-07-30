@@ -7551,17 +7551,22 @@ def _run_move_scan(now: float, quotes: dict) -> dict:
                 prefs = _move_prefs_row(conn, uid)
                 if not prefs['enabled']:
                     continue
-                items: dict = {}
+                # KR 종목은 A접두 유무가 달라도 같은 종목이므로 정규화 키로 합친다.
+                # (실제 사용자 데이터에 '381170'과 'A381170'이 함께 있어, 합치지 않으면
+                #  같은 종목 알림이 2건 발송되고 시세도 2번 조회된다.)
+                items: dict = {}          # 정규화키 -> (대표티커, 이름, 출처)
                 if prefs['scope'] in ('both', 'holdings'):
                     for r in conn.execute(
                         "SELECT ticker, name FROM portfolios "
                         "WHERE user_id=? AND quantity>0", (uid,)).fetchall():
-                        items[r['ticker']] = (r['name'] or r['ticker'], '보유')
+                        items[kr_code(r['ticker'])] = (
+                            r['ticker'], r['name'] or r['ticker'], '보유')
                 if prefs['scope'] in ('both', 'watchlist'):
                     for r in conn.execute(
                         "SELECT ticker, name FROM watchlist WHERE user_id=?",
                         (uid,)).fetchall():
-                        items.setdefault(r['ticker'], (r['name'] or r['ticker'], '관심'))
+                        items.setdefault(kr_code(r['ticker']), (
+                            r['ticker'], r['name'] or r['ticker'], '관심'))
                 if items:
                     watch[uid] = {'prefs': prefs, 'items': items}
 
@@ -7569,7 +7574,7 @@ def _run_move_scan(now: float, quotes: dict) -> dict:
             return {'users': 0, 'triggered': 0}
 
         # 2) 티커 합집합 1회 조회 (목표가 스캔에서 이미 받은 건 재사용)
-        universe = sorted({t for w in watch.values() for t in w['items']})
+        universe = sorted({v[0] for w in watch.values() for v in w['items'].values()})
         truncated = 0
         if len(universe) > MOVE_SCAN_MAX_TICKERS:
             truncated = len(universe) - MOVE_SCAN_MAX_TICKERS
@@ -7585,17 +7590,18 @@ def _run_move_scan(now: float, quotes: dict) -> dict:
                 states = {r['ticker']: dict(r) for r in conn.execute(
                     "SELECT ticker, last_kind, last_pct FROM move_alert_state "
                     "WHERE user_id=?", (uid,)).fetchall()}
-                for tkr, (nm, origin) in w['items'].items():
+                # key=정규화 티커(상태·중복 판정용), tkr=대표 티커(시세·표시용)
+                for key, (tkr, nm, origin) in w['items'].items():
                     q = quotes.get(tkr) or {}
                     pct, cur = q.get('change_pct'), q.get('current_price')
                     if pct is None or cur is None:
                         continue
-                    kind = _decide_move_alert(pct, thr, states.get(tkr))
+                    kind = _decide_move_alert(pct, thr, states.get(key))
                     if kind is None:
-                        if abs(float(pct)) < thr and tkr in states:
+                        if abs(float(pct)) < thr and key in states:
                             conn.execute(
                                 "DELETE FROM move_alert_state "
-                                "WHERE user_id=? AND ticker=?", (uid, tkr))
+                                "WHERE user_id=? AND ticker=?", (uid, key))
                         continue
                     is_kr = bool(re.match(r'^A?\d{6}$', tkr))
                     price_s = (f"₩{int(round(float(cur))):,}" if is_kr
@@ -7610,7 +7616,7 @@ def _run_move_scan(now: float, quotes: dict) -> dict:
                     conn.execute(
                         "INSERT OR REPLACE INTO move_alert_state "
                         "(user_id, ticker, last_kind, last_pct, fired_at) "
-                        "VALUES (?,?,?,?,?)", (uid, tkr, kind, float(pct), now))
+                        "VALUES (?,?,?,?,?)", (uid, key, kind, float(pct), now))
                     triggered += 1
                     pushed.append((uid, tkr, kind, msg))
 
