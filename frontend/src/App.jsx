@@ -84,6 +84,23 @@ export default function App() {
     if (el) el.style.display = 'none'
   }, [])
 
+  // 탭 청크 유휴 프리페치 — 탭을 처음 누를 때 청크를 받느라 1~1.8초 걸리던 것을 없앤다.
+  // 계측(2026-08-02): 종목 1047ms · 발굴 1840ms(콜드) → 프리페치 후 즉시 전환.
+  // requestIdleCallback 으로 초기 렌더·첫 데이터 요청이 끝난 뒤에만 받는다.
+  useEffect(() => {
+    if (!authToken) return
+    const idle = window.requestIdleCallback || (cb => setTimeout(cb, 1200))
+    const handle = idle(() => {
+      // 사용 빈도 순 — 먼저 받은 것이 먼저 캐시된다
+      import('./tabs/AllocationTab')
+      import('./tabs/ChartTab')
+      import('./tabs/WatchlistTab')
+      import('./tabs/DiscoverTab')
+      import('./tabs/TrendsTab')
+    }, { timeout: 4000 })
+    return () => window.cancelIdleCallback?.(handle)
+  }, [authToken])
+
   // 테마 적용: <html data-theme="..."> 로 CSS 변수 전체 스왑
   // 'auto' 는 OS prefers-color-scheme 따라감 (실시간 동기화)
   useEffect(() => {

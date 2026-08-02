@@ -2796,7 +2796,7 @@ def _fetch_kr_price(t: str):
     except Exception:
         return (t, None)
 
-def _batch_prices(tickers: list) -> dict:
+def _batch_prices(tickers: list, max_workers: int = 20, timeout: int = 15) -> dict:
     """모든 종목 가격을 병렬로 가져옵니다. 상장폐지 종목으로 인한 hang 완전 방지.
 
     ⚠️ `with ThreadPoolExecutor(...)` 를 쓰면 안 된다. __exit__ 가 shutdown(wait=True)라
@@ -2808,13 +2808,13 @@ def _batch_prices(tickers: list) -> dict:
     us = [t for t in tickers if not is_kr(t)]
     kr = [t for t in tickers if is_kr(t)]
 
-    ex = _cf.ThreadPoolExecutor(max_workers=20)
+    ex = _cf.ThreadPoolExecutor(max_workers=max_workers)
     try:
         us_futs = {ex.submit(_fetch_us_price, t): t for t in us}
         kr_futs = {ex.submit(_fetch_kr_price, t): t for t in kr}
         all_futs = {**us_futs, **kr_futs}
         try:
-            for fut in _as_completed_safe(all_futs, timeout=15):
+            for fut in _as_completed_safe(all_futs, timeout=timeout):
                 try:
                     ticker, p = fut.result(timeout=0)
                     if p:
@@ -3955,6 +3955,48 @@ def get_price(ticker: str):
 def get_prices(tickers: str):
     lst = [t.strip() for t in tickers.split(',') if t.strip()]
     return _batch_prices(lst)
+
+
+@app.get("/api/cron/warm_prices")
+def cron_warm_prices():
+    """모든 사용자의 보유·관심 종목 시세를 미리 조회해 프로세스 캐시를 데워둔다.
+
+    왜 필요한가: 시세 캐시는 프로세스 메모리에 있고 KR fresh TTL 이 5분이다.
+    사용자가 앱을 열 때가 마침 캐시 만료 직후면 배치 조회를 처음부터 다 하느라
+    수 초를 기다린다(실측 콜드 15초 / 워밍 0.01초). 5분 간격 cron 이 미리
+    채워두면 사용자는 항상 워밍 상태만 만난다.
+
+    UNLISTED_FUND 는 거래소 시세가 없으므로 대상에서 제외한다.
+    공개 GET (개인정보 미노출 — 티커 집합만 사용). cache-warm.sh 와 동일 패턴.
+
+    ⚠️ 반드시 '천천히' 돌아야 한다. 처음엔 일반 배치(20 워커)로 한 번에 긁었는데,
+    2코어 VM 에서 Naver 스크래핑 + BeautifulSoup 파싱(CPU 바운드)이 GIL 을 잡아
+    워밍 16초 동안 /api/market 이 0.003초 → 4.1초로 밀렸다(실측).
+    사용자 체감을 위해 도는 작업이 사용자를 느리게 만들면 본말전도다.
+    → 작은 청크 + 낮은 동시성 + 청크 사이 양보로 바꿨다. 총 소요는 길어지지만
+      5분 주기 안에 끝나기만 하면 되고, 그 사이 사용자 요청은 영향받지 않는다.
+    """
+    t0 = time()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT ticker FROM portfolios "
+            "WHERE quantity > 0 AND COALESCE(asset_type,'') <> ? "
+            "UNION "
+            "SELECT DISTINCT ticker FROM watchlist", (ASSET_UNLISTED_FUND,)
+        ).fetchall()
+    tickers = [r['ticker'] for r in rows if r['ticker']]
+    if not tickers:
+        return {'warmed': 0}
+
+    CHUNK, WORKERS, YIELD_SEC = 6, 3, 0.35
+    got: dict = {}
+    for i in range(0, len(tickers), CHUNK):
+        got.update(_batch_prices(tickers[i:i + CHUNK],
+                                 max_workers=WORKERS, timeout=20))
+        sleep(YIELD_SEC)          # 다른 요청에 CPU 양보
+    return {'requested': len(tickers), 'warmed': len(got),
+            'missing': sorted(set(tickers) - set(got)),
+            'elapsed_sec': round(time() - t0, 2)}
 
 @app.get("/api/stock/{ticker}/earnings")
 def get_earnings(ticker: str):

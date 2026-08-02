@@ -12,9 +12,17 @@
     <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- 웹폰트는 렌더 블로킹에서 제외 — media=print 로 받아 onload 시 적용.
+         계측(2026-08-02): 이 stylesheet 가 FCP 를 붙잡는 두 자원 중 하나였다.
+         display=swap 이라 폰트 도착 전에는 시스템 폰트로 먼저 그려진다. -->
+    <link rel="stylesheet" media="print" onload="this.media='all';this.onload=null"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" />
+    <noscript>
+      <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" />
+    </noscript>
     <title>다온 포트폴리오</title>
-    <script type="module" crossorigin src="/assets/index-BSc-6tAU.js"></script>
+    <script type="module" crossorigin src="/assets/index-D6zTE0f-.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-react-DHH8-g4D.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-query-DhEZekFc.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-zustand-CRKzPH-O.js">
