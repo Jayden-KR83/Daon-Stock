@@ -367,6 +367,18 @@ def _migrate_schema():
         nt_cols = {row['name'] for row in conn.execute("PRAGMA table_info(notifications)").fetchall()}
         if nt_cols and 'change_pct' not in nt_cols:
             conn.execute("ALTER TABLE notifications ADD COLUMN change_pct REAL")
+        # 자산 타입 분기 — 비상장 펀드는 거래소 시세가 없어 실시간 조회 대상이 아니다.
+        # nav = 기준가(1좌당), nav_date = 그 기준가의 기준일. 둘 다 nullable.
+        # manual_price 와 역할 분리: manual_price = 상장종목의 사용자 수동 override,
+        # nav = 펀드의 기준가(추후 협회/판매사 API로 자동 수신 예정).
+        if pf_cols:
+            if 'asset_type' not in pf_cols:
+                conn.execute("ALTER TABLE portfolios ADD COLUMN asset_type TEXT "
+                             "NOT NULL DEFAULT ''")   # ''=미지정(=상장으로 간주)
+            if 'nav' not in pf_cols:
+                conn.execute("ALTER TABLE portfolios ADD COLUMN nav REAL")
+            if 'nav_date' not in pf_cols:
+                conn.execute("ALTER TABLE portfolios ADD COLUMN nav_date TEXT")
         # 마이그레이션 직후, 기존 사용자(이미 가입된 자)는 자동 approved + ai_enabled (legacy compat)
         if added_status:
             conn.execute(
@@ -773,6 +785,21 @@ def kr_code(ticker: str) -> str:
     t = str(ticker)
     return t[1:] if re.match(r'^A\d{6}$', t) else t
 
+
+# ─── 자산 타입 ────────────────────────────────────────────────────
+# LISTED_STOCK / LISTED_ETF : 거래소 상장 → 실시간 시세 파이프라인 대상
+# UNLISTED_FUND             : 비상장 공모펀드 → 시세 조회 제외, nav(기준가)로 평가
+ASSET_LISTED_STOCK = 'LISTED_STOCK'
+ASSET_LISTED_ETF   = 'LISTED_ETF'
+ASSET_UNLISTED_FUND = 'UNLISTED_FUND'
+ASSET_TYPES = (ASSET_LISTED_STOCK, ASSET_LISTED_ETF, ASSET_UNLISTED_FUND)
+
+
+def is_unlisted(asset_type: str) -> bool:
+    """시세 조회에서 제외해야 하는가. 빈 값은 '미지정'이며 상장으로 간주한다
+    (기존 데이터 호환 — 마이그레이션 시 기본값 '')."""
+    return str(asset_type or '').upper() == ASSET_UNLISTED_FUND
+
 def has_korean(text: str) -> bool:
     return any('\uAC00' <= c <= '\uD7A3' or '\u3131' <= c <= '\u318E' for c in text)
 
@@ -941,7 +968,8 @@ def _chart_to_full(ticker: str, res: dict) -> dict | None:
 def _load_user_portfolio(user_id: str) -> dict:
     with _db() as conn:
         rows = conn.execute(
-            "SELECT account,ticker,name,avg_price,quantity,sector,manual_price FROM portfolios WHERE user_id=?",
+            "SELECT account,ticker,name,avg_price,quantity,sector,manual_price,"
+            "       asset_type,nav,nav_date FROM portfolios WHERE user_id=?",
             (user_id,)
         ).fetchall()
         wl = conn.execute(
@@ -957,6 +985,9 @@ def _load_user_portfolio(user_id: str) -> dict:
                 'avg_price': r['avg_price'], 'quantity': r['quantity'],
                 'sector': r['sector'],
                 'manual_price': (r['manual_price'] if 'manual_price' in r.keys() else 0) or 0,
+                'asset_type': r['asset_type'] or '',
+                'nav': r['nav'],            # 비상장 펀드 기준가(1좌당). None = 미수신
+                'nav_date': r['nav_date'],  # 그 기준가의 기준일 'YYYY-MM-DD'
             })
     watchlist = [{'ticker': w['ticker'], 'name': w['name'],
                   'exchange': w['exchange'], 'qtype': w['qtype']} for w in wl]
@@ -970,10 +1001,13 @@ def _save_user_portfolio(user_id: str, user_data: dict):
         for acc, holdings in user_data.get('portfolios', {}).items():
             for h in holdings:
                 conn.execute(
-                    "INSERT INTO portfolios(user_id,account,ticker,name,avg_price,quantity,sector,manual_price) VALUES(?,?,?,?,?,?,?,?)",
+                    "INSERT INTO portfolios(user_id,account,ticker,name,avg_price,quantity,"
+                    "                       sector,manual_price,asset_type,nav,nav_date) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (user_id, acc, h.get('ticker',''), h.get('name',''),
                      h.get('avg_price',0), h.get('quantity',0), h.get('sector',''),
-                     h.get('manual_price',0) or 0)
+                     h.get('manual_price',0) or 0,
+                     (h.get('asset_type') or '').upper(), h.get('nav'), h.get('nav_date'))
                 )
         for w in user_data.get('watchlist', []):
             conn.execute(
@@ -3689,6 +3723,9 @@ def _stock_peers(ticker: str) -> list:
 class Holding(BaseModel):
     ticker: str; name: str; quantity: float; avg_price: float; sector: str = ''
     manual_price: float = 0   # 외부 시세 미조회 종목용 사용자 직접 입력 참고가(0=미설정)
+    asset_type: str = ''      # ''(미지정=상장) | LISTED_STOCK | LISTED_ETF | UNLISTED_FUND
+    nav: float | None = None      # 비상장 펀드 기준가(1좌당). None=미수신
+    nav_date: str | None = None   # 기준가 기준일 'YYYY-MM-DD'
 
 class WatchlistItem(BaseModel):
     ticker: str; name: str; exchange: str = ''; qtype: str = ''

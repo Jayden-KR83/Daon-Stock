@@ -151,7 +151,10 @@ export default function App() {
     if (!snapPortfolio?.portfolios) return []
     const arr = []
     for (const acc of Object.keys(snapPortfolio.portfolios)) {
-      for (const h of (snapPortfolio.portfolios[acc] || [])) arr.push(h.ticker)
+      for (const h of (snapPortfolio.portfolios[acc] || [])) {
+        if (String(h.asset_type || "").toUpperCase() === "UNLISTED_FUND") continue
+        arr.push(h.ticker)
+      }
     }
     return [...new Set(arr)].filter(Boolean)
   }, [snapPortfolio])

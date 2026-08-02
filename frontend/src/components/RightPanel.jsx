@@ -6,7 +6,7 @@ import Sparkline from './Sparkline'
 import LogoCircle from './LogoCircle'
 import { SkeletonRow, SkeletonNews } from './Skeleton'
 import { displayName } from '../utils/displayName'
-import { effPrice } from '../utils/effPrice'
+import { effPrice, priceableTickers } from '../utils/effPrice'
 import './RightPanel.css'
 
 const isKr = tkr => /^A?\d{6}$/.test(tkr)
@@ -115,7 +115,7 @@ function PortfolioPanel({ market }) {
     )
   }, [portfolio])
 
-  const tickers = allHoldings.map(h => h.ticker)
+  const tickers = priceableTickers(allHoldings)   // 비상장 펀드 제외
   const { data: prices = {} } = useQuery({
     queryKey: ['prices-batch', tickers.join(',')],
     queryFn: () => getPricesBatch(tickers),

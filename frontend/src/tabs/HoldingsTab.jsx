@@ -12,7 +12,7 @@ import Sparkles from '../components/Sparkles'
 import { SkeletonRow } from '../components/Skeleton'
 import { usePriceFlash } from '../hooks/usePriceFlash'
 import { isKrTicker } from '../utils/displayName'
-import { effPrice } from '../utils/effPrice'
+import { effPrice, priceableTickers, isUnlistedFund } from '../utils/effPrice'
 import { useAccounts } from '../utils/accounts'
 import { listNotes } from '../api'
 import './HoldingsTab.css'
@@ -66,7 +66,7 @@ export default function HoldingsTab() {
     ? allHoldings
     : allHoldings.filter(h => h.account === accFilter)
 
-  const tickers = filtered.map(h => h.ticker)
+  const tickers = priceableTickers(filtered)      // 비상장 펀드 제외
   const { data: prices = {} } = useQuery({
     queryKey: ['prices-batch', tickers.join(',')],
     queryFn: () => getPricesBatch(tickers),
@@ -310,7 +310,14 @@ export default function HoldingsTab() {
             && typeof rawCur === 'number' && !isNaN(rawCur)
           const isStale = !!priceData?._stale
           const manual  = Number(h.manual_price) || 0
-          const cur     = hasLivePrice ? rawCur : (manual > 0 ? manual : avg)
+          // 비상장 펀드는 시세가 아니라 '기준가(nav)'로 평가한다. 라이브 시세는 존재하지 않으므로
+          // 없다고 해서 오류가 아니다 → 토스트 없이 '—' 로만 표기.
+          const isFund  = isUnlistedFund(h)
+          const navVal  = Number(h.nav) || 0
+          const cur     = isFund
+            ? (navVal > 0 ? navVal : (manual > 0 ? manual : avg))
+            : (hasLivePrice ? rawCur : (manual > 0 ? manual : avg))
+          const hasValue = isFund ? (navVal > 0 || manual > 0) : hasLivePrice
           const chgPct  = Number(priceData?.change_pct) || 0
           const up      = chgPct >= 0
           const mul     = isUs ? (Number(usdKrw) || 1) : 1
@@ -394,9 +401,10 @@ export default function HoldingsTab() {
                 )}
               </div>
 
-              {/* 4. Value (평가액 또는 시세 — 큰 글자). 가격 미수신 시 chip 표시. */}
+              {/* 4. Value (평가액 또는 시세 — 큰 글자). 값을 못 구했을 때만 chip 표시.
+                   비상장 펀드는 기준가(nav)로 정상 평가되므로 칩을 띄우지 않는다. */}
               <div className="h-value">
-                {!hasLivePrice ? (
+                {!hasValue ? (
                   <span title="외부 시세 소스에서 가격을 받지 못했습니다 (한국 펀드/일부 ETF). 평균단가 기준."
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -434,9 +442,9 @@ export default function HoldingsTab() {
 
               {/* 5. PnL (손익 — 평가액 모드는 금액+%, 시세 모드는 평단+%). 가격 없으면 — 표기. */}
               <div className="h-pnl">
-                {!hasLivePrice ? (
+                {!hasValue ? (
                   <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)' }}>
-                    수동 추정만 가능
+                    {isFund ? '기준가 미수신 · —' : '수동 추정만 가능'}
                   </span>
                 ) : viewMode === '평가액' ? (
                   <div className="h-pnl-row">
@@ -570,6 +578,26 @@ function EditPanel({ holding, onSave, onCancel, onDelete }) {
         </div>
       </div>
 
+      {/* 자산 타입 — UNLISTED_FUND 는 실시간 시세 조회에서 제외되고 기준가(NAV)로 평가된다 */}
+      <div className="edit-field">
+        <label className="edit-label">자산 타입</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[['', '상장(기본)'], ['LISTED_ETF', 'ETF'], ['UNLISTED_FUND', '비상장 펀드']].map(([v, label]) => (
+            <button key={v || 'default'}
+              onClick={() => setForm(p => ({ ...p, asset_type: v }))}
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 4, border: '1px solid',
+                borderColor: (form.asset_type || '') === v ? '#0EA5E9' : 'var(--clr-border-md)',
+                background: (form.asset_type || '') === v ? 'var(--clr-info-bg)' : 'var(--clr-surface)',
+                color: (form.asset_type || '') === v ? 'var(--clr-info-dark)' : 'var(--clr-text-sub)',
+                fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* 나머지 필드 */}
       {[
         { label: '종목명', key: 'name', type: 'text' },
@@ -577,6 +605,9 @@ function EditPanel({ holding, onSave, onCancel, onDelete }) {
         { label: '평균 단가', key: 'avg_price', type: 'number' },
         { label: '섹터', key: 'sector', type: 'text' },
         { label: '수동 기준가 (시세 미조회 시 · 0=미사용)', key: 'manual_price', type: 'number' },
+        // 비상장 펀드 전용 — 거래소 시세가 없어 기준가로 평가한다
+        { label: '기준가 NAV (비상장 펀드 · 1좌당)', key: 'nav', type: 'number' },
+        { label: '기준가 기준일 (YYYY-MM-DD)', key: 'nav_date', type: 'text' },
       ].map(f => (
         <div key={f.key} className="edit-field">
           <label className="edit-label">{f.label}</label>

@@ -15,7 +15,7 @@ import DividendsCard from '../components/DividendsCard'
 import PortfolioSummaryBanner from '../components/PortfolioSummaryBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
-import { effPrice } from '../utils/effPrice'
+import { effPrice, priceableTickers } from '../utils/effPrice'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import './TrendsTab.css'   // tt-ai-widget 스타일 공유 사용
 
@@ -170,7 +170,7 @@ export default function AllocationTab() {
     return result
   }, [portfolio])
 
-  const tickers = allHoldings.map(h => h.ticker)
+  const tickers = priceableTickers(allHoldings)   // 비상장 펀드 제외
   const { data: prices = {} } = useQuery({
     queryKey: ['prices-batch', tickers.join(',')],
     queryFn: () => getPricesBatch(tickers),
