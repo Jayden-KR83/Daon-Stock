@@ -12,12 +12,15 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
   const privacyMode = useStore(s => s.privacyMode)
   const setChartTicker = useStore(s => s.setChartTicker)
 
-  const { totalKrw, totalPnl, totalPnlPct, sectorCount, accountCount, topStack } = React.useMemo(() => {
+  const { totalKrw, totalPnl, totalPnlPct, sectorCount, accountCount, topStack, stockCount } = React.useMemo(() => {
     let total = 0, cost = 0
     const sectors = new Set(), accounts = new Set()
-    const perStock = []
+    // 같은 종목이 여러 계좌에 있으면 한 종목으로 합산한다(비중·종목 수 모두).
+    // 합치지 않으면 TOP5 막대에 같은 이름이 두 번 나오고 '보유 N종'도 부풀려진다.
+    const byStock = new Map()
     for (const h of allHoldings) {
       const tkr = h.ticker
+      const key = /^A\d{6}$/.test(String(tkr)) ? String(tkr).slice(1) : String(tkr)
       const isUs = !/^A?\d{6}$/.test(tkr)
       const cur = effPrice(h, prices)
       const mul = isUs ? usdKrw : 1
@@ -26,9 +29,11 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
       cost  += h.quantity * h.avg_price * mul
       sectors.add(h.sector || '기타')
       accounts.add(h.account)
-      perStock.push({ ticker: tkr, name: h.name || tkr, value: v })
+      const prev = byStock.get(key)
+      if (prev) prev.value += v
+      else byStock.set(key, { ticker: tkr, name: h.name || tkr, value: v })
     }
-    perStock.sort((a, b) => b.value - a.value)
+    const perStock = [...byStock.values()].sort((a, b) => b.value - a.value)
     const pnl = total - cost
     const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0
 
@@ -42,6 +47,7 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
       totalKrw: total, totalPnl: pnl, totalPnlPct: pnlPct,
       sectorCount: sectors.size, accountCount: accounts.size,
       topStack: stack,
+      stockCount: perStock.length,   // 계좌 중복 제거된 '순 종목 수'
     }
   }, [allHoldings, prices, usdKrw])
 
@@ -56,16 +62,16 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
 
   // 한 줄 다이내믹 헤드라인 (정량 기반)
   const headline = React.useMemo(() => {
-    if (allHoldings.length === 0) return '보유 종목이 없습니다'
-    if (allHoldings.length <= 2) return '극단적 미분산 — 추가 종목 권장'
+    if (stockCount === 0) return '보유 종목이 없습니다'
+    if (stockCount <= 2) return '극단적 미분산 — 추가 종목 권장'
     if (sectorCount === 1) return '단일 섹터 집중 — 분산 권장'
     const topPct = topStack[0]?.pct || 0
     if (topPct >= 40) return `${topStack[0].name} 비중 ${topPct.toFixed(0)}% — 집중도 높음`
-    if (allHoldings.length >= 10 && sectorCount >= 4) return '균형 잡힌 포트폴리오 — 다각화 양호'
+    if (stockCount >= 10 && sectorCount >= 4) return '균형 잡힌 포트폴리오 — 다각화 양호'
     if (isPositive && Math.abs(totalPnlPct) >= 10) return `평가액 +${totalPnlPct.toFixed(1)}% — 좋은 흐름`
     if (!isPositive && Math.abs(totalPnlPct) >= 10) return `평가액 ${totalPnlPct.toFixed(1)}% — 손실 점검 필요`
-    return `${allHoldings.length}종 · ${sectorCount}개 섹터 · ${accountCount}개 계좌 분산`
-  }, [allHoldings.length, sectorCount, isPositive, totalPnlPct, topStack, accountCount])
+    return `${stockCount}종 · ${sectorCount}개 섹터 · ${accountCount}개 계좌 분산`
+  }, [stockCount, sectorCount, isPositive, totalPnlPct, topStack, accountCount])
 
   // 다온 표준 카테고리 차트 팔레트 (design.md R2). '기타'만 무채색.
   const CHART_COLORS = ['#1F4FD3','#059669','#D97706','#7C3AED','#0891B2','#DB2777']
@@ -98,7 +104,7 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
         </div>
         {/* 우측 metric stack — 3 inline blocks */}
         <div style={{ display: 'flex', gap: 18, fontVariantNumeric: 'tabular-nums' }}>
-          <Stat label="보유" value={`${allHoldings.length}`} />
+          <Stat label="보유" value={`${stockCount}`} />
           <Stat label="섹터" value={`${sectorCount}`} />
           <Stat label="계좌" value={`${accountCount}`} />
         </div>

@@ -2253,8 +2253,10 @@ def _stock_full(ticker: str) -> dict | None:
 # 한국 종목 가격 이중화 — fresh(5분) + stale(30분 fallback) 캐시
 _kr_price_cache: dict = {}      # ticker -> (fresh_until_epoch, data)
 _kr_price_stale: dict = {}      # ticker -> (last_ok_epoch, data)  — 마지막 정상값 보관
+_kr_price_neg:   dict = {}      # ticker -> retry_after_epoch — 어느 소스에도 없는 코드
 _KR_FRESH_TTL = 300             # 5분 — 정상 응답을 캐시
 _KR_STALE_TTL = 1800            # 30분 — Naver/yfinance 모두 실패 시 마지막 정상값 반환
+_KR_NEG_TTL   = 1800            # 30분 — 실패 코드 재시도 억제(아래 주석 참조)
 
 def _kr_price(ticker: str) -> dict | None:
     """KR 종목 현재가 — Naver 1차 → yfinance 2차 → stale 3차.
@@ -2265,6 +2267,18 @@ def _kr_price(ticker: str) -> dict | None:
         until, data = _kr_price_cache[ticker]
         if now < until:
             return data
+
+    # 1-b) 네거티브 캐시 — 상장폐지·미상장 코드는 Naver + yfinance(.KS/.KQ)를 매번
+    #      다 두드려도 결과가 없다. 실측: 죽은 코드 3개가 콜드 배치의 7.7초를 차지.
+    #      30분간 재시도를 건너뛴다. (stale 값이 있으면 그걸 먼저 돌려준다)
+    if ticker in _kr_price_neg and now < _kr_price_neg[ticker]:
+        if ticker in _kr_price_stale:
+            last_ok, data = _kr_price_stale[ticker]
+            if now - last_ok < _KR_STALE_TTL:
+                stale = dict(data)
+                stale['_stale'] = True
+                return stale
+        return None
 
     code = kr_code(ticker)
     fetched = None
@@ -2308,10 +2322,11 @@ def _kr_price(ticker: str) -> dict | None:
             except Exception:
                 pass
 
-    # 3) 정상 응답 — fresh + stale 캐시 모두 갱신
+    # 3) 정상 응답 — fresh + stale 캐시 모두 갱신 (네거티브 캐시는 해제)
     if fetched is not None:
         _kr_price_cache[ticker] = (now + _KR_FRESH_TTL, fetched)
         _kr_price_stale[ticker] = (now, fetched)
+        _kr_price_neg.pop(ticker, None)
         return fetched
 
     # 4) Stale fallback — 30분 내 마지막 정상값 반환 (0 표시 방지)
@@ -2323,6 +2338,8 @@ def _kr_price(ticker: str) -> dict | None:
             stale['_stale_age_sec'] = int(now - last_ok)
             return stale
 
+    # 5) 어느 소스에도 없음 → 30분간 재시도 억제
+    _kr_price_neg[ticker] = now + _KR_NEG_TTL
     return None
 
 @ttl_cache(1800)
@@ -2746,13 +2763,19 @@ def _fetch_kr_price(t: str):
         return (t, None)
 
 def _batch_prices(tickers: list) -> dict:
-    """모든 종목 가격을 병렬로 가져옵니다. 상장폐지 종목으로 인한 hang 완전 방지."""
+    """모든 종목 가격을 병렬로 가져옵니다. 상장폐지 종목으로 인한 hang 완전 방지.
+
+    ⚠️ `with ThreadPoolExecutor(...)` 를 쓰면 안 된다. __exit__ 가 shutdown(wait=True)라
+    as_completed 가 15초에 끊고 나와도 남은 future 가 끝날 때까지 블록된다 →
+    실측 47종목 콜드 19.6초(예산 15초 초과). 죽은 종목 3개가 그중 7.7초를 먹었다.
+    타임아웃을 실제로 지키려면 대기 없이 shutdown 해야 한다.
+    """
     result = {}
     us = [t for t in tickers if not is_kr(t)]
     kr = [t for t in tickers if is_kr(t)]
 
-    # US + KR 동시에 병렬 실행 (max_workers=20)
-    with _cf.ThreadPoolExecutor(max_workers=20) as ex:
+    ex = _cf.ThreadPoolExecutor(max_workers=20)
+    try:
         us_futs = {ex.submit(_fetch_us_price, t): t for t in us}
         kr_futs = {ex.submit(_fetch_kr_price, t): t for t in kr}
         all_futs = {**us_futs, **kr_futs}
@@ -2766,6 +2789,9 @@ def _batch_prices(tickers: list) -> dict:
                     pass
         except _cf.TimeoutError:
             pass  # 타임아웃 시 수집된 결과만 반환 (500 에러 방지)
+    finally:
+        # 미완료 future 는 취소하고 즉시 반환 (스레드는 백그라운드에서 정리됨)
+        ex.shutdown(wait=False, cancel_futures=True)
     return result
 
 @ttl_cache(3600)

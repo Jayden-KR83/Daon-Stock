@@ -210,9 +210,23 @@ export default function AllocationTab() {
       return Object.entries(map).map(([name, value]) => ({ name, value: Math.round(value) }))
         .sort((a, b) => b.value - a.value)
     }
-    // 종목별: name으로 표시
-    return filteredForView
-      .map(h => ({ name: h.name || h.ticker, ticker: h.ticker, value: Math.round(val(h)), quantity: h.quantity }))
+    // 종목별: 같은 종목은 계좌가 달라도 하나로 합산한다.
+    // "이 종목에 내 자산의 몇 %가 걸려 있나"를 보는 차트이므로 계좌는 무관하다.
+    // (보유 목록은 계좌별 평단·과세가 달라 지금처럼 분리 유지)
+    // KR은 A접두 유무가 달라도 같은 종목 → kr_code 와 같은 규칙으로 정규화.
+    const map = {}
+    for (const h of filteredForView) {
+      const t = String(h.ticker || '')
+      const key = /^A\d{6}$/.test(t) ? t.slice(1) : t
+      if (!map[key]) {
+        map[key] = { name: h.name || t, ticker: t, value: 0, quantity: 0, accounts: 0 }
+      }
+      map[key].value += val(h)
+      map[key].quantity += Number(h.quantity) || 0
+      map[key].accounts += 1
+    }
+    return Object.values(map)
+      .map(d => ({ ...d, value: Math.round(d.value) }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 15)
   }, [filteredForView, view, allHoldings, prices, usdKrw])
@@ -597,6 +611,12 @@ export default function AllocationTab() {
                       {d.name}
                       {isStock && d.ticker !== d.name && (
                         <span style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginLeft: 4 }}>({d.ticker})</span>
+                      )}
+                      {isStock && d.accounts > 1 && (
+                        <span title={`${d.accounts}개 계좌에 나눠 보유 — 합산 비중`}
+                          style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginLeft: 5 }}>
+                          · {d.accounts}계좌 합산
+                        </span>
                       )}
                       {!isStock && children.length > 0 && (
                         <span style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginLeft: 6 }}>

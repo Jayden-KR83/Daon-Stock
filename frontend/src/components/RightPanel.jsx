@@ -123,17 +123,23 @@ function PortfolioPanel({ market }) {
     staleTime: 60_000,
   })
 
-  const withPct = React.useMemo(() =>
-    allHoldings
-      .map(h => ({
+  // 같은 종목을 여러 계좌에 나눠 보유해도 등락률은 하나다 → 티커 기준 1건으로 합친다.
+  // (합치지 않으면 Today's Winners/Losers 에 같은 종목이 2번 나온다)
+  const withPct = React.useMemo(() => {
+    const seen = new Map()
+    for (const h of allHoldings) {
+      const t = String(h.ticker || '')
+      const key = /^A\d{6}$/.test(t) ? t.slice(1) : t   // KR A접두 정규화
+      if (seen.has(key)) continue
+      seen.set(key, {
         ...h,
         pct:   prices[h.ticker]?.change_pct ?? 0,
         price: effPrice(h, prices),
         spark: prices[h.ticker]?.spark,
-      }))
-      .sort((a, b) => b.pct - a.pct),
-    [allHoldings, prices]
-  )
+      })
+    }
+    return [...seen.values()].sort((a, b) => b.pct - a.pct)
+  }, [allHoldings, prices])
 
   const gainers = withPct.filter(h => h.pct > 0).slice(0, 3)
   const losers  = withPct.filter(h => h.pct < 0).slice(-2).reverse()
