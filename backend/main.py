@@ -800,6 +800,86 @@ def is_unlisted(asset_type: str) -> bool:
     (기존 데이터 호환 — 마이그레이션 시 기본값 '')."""
     return str(asset_type or '').upper() == ASSET_UNLISTED_FUND
 
+
+# ─── 종목코드 검증 (마스터 대조) ────────────────────────────────────
+# 왜 필요한가: 447180·470000 처럼 '존재하지 않는 코드'가 저장돼 있어도 앱은
+# 조용히 시세만 비워 보여줬다. 사용자는 몇 달간 그게 오류인지 몰랐다.
+# → 저장 시점에 실재 여부를 확인하고, 없는 코드는 저장 자체를 거부한다.
+#
+# 마스터 소스는 네이버 모바일 API 를 쓴다. KRX(data.krx.co.kr)는 JSON 파싱이
+# 불안정했고(2026-08-02 확인), 네이버는 실재=200+종목명 / 부재=409 로 명확히 갈린다.
+_TICKER_MASTER: dict = {}          # 정규화코드 -> (검증시각, {name, type, exch} | None)
+TICKER_MASTER_TTL = 86400          # 기본 24시간. settings 로 조정 가능
+
+
+def _master_ttl() -> int:
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='ticker_master_ttl'").fetchone()
+        return int(row['value']) if row and row['value'] else TICKER_MASTER_TTL
+    except Exception:
+        return TICKER_MASTER_TTL
+
+
+def lookup_kr_master(ticker: str) -> dict | None:
+    """KR 종목 마스터 조회. 실재하면 dict, 없으면 None. TTL 캐시.
+
+    A접두 유무는 kr_code() 로 정규화하므로 'A447770' 과 '447770' 이 같은 키를 쓴다.
+    """
+    code = kr_code(str(ticker).strip())
+    now = time()
+    hit = _TICKER_MASTER.get(code)
+    if hit and now - hit[0] < _master_ttl():
+        return hit[1]
+    info = None
+    try:
+        r = _session.get(f'https://m.stock.naver.com/api/stock/{code}/basic',
+                         headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+        if r.status_code == 200:
+            j = r.json()
+            if j.get('stockName'):
+                info = {'name': j.get('stockName'),
+                        'type': j.get('stockEndType') or '',
+                        'exchange': (j.get('stockExchangeType') or {}).get('code') or ''}
+    except Exception:
+        # 네트워크 실패는 '없음'이 아니다 → 캐시하지 않고 None 반환(검증은 통과시킨다)
+        return None
+    _TICKER_MASTER[code] = (now, info)
+    return info
+
+
+def validate_ticker(ticker: str, asset_type: str = '') -> tuple[bool, str]:
+    """(통과여부, 사유). 저장 전 호출.
+
+    - 비상장 펀드(UNLISTED_FUND)는 거래소 마스터에 없는 게 정상 → 검증 면제.
+      면제하지 않으면 404610 같은 정상 보유를 등록할 수 없게 된다.
+    - 미국 종목은 이 마스터의 대상이 아니므로 형식만 본다.
+    - 네트워크 실패 시에는 통과시킨다(가용성 우선 — 조회 불가를 '없는 코드'로
+      단정해 사용자의 정상 등록을 막으면 안 된다).
+    """
+    t = str(ticker or '').strip().upper()
+    if not t:
+        return False, '종목코드가 비어 있습니다'
+    if is_unlisted(asset_type):
+        return True, '비상장 펀드 — 거래소 마스터 대조 면제'
+    if not is_kr(t):
+        if not re.match(r'^[A-Z0-9.\-]{1,10}$', t):
+            return False, f'올바르지 않은 티커 형식입니다: {t}'
+        return True, '해외 종목 — 형식 검사만'
+    if not re.match(r'^A?\d{6}$', t):
+        return False, f'한국 종목코드는 6자리 숫자여야 합니다: {t}'
+    info = lookup_kr_master(t)
+    if info is None:
+        code = kr_code(t)
+        cached = _TICKER_MASTER.get(code)
+        if cached and cached[1] is None:
+            return False, (f'존재하지 않는 종목코드입니다: {t}. '
+                           f'단축코드를 확인하거나, 비상장 펀드라면 자산 타입을 '
+                           f'"비상장 펀드"로 지정하세요.')
+        return True, '마스터 조회 불가 — 검증 보류(통과)'
+    return True, f"확인됨: {info['name']}"
+
 def has_korean(text: str) -> bool:
     return any('\uAC00' <= c <= '\uD7A3' or '\u3131' <= c <= '\u318E' for c in text)
 
@@ -3792,6 +3872,9 @@ def add_holding(account: str, h: Holding, cu: dict = Depends(require_approved)):
         valid = _user_account_keys(cu['user_id'])
     if account not in valid:
         raise HTTPException(400, f"존재하지 않는 계좌입니다: {account}")
+    ok, why = validate_ticker(h.ticker, h.asset_type)
+    if not ok:
+        raise HTTPException(400, why)
     ud = _load_user_data(cu["user_id"])
     holdings = ud['portfolios'].get(account, [])
     for i, x in enumerate(holdings):
@@ -3812,6 +3895,9 @@ def del_holding(account: str, ticker: str, cu: dict = Depends(get_current_user))
 
 @app.post("/api/watchlist/add")
 def add_watchlist(item: WatchlistItem, cu: dict = Depends(get_current_user)):
+    ok, why = validate_ticker(item.ticker)
+    if not ok:
+        raise HTTPException(400, why)
     ud = _load_user_data(cu["user_id"])
     wl = ud.get('watchlist', [])
     if not any(w['ticker'].upper() == item.ticker.upper() for w in wl):
@@ -3955,6 +4041,50 @@ def get_price(ticker: str):
 def get_prices(tickers: str):
     lst = [t.strip() for t in tickers.split(',') if t.strip()]
     return _batch_prices(lst)
+
+
+@app.post("/api/admin/audit_tickers")
+def audit_tickers(cu: dict = Depends(require_admin)):
+    """보유·관심 전 종목을 검증기에 통과시켜 잘못된 코드를 리포트(읽기 전용).
+
+    447180·470000 처럼 조용히 죽어 있던 코드가 더 있는지 확인하는 용도.
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT user_id, ticker, name, COALESCE(asset_type,'') at, 'portfolio' src "
+            "FROM portfolios WHERE quantity > 0 "
+            "UNION ALL "
+            "SELECT user_id, ticker, name, '' at, 'watchlist' src FROM watchlist"
+        ).fetchall()
+    def _norm(s):
+        return re.sub(r'[\s()\[\]&·\-_/]', '', str(s or '')).upper()
+
+    bad, exempt, mismatch, ok_n = [], [], [], 0
+    seen = set()
+    for r in rows:
+        key = (r['ticker'], r['at'])
+        if key in seen:
+            continue
+        seen.add(key)
+        passed, why = validate_ticker(r['ticker'], r['at'])
+        rec = {'ticker': r['ticker'], 'name': r['name'], 'source': r['src'],
+               'asset_type': r['at'], 'reason': why}
+        if not passed:
+            bad.append(rec)
+        elif '면제' in why:
+            exempt.append(rec)
+        else:
+            ok_n += 1
+            # 코드가 실재해도 '다른 종목'일 수 있다 — 이게 더 잡기 어렵다.
+            # (예: 448300 은 실재하지만 사용자가 의도한 ACE 엔비디아채권혼합이 아니라
+            #  TIGER 미국나스닥100(H) 였고, 몇 달간 틀린 평가액이 표시됐다)
+            if is_kr(r['ticker']) and r['name']:
+                info = lookup_kr_master(r['ticker'])
+                if info and _norm(info['name']) != _norm(r['name']):
+                    mismatch.append({**rec, 'master_name': info['name']})
+        sleep(0.05)          # 마스터 API 예의상 간격
+    return {'checked': len(seen), 'ok': ok_n,
+            'invalid': bad, 'exempt': exempt, 'name_mismatch': mismatch}
 
 
 @app.get("/api/cron/warm_prices")
