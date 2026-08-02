@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx'
  * '저장'하면 savePortfolio(전체 교체 + 자동 백업)로 앱 전체에 즉시 반영.
  */
 let _uid = 0
-const KR_RE = /^A?\d{6}$/
+const KR_RE = /^A?\d[0-9A-Z]{5}$/
 const TEMPLATE_COLS = ['종목명', '티커명', '평균단가', '수량', '계좌명', '섹터']
 const TEMPLATE_SAMPLE = [
   ['Apple Inc.', 'AAPL', 180.50, 10, '미국', 'Technology'],

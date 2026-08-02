@@ -519,7 +519,7 @@ export default function ChartTab() {
   // Valuation / 동종업계 — 종목 진입 즉시 자동 fetch (항상 펼침으로 변경됨)
   const fundReady = !!activeTicker && !/^\^/.test(activeTicker)
     && !activeTicker.endsWith('=X') && !activeTicker.endsWith('-USD')
-    && (/^[A-Z]/.test(activeTicker) || /^A?\d{6}$/.test(activeTicker))   // US + KR 모두
+    && (/^[A-Z]/.test(activeTicker) || /^A?\d[0-9A-Z]{5}$/.test(activeTicker))   // US + KR 모두
   const { data: fundamentals, isLoading: fundLoading } = useQuery({
     queryKey: ['fundamentals', activeTicker],
     queryFn: () => getFundamentals(activeTicker),
@@ -583,7 +583,7 @@ export default function ChartTab() {
     }
   }
 
-  const isKr     = /^A?\d{6}$/.test(activeTicker)
+  const isKr     = /^A?\d[0-9A-Z]{5}$/.test(activeTicker)
   const isUs     = !isKr
   const isIndex  = /^\^/.test(activeTicker)           // ^GSPC, ^VIX, ^KS11 등
   const isForex  = activeTicker.endsWith('=X')        // KRW=X 등

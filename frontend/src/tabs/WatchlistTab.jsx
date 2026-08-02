@@ -225,7 +225,7 @@ function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
   const cur    = priceData?.current_price
   const chgPct = priceData?.change_pct ?? 0
   const up     = chgPct >= 0
-  const isUs   = !/^A?\d{6}$/.test(item.ticker)
+  const isUs   = !/^A?\d[0-9A-Z]{5}$/.test(item.ticker)
 
   // 뉴스 패널 제거 — 종목 클릭 시 차트 탭에서 뉴스 확인 가능 (중복 제거)
   // expanded 상태 제거. 본 컴포넌트는 보유 카드 그대로 클릭 = 차트 이동

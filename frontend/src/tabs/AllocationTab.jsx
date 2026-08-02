@@ -178,7 +178,7 @@ export default function AllocationTab() {
     staleTime: 60_000,
   })
 
-  const isUs = h => !/^A?\d{6}$/.test(h.ticker)
+  const isUs = h => !/^A?\d[0-9A-Z]{5}$/.test(h.ticker)
   const val  = h => {
     const cur = effPrice(h, prices)
     return h.quantity * cur * (isUs(h) ? usdKrw : 1)
@@ -217,7 +217,7 @@ export default function AllocationTab() {
     const map = {}
     for (const h of filteredForView) {
       const t = String(h.ticker || '')
-      const key = /^A\d{6}$/.test(t) ? t.slice(1) : t
+      const key = /^A\d[0-9A-Z]{5}$/.test(t) ? t.slice(1) : t
       if (!map[key]) {
         map[key] = { name: h.name || t, ticker: t, value: 0, quantity: 0, accounts: 0 }
       }

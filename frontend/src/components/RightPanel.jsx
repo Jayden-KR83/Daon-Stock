@@ -9,7 +9,7 @@ import { displayName } from '../utils/displayName'
 import { effPrice, priceableTickers } from '../utils/effPrice'
 import './RightPanel.css'
 
-const isKr = tkr => /^A?\d{6}$/.test(tkr)
+const isKr = tkr => /^A?\d[0-9A-Z]{5}$/.test(tkr)
 
 /* ── 가격 포맷 ── */
 function fmtPrice(name, price) {
@@ -129,7 +129,7 @@ function PortfolioPanel({ market }) {
     const seen = new Map()
     for (const h of allHoldings) {
       const t = String(h.ticker || '')
-      const key = /^A\d{6}$/.test(t) ? t.slice(1) : t   // KR A접두 정규화
+      const key = /^A\d[0-9A-Z]{5}$/.test(t) ? t.slice(1) : t   // KR A접두 정규화
       if (seen.has(key)) continue
       seen.set(key, {
         ...h,
@@ -337,7 +337,7 @@ function ChartPanel() {
   })
   const newsItems = newsData?.news || []
 
-  const isKrTicker = /^A?\d{6}$/.test(ticker)
+  const isKrTicker = /^A?\d[0-9A-Z]{5}$/.test(ticker)
   const { data: peers = [] } = useQuery({
     queryKey: ['stock-peers', ticker],
     queryFn:  () => getPeers(ticker),

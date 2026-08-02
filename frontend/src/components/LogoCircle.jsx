@@ -10,7 +10,7 @@ function hashColor(str) {
 }
 
 function isKr(ticker) {
-  return /^A?\d{6}$/.test(String(ticker))
+  return /^A?\d[0-9A-Z]{5}$/.test(String(ticker))
 }
 
 /* 'A005930' → '005930' 6자리만 추출 */

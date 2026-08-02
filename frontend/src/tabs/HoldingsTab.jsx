@@ -79,7 +79,7 @@ export default function HoldingsTab() {
   const { totalCur, totalInvest, profit } = React.useMemo(() => {
     let totalCur = 0, totalInvest = 0
     for (const h of filtered) {
-      const isUs = !/^A?\d{6}$/.test(h.ticker)
+      const isUs = !/^A?\d[0-9A-Z]{5}$/.test(h.ticker)
       const cur  = effPrice(h, prices)
       const mul  = isUs ? usdKrw : 1
       totalCur    += h.quantity * cur * mul
@@ -96,7 +96,7 @@ export default function HoldingsTab() {
   const sorted = React.useMemo(() => {
     return [...filtered].sort((a, b) => {
       const getVal = h => {
-        const isUs = !/^A?\d{6}$/.test(h.ticker)
+        const isUs = !/^A?\d[0-9A-Z]{5}$/.test(h.ticker)
         const cur  = effPrice(h, prices)
         return h.quantity * cur * (isUs ? usdKrw : 1)
       }
@@ -303,7 +303,7 @@ export default function HoldingsTab() {
           const ticker = String(h.ticker || '')
           const qty    = Number(h.quantity) || 0
           const avg    = Number(h.avg_price) || 0
-          const isUs   = !/^A?\d{6}$/.test(ticker)
+          const isUs   = !/^A?\d[0-9A-Z]{5}$/.test(ticker)
           const priceData = prices[ticker]
           const rawCur = priceData?.current_price
           const hasLivePrice = priceData != null && rawCur != null
@@ -631,7 +631,7 @@ function EditPanel({ holding, onSave, onCancel, onDelete }) {
         <TransactionsSection
           ticker={holding.ticker}
           name={holding.name || ''}
-          isUs={!/^A?\d{6}$/.test(holding.ticker)}
+          isUs={!/^A?\d[0-9A-Z]{5}$/.test(holding.ticker)}
         />
       </div>
     </div>

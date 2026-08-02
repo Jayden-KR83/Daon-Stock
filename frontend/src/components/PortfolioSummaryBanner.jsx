@@ -20,8 +20,8 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
     const byStock = new Map()
     for (const h of allHoldings) {
       const tkr = h.ticker
-      const key = /^A\d{6}$/.test(String(tkr)) ? String(tkr).slice(1) : String(tkr)
-      const isUs = !/^A?\d{6}$/.test(tkr)
+      const key = /^A\d[0-9A-Z]{5}$/.test(String(tkr)) ? String(tkr).slice(1) : String(tkr)
+      const isUs = !/^A?\d[0-9A-Z]{5}$/.test(tkr)
       const cur = effPrice(h, prices)
       const mul = isUs ? usdKrw : 1
       const v   = h.quantity * cur * mul

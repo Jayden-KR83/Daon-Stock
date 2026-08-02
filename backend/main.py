@@ -776,14 +776,20 @@ def _set_ai_cache(key: str, value, source: str = 'api'):
         pass
 
 # ─── Helpers ──────────────────────────────────────────────────────────
+# KRX 단축코드: 6자리. 전통적으로 숫자 6자리(005930)지만, 최근 상장 종목은
+# 영숫자 혼합(예: 0131V0 = 1Q 미국우주항공테크)도 쓴다.
+# '첫 글자가 숫자'를 판별자로 삼는다 — 미국 티커는 숫자로 시작하지 않는다.
+KR_TICKER_RE = re.compile(r'^A?\d[0-9A-Z]{5}$')
+
+
 def is_kr(ticker: str) -> bool:
-    # A005930, 005930 모두 한국 주식으로 처리 (KRX의 A접두사 포함)
-    return bool(re.match(r'^A?\d{6}$', str(ticker)))
+    # A005930, 005930, 0131V0 모두 한국 종목 (KRX A접두사·영숫자 코드 포함)
+    return bool(KR_TICKER_RE.match(str(ticker).upper()))
 
 def kr_code(ticker: str) -> str:
     """Naver/yfinance 호출 시 A접두사 제거"""
     t = str(ticker)
-    return t[1:] if re.match(r'^A\d{6}$', t) else t
+    return t[1:] if re.match(r'^A\d[0-9A-Z]{5}$', t.upper()) else t
 
 
 # ─── 자산 타입 ────────────────────────────────────────────────────
@@ -864,11 +870,15 @@ def validate_ticker(ticker: str, asset_type: str = '') -> tuple[bool, str]:
     if is_unlisted(asset_type):
         return True, '비상장 펀드 — 거래소 마스터 대조 면제'
     if not is_kr(t):
+        # 숫자로 시작하는데 KR 형식이 아니면 '잘못 입력한 한국 코드'다.
+        # 해외 티커로 흘려보내면 검증을 그냥 통과해 버린다(예: '0131V' 5자리).
+        if t[0].isdigit() or (t.startswith('A') and len(t) > 1 and t[1].isdigit()):
+            return False, f'한국 종목코드 형식이 아닙니다(A접두 제외 6자리): {t}'
         if not re.match(r'^[A-Z0-9.\-]{1,10}$', t):
             return False, f'올바르지 않은 티커 형식입니다: {t}'
         return True, '해외 종목 — 형식 검사만'
-    if not re.match(r'^A?\d{6}$', t):
-        return False, f'한국 종목코드는 6자리 숫자여야 합니다: {t}'
+    if not is_kr(t):
+        return False, f'한국 종목코드 형식이 아닙니다(6자리): {t}'
     info = lookup_kr_master(t)
     if info is None:
         code = kr_code(t)
@@ -4385,7 +4395,7 @@ def analyze(req: AnalyzeReq, cu: dict = Depends(require_ai_enabled)):
         avg   = h.get('avg_price', 0)
         name  = h.get('name', tkr)
         sector= h.get('sector','?')
-        is_us = not re.match(r'^A?\d{6}$', tkr)
+        is_us = not is_kr(tkr)
         cur   = req.prices.get(tkr, {}).get('current_price') or (h.get('manual_price') or 0) or avg
         mul   = usd_krw if is_us else 1
         val   = qty * cur * mul
@@ -4742,7 +4752,7 @@ def _calc_metrics(ticker: str, avg_price: float) -> dict:
     import numpy as np
 
     hist = None
-    if re.match(r'^A?\d{6}$', ticker):
+    if is_kr(ticker):
         code = re.sub(r'^A', '', ticker)
         # 1차: v8 chart API 직접 호출 — yfinance보다 KR ETF 커버리지 넓음
         for sfx in ['.KS', '.KQ']:
@@ -5088,7 +5098,7 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     def _fetch_strategy_metric(h):
         tkr    = h.get('ticker', '')
         avg    = float(h.get('avg_price', 0))
-        is_us  = not re.match(r'^A?\d{6}$', tkr)
+        is_us  = not is_kr(tkr)
         # 권위 수치(Phase 1): 프론트가 시세를 못 넘겨도 백엔드가 직접 실시간 시세를 조회한다.
         # 앱 보유 표와 동일 소스(_price_fast/_kr_price) → verified_facts가 표와 일치(평단가 폴백으로
         # NVDA 23%→5%로 deflate되던 정합성 균열 차단). metrics와 같은 병렬 작업이라 추가 직렬 지연 없음.
@@ -5120,7 +5130,7 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
         name   = h.get('name', tkr)
         sector = h.get('sector', '기타')
         acct   = h.get('account', '')
-        is_us  = not re.match(r'^A?\d{6}$', tkr)
+        is_us  = not is_kr(tkr)
         # 우선순위: 프론트 실시간가 → 백엔드 실시간가(price_map) → 수동 기준가 → 평단가
         cur    = float(req.prices.get(tkr, {}).get('current_price')
                        or price_map.get(tkr) or (h.get('manual_price') or 0) or avg)
@@ -5817,7 +5827,7 @@ def backtest(req: BacktestReq, cu: dict = Depends(require_approved)):
         qty = float(h.get('quantity', 0))
         if qty <= 0: return None
         # KR 종목은 .KS/.KQ 시도
-        if re.match(r'^A?\d{6}$', tkr):
+        if is_kr(tkr):
             code = re.sub(r'^A', '', tkr)
             for sfx in ('.KS', '.KQ'):
                 try:
@@ -6500,7 +6510,7 @@ def portfolio_correlation(req: CorrelationReq, cu: dict = Depends(require_approv
     def _fetch(h):
         tkr = h.get('ticker', '')
         if not tkr: return None
-        if re.match(r'^A?\d{6}$', tkr):
+        if is_kr(tkr):
             code = re.sub(r'^A', '', tkr)
             for sfx in ('.KS', '.KQ'):
                 try:
@@ -6653,14 +6663,14 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
 
     def _fetch(tkr):
         tkr = str(tkr).upper()
-        is_kr = bool(re.match(r'^A?\d{6}$', tkr))
+        kr_flag = is_kr(tkr)
         nowt = time()
         c = _earnings_cache.get(tkr)
         if c and nowt - c[0] < _EARNINGS_TTL:
             return c[1]
         out = []
         try:
-            if is_kr:
+            if kr_flag:
                 # KR: .KS(KOSPI) → .KQ(KOSDAQ) 순으로 earnings 시도 (있는 종목만 표시)
                 code = tkr.lstrip('A')
                 ed = None
@@ -6681,7 +6691,7 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
                         continue
                     if win_lo <= ts <= cutoff:
                         row = ed.loc[ts_idx]
-                        nm = _KOSPI_NAMES.get(tkr.lstrip('A')) if is_kr else tkr
+                        nm = _KOSPI_NAMES.get(tkr.lstrip('A')) if kr_flag else tkr
                         out.append({
                             'ticker': tkr,
                             'name':   nm,            # KR은 한글명(유니버스), US는 티커
@@ -6731,7 +6741,7 @@ def compare_series(req: CompareSeriesReq, cu: dict = Depends(require_approved)):
 
     def _fetch(tkr):
         try:
-            if re.match(r'^A?\d{6}$', tkr):
+            if is_kr(tkr):
                 code = re.sub(r'^A', '', tkr)
                 for sfx in ('.KS', '.KQ'):
                     try:
@@ -6789,9 +6799,9 @@ def _fetch_dividends_single(tkr: str, months_back: int):
     try:
         import yfinance as yf
         from datetime import timedelta as _td
-        is_kr = bool(re.match(r'^A?\d{6}$', tkr))
+        kr_flag = is_kr(tkr)
         t = None
-        if is_kr:
+        if kr_flag:
             code = re.sub(r'^A', '', tkr)
             for sfx in ('.KS', '.KQ'):
                 try:
@@ -6851,7 +6861,7 @@ def _fetch_dividends_single(tkr: str, months_back: int):
             'annual_rate_per_share': round(annual_rate, 4),
             'dividend_yield_pct':    round(div_yield, 2),
             'ex_date': ex_date,
-            'is_kr':   is_kr,
+            'is_kr':   kr_flag,
         }
         _dividends_cache[cache_key] = (now, data)
         return data
@@ -7752,7 +7762,7 @@ def _quote_for_alert(ticker: str, cache: dict) -> dict:
         return cache[ticker]
     q: dict = {}
     try:
-        q = (_kr_price(ticker) if re.match(r'^A?\d{6}$', ticker)
+        q = (_kr_price(ticker) if is_kr(ticker)
              else _price_fast(ticker)) or {}
     except Exception:
         q = {}
@@ -7838,8 +7848,8 @@ def _run_move_scan(now: float, quotes: dict) -> dict:
                                 "DELETE FROM move_alert_state "
                                 "WHERE user_id=? AND ticker=?", (uid, key))
                         continue
-                    is_kr = bool(re.match(r'^A?\d{6}$', tkr))
-                    price_s = (f"₩{int(round(float(cur))):,}" if is_kr
+                    kr_flag = is_kr(tkr)
+                    price_s = (f"₩{int(round(float(cur))):,}" if kr_flag
                                else f"${float(cur):,.2f}")
                     msg = (f"[{origin}] {nm} {float(pct):+.1f}% "
                            f"{'급등' if kind == 'surge' else '급락'} · 현재 {price_s}")
