@@ -463,6 +463,23 @@ input.input, .btn-primary, .btn-secondary {
 }
 .web-root { max-width: 100vw; }
 
+/* ── 좁은 기기에서 '웹(데스크톱) 화면'을 선택한 경우 ──
+   데스크톱 레이아웃(사이드바 220 + 본문 + 우측패널)을 390px 에 압축하면
+   본문 칸이 몇 글자 폭으로 줄어 금액이 한 글자씩 세로로 쪼개진다(2026-08-02 발생).
+   압축하지 말고 데스크톱 최소 폭을 유지한 채 가로 스크롤/줌으로 보게 한다.
+   (viewport meta 도 App.jsx 에서 width=1180 으로 바꿔 브라우저가 축소 렌더한다) */
+@media (max-width: 1000px) {
+  .web-root {
+    min-width: var(--web-min-width, 1180px);
+    max-width: none;
+  }
+  .web-right { overflow: visible; }
+  /* 숫자·이름이 글자 단위로 쪼개지는 것 방지 — 최후의 안전망 */
+  .hero-card .hero-value,
+  .hero-card .hero-app-name,
+  .m3-metric-value { word-break: keep-all; overflow-wrap: normal; }
+}
+
 /* 모든 카드/패널: padding-box & 가로 100% 보장 */
 .card, .hero-card, .chart-card,
 .tt-card, .tt-drill-panel, .holding-edit-card {

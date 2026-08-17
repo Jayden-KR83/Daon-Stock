@@ -84,6 +84,24 @@ export default function App() {
     if (el) el.style.display = 'none'
   }, [])
 
+  // 레이아웃에 맞춰 viewport meta 교체.
+  // 좁은 기기에서 '웹(데스크톱) 화면'을 고르면 width=device-width 로는 데스크톱 3열이
+  // 390px 로 압축돼 금액이 한 글자씩 쪼개진다(2026-08-02 발생). 데스크톱 폭을 명시해
+  // 브라우저가 축소 렌더하도록 한다 = 브라우저 '데스크톱 사이트 요청'과 같은 원리.
+  // 앱 모드로 돌아오면 원래 값으로 복원한다(줌 금지 포함).
+  //
+  // ⚠️ isApp 을 쓰지 않고 layoutMode/isMobile 로 직접 계산한다. isApp 은 이 아래에서
+  // const 로 선언되므로, 여기서 의존성 배열에 넣으면 렌더 중 TDZ ReferenceError 가
+  // 나서 앱 전체가 백지가 된다(2026-08-02 실제로 배포까지 나갔던 사고).
+  const wantsAppLayout = layoutMode === 'app' || (layoutMode === 'auto' && isMobile)
+  useEffect(() => {
+    const el = document.querySelector('meta[name="viewport"]')
+    if (!el) return
+    el.setAttribute('content', wantsAppLayout
+      ? 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
+      : 'width=1180, user-scalable=yes')   // 데스크톱 폭 고정 + 핀치줌 허용
+  }, [wantsAppLayout])
+
   // 탭 청크 유휴 프리페치 — 탭을 처음 누를 때 청크를 받느라 1~1.8초 걸리던 것을 없앤다.
   // 계측(2026-08-02): 종목 1047ms · 발굴 1840ms(콜드) → 프리페치 후 즉시 전환.
   // requestIdleCallback 으로 초기 렌더·첫 데이터 요청이 끝난 뒤에만 받는다.
@@ -212,7 +230,7 @@ export default function App() {
 
   // 'auto'는 화면 폭으로 결정. 사용자가 직접 고른 'web'/'app'은 폭과 무관하게 존중한다
   // (모바일에서도 웹 레이아웃을 볼 수 있어야 한다는 요구 — 좁은 화면은 가로 스크롤로 감당).
-  const isApp = layoutMode === 'app' || (layoutMode === 'auto' && isMobile)
+  const isApp = wantsAppLayout
 
   // 앱/모바일 좌우 스와이프 탭 전환 — 순서는 BottomNav에서 직접 가져온다.
   // (예전엔 배열을 여기 하드코딩해 하단바와 어긋날 수 있었다)
