@@ -3,6 +3,19 @@
  *  한국 비상장 펀드처럼 외부 시세가 없는 종목을 최소한 "참고가"로 평가하기 위함.
  *  반환값은 항상 종목 통화 기준(환산 전). */
 export const UNLISTED_FUND = 'UNLISTED_FUND'
+export const CRYPTO = 'CRYPTO'
+
+/** 암호화폐인가 — 'BTC-USD' 형태 또는 asset_type=CRYPTO.
+ *  수량 단위가 '주'가 아니라 '개'이고, PER 같은 기업 지표가 없다. */
+export function isCrypto(h) {
+  if (String(h?.asset_type || '').toUpperCase() === CRYPTO) return true
+  return /^[A-Z]{2,6}-USD$/.test(String(h?.ticker || '').toUpperCase())
+}
+
+/** 수량 뒤에 붙는 단위. 암호화폐는 소수점 보유가 흔해 '개'로 표기한다. */
+export function qtyUnit(h) {
+  return isCrypto(h) ? '개' : '주'
+}
 
 /** 비상장 공모펀드인가 — 거래소 시세가 없어 실시간 조회 대상이 아니다. */
 export function isUnlistedFund(h) {

@@ -12,7 +12,7 @@ import Sparkles from '../components/Sparkles'
 import { SkeletonRow } from '../components/Skeleton'
 import { usePriceFlash } from '../hooks/usePriceFlash'
 import { isKrTicker } from '../utils/displayName'
-import { effPrice, priceableTickers, isUnlistedFund } from '../utils/effPrice'
+import { effPrice, priceableTickers, isUnlistedFund, qtyUnit } from '../utils/effPrice'
 import { useAccounts } from '../utils/accounts'
 import { listNotes } from '../api'
 import './HoldingsTab.css'
@@ -386,8 +386,8 @@ export default function HoldingsTab() {
               {/* 3. Meta (수량 · 계좌) — sparkline은 별도 중앙 셀로 분리 */}
               <div className="h-meta" onClick={() => setChartTicker(h.ticker)}
                 style={{ cursor: 'pointer' }}>
-                <span>{privacyMode ? '•••주'
-                  : `${h.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })}주`}</span>
+                <span>{privacyMode ? `•••${qtyUnit(h)}`
+                  : `${h.quantity.toLocaleString(undefined, { maximumFractionDigits: 8 })}${qtyUnit(h)}`}</span>
                 <span className="h-meta-divider" />
                 <span>{ACC_LABELS[h.account]}</span>
               </div>

@@ -63,10 +63,15 @@ class TestExemption:
 
 
 class TestUsTicker:
-    def test_미국_티커는_형식만_검사(self):
+    def test_미국_티커는_시세_실재까지_확인(self):
+        """형식만 보던 것을 시세 실재 확인까지로 강화했다(2026-08-02).
+        형식만 통과시키면 오타 티커가 조용한 무시세 보유로 남는다.
+        네트워크에 의존하지 않도록 캐시를 미리 심는다."""
+        import time as _t
         for t in ('AAPL', 'BRK-B', 'SOXX'):
+            main._FOREIGN_EXISTS[t] = (_t.time(), True)
             ok, why = main.validate_ticker(t)
-            assert ok and '형식' in why
+            assert ok and '확인' in why, (t, why)
 
     def test_이상한_티커는_거부(self):
         ok, _ = main.validate_ticker('AA PL!')

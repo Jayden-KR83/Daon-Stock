@@ -5,6 +5,15 @@ const BADGE_COLORS = [
   '#EC4899','#14B8A6','#F97316','#0EA5E9','#84CC16','#6366F1'
 ]
 
+/* 암호화폐 — 브랜드 컬러 + 기호. 외부 이미지 의존 없이 항상 뜬다. */
+const CRYPTO_BG = {
+  BTC: '#F7931A', ETH: '#627EEA', XRP: '#23292F', SOL: '#9945FF',
+  ADA: '#0033AD', DOGE: '#C2A633', AVAX: '#E84142', LINK: '#2A5ADA',
+  DOT: '#E6007A', MATIC: '#8247E5', TRX: '#EB0029', BCH: '#8DC351',
+  LTC: '#345D9D', ATOM: '#2E3148', UNI: '#FF007A', ETC: '#328332',
+}
+const CRYPTO_MARK = { BTC: '₿', ETH: 'Ξ', XRP: 'XRP', LTC: 'Ł', DOGE: 'Ð' }
+
 function hashColor(str) {
   return BADGE_COLORS[str.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % BADGE_COLORS.length]
 }
@@ -68,6 +77,23 @@ export default function LogoCircle({ ticker, size = 42 }) {
           }}
           alt={code}
         />
+      </div>
+    )
+  }
+
+  /* ── 암호화폐: 'BTC-USD' → 코인 심볼 아이콘. 미국기 폴백은 틀린 표시다 ── */
+  const cryptoBase = /^([A-Z]{2,6})-USD$/.exec(t)?.[1]
+  if (cryptoBase) {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: '50%',
+        background: CRYPTO_BG[cryptoBase] || color,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, color: '#fff',
+        fontSize: Math.max(9, Math.round(size * 0.30)), fontWeight: 800,
+        letterSpacing: '-.02em',
+      }} title={t}>
+        {CRYPTO_MARK[cryptoBase] || cryptoBase.slice(0, 3)}
       </div>
     )
   }

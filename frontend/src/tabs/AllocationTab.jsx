@@ -15,7 +15,7 @@ import DividendsCard from '../components/DividendsCard'
 import PortfolioSummaryBanner from '../components/PortfolioSummaryBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
-import { effPrice, priceableTickers } from '../utils/effPrice'
+import { effPrice, priceableTickers, qtyUnit } from '../utils/effPrice'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import './TrendsTab.css'   // tt-ai-widget 스타일 공유 사용
 
@@ -626,7 +626,7 @@ export default function AllocationTab() {
                     </span>
                     {d.quantity != null && view === '종목별' && (
                       <span style={{ fontSize: 11, color: 'var(--clr-text-muted)', minWidth: 36 }}>
-                        {d.quantity}주
+                        {Number(d.quantity).toLocaleString(undefined, { maximumFractionDigits: 8 })}{qtyUnit(d)}
                       </span>
                     )}
                     <span style={{ fontSize: 12, color: 'var(--clr-text-muted)', minWidth: 36, textAlign: 'right' }}>

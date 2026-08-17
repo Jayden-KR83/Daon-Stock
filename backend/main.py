@@ -798,7 +798,45 @@ def kr_code(ticker: str) -> str:
 ASSET_LISTED_STOCK = 'LISTED_STOCK'
 ASSET_LISTED_ETF   = 'LISTED_ETF'
 ASSET_UNLISTED_FUND = 'UNLISTED_FUND'
-ASSET_TYPES = (ASSET_LISTED_STOCK, ASSET_LISTED_ETF, ASSET_UNLISTED_FUND)
+ASSET_CRYPTO        = 'CRYPTO'
+ASSET_TYPES = (ASSET_LISTED_STOCK, ASSET_LISTED_ETF, ASSET_UNLISTED_FUND, ASSET_CRYPTO)
+
+# ─── 암호화폐 ──────────────────────────────────────────────────────
+# 야후 표기는 'BTC-USD' 형태. 'BTC' 만 저장하면 검증은 통과하지만 시세가 안 나와
+# 조용히 무시세 보유가 된다(447180 사고와 같은 유형) → 저장 시 정규화한다.
+#
+# ⚠️ 원화쌍('BTC-KRW')도 야후가 주지만 채택하지 않는다. 그 티커가 KRW 표시임을
+# 앱 전체(환율 곱하는 자리 전부)에 알려야 하는데, is_kr 은 '한국 상장 종목'
+# (→ Naver 스크래핑 경로) 판정도 겸하고 있어 두 의미를 섞으면 위험하다.
+# 실측(2026-08-02) 두 방식 차이는 0.06% 로, 그 위험을 감수할 이득이 없다.
+CRYPTO_SYMBOLS = {
+    'BTC': '비트코인', 'ETH': '이더리움', 'XRP': '리플', 'SOL': '솔라나',
+    'ADA': '에이다', 'DOGE': '도지코인', 'AVAX': '아발란체', 'LINK': '체인링크',
+    'DOT': '폴카닷', 'MATIC': '폴리곤', 'TRX': '트론', 'BCH': '비트코인캐시',
+    'LTC': '라이트코인', 'ATOM': '코스모스', 'UNI': '유니스왑', 'ETC': '이더리움클래식',
+}
+
+
+def normalize_crypto(ticker: str) -> str:
+    """'BTC' / 'btc-usd' → 'BTC-USD'. 암호화폐가 아니면 원본 그대로(대문자화만)."""
+    t = str(ticker or '').strip().upper()
+    if t in CRYPTO_SYMBOLS:
+        return f'{t}-USD'
+    if t.endswith('-USD') and t[:-4] in CRYPTO_SYMBOLS:
+        return t
+    return t
+
+
+def is_crypto(ticker: str) -> bool:
+    t = str(ticker or '').upper()
+    base = t[:-4] if t.endswith('-USD') else t
+    return base in CRYPTO_SYMBOLS
+
+
+def crypto_name(ticker: str) -> str:
+    t = str(ticker or '').upper()
+    base = t[:-4] if t.endswith('-USD') else t
+    return CRYPTO_SYMBOLS.get(base, '')
 
 
 def is_unlisted(asset_type: str) -> bool:
@@ -855,6 +893,28 @@ def lookup_kr_master(ticker: str) -> dict | None:
     return info
 
 
+_FOREIGN_EXISTS: dict = {}      # 티커 -> (검증시각, True/False)
+
+
+def _foreign_ticker_exists(ticker: str):
+    """해외 티커에 실제 시세가 있는가. True/False, 네트워크 실패 시 None(판단 보류).
+
+    TTL 캐시 — 같은 티커를 반복 저장해도 야후를 매번 두드리지 않는다.
+    """
+    t = str(ticker).upper()
+    now = time()
+    hit = _FOREIGN_EXISTS.get(t)
+    if hit and now - hit[0] < _master_ttl():
+        return hit[1]
+    try:
+        res = _yf_chart(t, '5d', '1d')
+        exists = bool(res and (res.get('indicators', {}) or {}).get('quote'))
+    except Exception:
+        return None                     # 네트워크 실패는 '없음'이 아니다
+    _FOREIGN_EXISTS[t] = (now, exists)
+    return exists
+
+
 def validate_ticker(ticker: str, asset_type: str = '') -> tuple[bool, str]:
     """(통과여부, 사유). 저장 전 호출.
 
@@ -874,9 +934,18 @@ def validate_ticker(ticker: str, asset_type: str = '') -> tuple[bool, str]:
         # 해외 티커로 흘려보내면 검증을 그냥 통과해 버린다(예: '0131V' 5자리).
         if t[0].isdigit() or (t.startswith('A') and len(t) > 1 and t[1].isdigit()):
             return False, f'한국 종목코드 형식이 아닙니다(A접두 제외 6자리): {t}'
-        if not re.match(r'^[A-Z0-9.\-]{1,10}$', t):
+        if not re.match(r'^[A-Z0-9.\-]{1,12}$', t):
             return False, f'올바르지 않은 티커 형식입니다: {t}'
-        return True, '해외 종목 — 형식 검사만'
+        # 형식만 보고 통과시키면 'BTC'(→ BTC-USD 여야 함)나 오타 티커가
+        # 조용히 무시세 보유로 남는다(447180 사고와 같은 유형).
+        # 야후에 실제로 시세가 있는지 1회 확인하고 캐시한다.
+        ok_live = _foreign_ticker_exists(t)
+        if ok_live is False:
+            hint = ''
+            if is_crypto(t) and not t.endswith('-USD'):
+                hint = f" 암호화폐는 '{t}-USD' 형식으로 입력하세요."
+            return False, f'시세를 조회할 수 없는 티커입니다: {t}.{hint}'
+        return True, '해외 종목 — 시세 확인됨' if ok_live else '해외 종목 — 확인 보류(통과)'
     if not is_kr(t):
         return False, f'한국 종목코드 형식이 아닙니다(6자리): {t}'
     info = lookup_kr_master(t)
@@ -3882,6 +3951,14 @@ def add_holding(account: str, h: Holding, cu: dict = Depends(require_approved)):
         valid = _user_account_keys(cu['user_id'])
     if account not in valid:
         raise HTTPException(400, f"존재하지 않는 계좌입니다: {account}")
+    # 'BTC' → 'BTC-USD' 자동 정규화 + 암호화폐면 asset_type/이름 자동 채움
+    h.ticker = normalize_crypto(h.ticker)
+    if is_crypto(h.ticker):
+        h.asset_type = h.asset_type or ASSET_CRYPTO
+        if not (h.name or '').strip():
+            h.name = crypto_name(h.ticker)
+        if not (h.sector or '').strip():
+            h.sector = '암호화폐'
     ok, why = validate_ticker(h.ticker, h.asset_type)
     if not ok:
         raise HTTPException(400, why)
@@ -3905,6 +3982,9 @@ def del_holding(account: str, ticker: str, cu: dict = Depends(get_current_user))
 
 @app.post("/api/watchlist/add")
 def add_watchlist(item: WatchlistItem, cu: dict = Depends(get_current_user)):
+    item.ticker = normalize_crypto(item.ticker)
+    if is_crypto(item.ticker) and not (item.name or '').strip():
+        item.name = crypto_name(item.ticker)
     ok, why = validate_ticker(item.ticker)
     if not ok:
         raise HTTPException(400, why)
