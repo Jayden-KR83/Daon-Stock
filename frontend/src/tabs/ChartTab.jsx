@@ -1056,7 +1056,7 @@ function AiStockResult({ data, isUs, cur }) {
         style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}
       >
         <span style={{ fontSize: 16, fontWeight: 900, color: recColor, border: `2px solid ${recColor}`,
-          borderRadius: 8, padding: '3px 12px' }}>{data.recommendation}</span>
+          borderRadius: 4, padding: '3px 12px' }}>{data.recommendation}</span>
         {data.priceTarget > 0 && (
           <span style={{ fontSize: 12, color: 'var(--clr-text-sub)' }}>
             목표가: <NumberTicker value={data.priceTarget} format={fmtTarget} duration={1.0} />
@@ -1078,16 +1078,11 @@ function AiStockResult({ data, isUs, cur }) {
         </span>
       </motion.div>
 
-      {/* 핵심 요약 */}
+      {/* 핵심 요약 — 리포트의 첫 블록. 항상 펼침(접히면 결론부터 사라진다) */}
       {data.summary && (
-        <motion.p
-          variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
-          transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-          style={{ fontSize: 13, color: 'var(--clr-text)', lineHeight: 1.7, marginBottom: 12,
-            whiteSpace: 'pre-wrap' }}
-        >
-          {breakSentences(data.summary)}
-        </motion.p>
+        <Section title="핵심 요약" collapsible={false}>
+          <p style={{ ...proseStyle, fontSize: 13 }}>{breakSentences(data.summary)}</p>
+        </Section>
       )}
 
       {/* ── 본문: 번호 매긴 보고서 섹션 (존재하는 것만 01·02… 순번 통일) ── */}
@@ -1128,25 +1123,16 @@ function AiStockResult({ data, isUs, cur }) {
         if (data.bear?.length > 0)
           secs.push({ title: '리스크 요인',
             body: data.bear.map((b, i) => <Bullet key={i}>{b}</Bullet>) })
-        return secs.map((s, i) => (
-          <Section key={s.title} num={i + 1} title={s.title} barColor={s.barColor}>
-            {s.body}
-          </Section>
+        return secs.map(s => (
+          <Section key={s.title} title={s.title}>{s.body}</Section>
         ))
       })()}
 
-      {/* 최종 의견 — Insight Banner (좌측 색띠 = 추천 색) */}
+      {/* 최종 의견 — 리포트의 마지막 블록. 매수/보유/매도는 제목 글자색으로만 표현(R1) */}
       {data.verdict && (
-        <motion.div
-          variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
-          transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-          style={{ padding: '11px 14px', background: 'var(--m-surface-variant)',
-            border: '1px solid var(--m-outline-variant)', borderRadius: 4, marginBottom: 8 }}
-        >
-          <div style={{ fontSize: 10, fontWeight: 800, color: recColor,
-            letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}><SqMark color="currentColor" size={7} /> 투자 의견</div>
+        <Section title="투자 의견" accent={recColor} collapsible={false}>
           <p style={{ ...proseStyle, lineHeight: 1.65 }}>{breakSentences(data.verdict)}</p>
-        </motion.div>
+        </Section>
       )}
 
       {/* 분석 근거·한계 (Reference) — 문장 단위 출처는 불가하나 분석 전체의 근거·범위를 명시 (R6: 문장별 줄바꿈) */}
@@ -1200,9 +1186,27 @@ function SqMark({ color = 'var(--clr-text-secondary)', size = 8 }) {
 }
 
 /* AI 분석 결과 — 접고 펼치는 섹션 카드. 부모 stagger 변형을 따른다.
-   머릿글 = 통일된 ■ 마커(번호·◆ 혼용 폐지). 이모지 없음(디자인 시스템 준수). */
-function Section({ title, num, barColor = 'var(--clr-text-sub)', children, defaultOpen = true }) {
+   ★ 이 컴포넌트가 분석 리포트의 **유일한 머릿글 체계**다.
+   2026-08-18: 이전에는 세 가지가 섞여 있었다 — 핵심 요약은 머릿글이 아예 없고,
+   본문만 이 Section 을 쓰고, 최종 의견은 또 다른 크기·색의 라벨을 따로 그렸다.
+   그래서 읽을 때 어디가 문단 제목인지 뒤죽박죽이었다. 이제 모든 블록이 이걸 쓴다.
+   - 머릿글 = ■ 마커 + 11.5px/800 대문자. 크기·색·마커를 여기 밖에서 다시 정의하지 말 것
+   - 의미(추천 강도 등)는 accent(제목 글자색)로만 표현 — design.md R1(좌측 색띠 금지)
+   - collapsible=false 는 리포트의 처음(요약)·끝(의견)처럼 항상 보여야 하는 블록용 */
+function Section({ title, accent, children, defaultOpen = true, collapsible = true }) {
   const [open, setOpen] = useState(defaultOpen)
+  const shown = collapsible ? open : true
+  const head = (
+    <>
+      <SqMark color={accent || 'var(--clr-text-secondary)'} />
+      <span style={{ fontSize: 11.5, fontWeight: 800, color: accent || 'var(--clr-text)',
+        letterSpacing: '.02em', textTransform: 'uppercase' }}>{title}</span>
+      {collapsible && (
+        <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--clr-text-muted)',
+          transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▼</span>
+      )}
+    </>
+  )
   return (
     <motion.div
       variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
@@ -1211,19 +1215,19 @@ function Section({ title, num, barColor = 'var(--clr-text-sub)', children, defau
       background: 'var(--clr-surface)', borderRadius: 4, padding: '11px 14px',
       marginBottom: 8, border: '1px solid var(--m-outline-variant)',
     }}>
-      <button onClick={() => setOpen(o => !o)}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-          fontFamily: 'inherit', textAlign: 'left',
-        }}>
-        <SqMark />
-        <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--clr-text)',
-          letterSpacing: '.02em', textTransform: 'uppercase' }}>{title}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--clr-text-muted)',
-          transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▼</span>
-      </button>
-      {open && <div style={{ marginTop: 9 }}>{children}</div>}
+      {collapsible ? (
+        <button onClick={() => setOpen(o => !o)}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+            fontFamily: 'inherit', textAlign: 'left',
+          }}>
+          {head}
+        </button>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{head}</div>
+      )}
+      {shown && <div style={{ marginTop: 9 }}>{children}</div>}
     </motion.div>
   )
 }

@@ -1376,8 +1376,7 @@ function DaonAIReport({ data, computedAt = 0 }) {
           {data.dividend_simulation.warning && (
             <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--m-surface-variant)',
               border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--m-negative)',
-                letterSpacing: '.03em', marginBottom: 3 }}>월가의 경고</div>
+              <SubLabel tone="negative">월가의 경고</SubLabel>
               <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)',
                 lineHeight: 1.6, whiteSpace: 'pre-line' }}>
                 {breakSentences(String(data.dividend_simulation.warning).replace(/^\s*\[?월가의 경고\]?\s*[:·-]?\s*/, ''))}
@@ -1390,7 +1389,7 @@ function DaonAIReport({ data, computedAt = 0 }) {
       {/* 매크로 뷰 */}
       {data.macro_view && (
         <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-title" style={{ marginBottom: 8 }}>
+          <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>
             글로벌 매크로 포지셔닝
           </div>
           <BulletList items={splitToSentences(data.macro_view)}
@@ -1441,14 +1440,13 @@ function DaonAIReport({ data, computedAt = 0 }) {
             </span>
           </div>
 
-          {/* 리밸런싱 = 비중 조정 제안 (좌측 띠 banner — design.md R1) */}
+          {/* 리밸런싱 = 비중 조정 제안 (4면 hairline 박스 — design.md R1) */}
           {data.rebalancing && (
             <div style={{ marginBottom: data.actions?.length > 0 ? 12 : 0,
               background: 'var(--m-surface-variant)',
               border: '1px solid var(--m-outline-variant)',
               borderRadius: 4, padding: '8px 12px' }}>
-              <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--m-positive)',
-                letterSpacing: '.03em', marginBottom: 4 }}>리밸런싱 · 비중 조정</div>
+              <SubLabel tone="positive">리밸런싱 · 비중 조정</SubLabel>
               <BulletList items={splitToSentences(data.rebalancing)}
                 color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" small />
             </div>
@@ -1491,6 +1489,21 @@ function DaonAIReport({ data, computedAt = 0 }) {
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
+  )
+}
+
+/* 섹션 안의 2단계 소제목(월가의 경고·리밸런싱 등).
+   왜 컴포넌트인가: 같은 10.5px/800 라벨을 각자 인라인으로 적어두면 손댈 때마다
+   조금씩 달라져 결국 머릿글이 뒤죽박죽이 된다(2026-08-18 오너 지적).
+   1단계 = .mono-section-title, 2단계 = 이것. 그 밖의 제목 스타일을 새로 만들지 말 것.
+   의미(위험/긍정)는 tone(글자색)으로만 — design.md R1(좌측 색띠 금지). */
+function SubLabel({ children, tone = 'neutral' }) {
+  const color = tone === 'negative' ? 'var(--m-negative)'
+              : tone === 'positive' ? 'var(--m-positive)'
+              : 'var(--m-text-secondary)'
+  return (
+    <div style={{ fontSize: 10.5, fontWeight: 800, color,
+      letterSpacing: '.03em', marginBottom: 4 }}>{children}</div>
   )
 }
 
