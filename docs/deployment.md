@@ -79,17 +79,21 @@ WantedBy=multi-user.target
 # 일별 KST 07:00(UTC 22:00) — 신규 종목 발굴 GARP 스캔 (US 마감 후·저트래픽, 공용 캐시)
 # 주의: 월요일 09:00 UTC 리밸런싱과 시간 분리 — 두 무거운 작업 동시 실행 시 1GB VM OOM 위험
 0 22 * * * /usr/local/bin/daon-discover-scan.sh
-# 일별 KST 04:00(UTC 19:00) — 보유 종목 AI 분석 갱신 (웹 검색, ai_enabled 사용자)
-# 주의: 22:00 UTC 발굴 스캔·09:00 UTC 리밸런싱과 3시간 이상 간격 — 1GB VM OOM 회피
-0 19 * * * /usr/local/bin/daon-refresh-holdings.sh
+# 일별 KST 05:00(UTC 20:00) — 보유 종목 AI 분석 갱신 (웹 검색, ai_enabled 사용자)
+# 주의: 19:00 UTC 는 **이미 DB 백업이 쓰고 있다**(daon-backup.sh). 22:00 UTC 발굴 스캔과도
+# 2시간 띄운다 — 1GB VM 에서 무거운 작업 2개가 겹치면 OOM 위험
+0 20 * * * /usr/local/bin/daon-refresh-holdings.sh
 ```
 
-**daon-refresh-holdings.sh** (신규 — `/usr/local/bin/`, 실행권한 필요):
+**daon-refresh-holdings.sh** (신규 — `/usr/local/bin/`, 실행권한 필요).
+시크릿은 기존 `daon-check-alerts.sh` 와 같은 방식으로 스크립트에 직접 적는다
+(서버 안에서만 읽히고 root 소유 파일이다):
 
 ```bash
 #!/bin/sh
 # 보유 종목 AI 분석 일 1회 갱신. max_tickers 로 1회 비용 상한을 건다.
-curl -fsS -X POST http://127.0.0.1:8501/api/cron/refresh_holdings_analysis   -H 'Content-Type: application/json'   -d "{\"cron_secret\":\"$DAON_CRON_SECRET\",\"max_tickers\":12,\"min_age_hours\":20}"
+curl -fsS -X POST http://127.0.0.1:8501/api/cron/refresh_holdings_analysis   -H 'Content-Type: application/json'   -d "{\"cron_secret\":\"<서버의 기존 cron_secret 과 동일한 값>\",\"max_tickers\":12,\"min_age_hours\":20}" \
+  >> /var/log/daon-refresh.log 2>&1
 ```
 
 - **비용**: 1종목당 web_search 약 4회(1,000건당 $10 → 약 $0.04) + Sonnet 토큰.
