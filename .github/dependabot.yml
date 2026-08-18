@@ -1,0 +1,40 @@
+# Dependabot — 외부 라이브러리에 보안 구멍이 생기면 자동으로 PR 을 올려준다.
+# 2026-08-18 추가. 그전까지 의존성 취약점을 추적하는 장치가 아예 없었다.
+#
+# ⚠️ 이 파일은 '버전 업데이트 PR' 만 켠다. **보안 경보(Dependabot alerts)** 는 리포 설정의
+#    별도 스위치라 웹에서 한 번 켜야 한다:
+#    Settings → Code security → Dependabot alerts → Enable
+version: 2
+updates:
+  # 백엔드 (FastAPI 등)
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3      # PR 폭탄 방지 — 개인 프로젝트라 3개면 충분
+    commit-message:
+      prefix: "chore(deps)"
+
+  # 프론트엔드 (React·Vite)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # 마이너·패치는 한 PR 로 묶는다. 개별 PR 이 쏟아지면 결국 아무도 안 본다.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # 스모크 테스트 스크립트 (puppeteer-core)
+  - package-ecosystem: "npm"
+    directory: "/scripts"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"
