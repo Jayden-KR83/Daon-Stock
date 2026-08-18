@@ -87,3 +87,31 @@ class TestValidator:
             assert ok and '보류' in why
         finally:
             main._yf_chart = orig
+
+
+class TestKrwAvgPriceRecord:
+    """원화 평단 입력(업비트 등)의 '입력 원본' 기록이 보존되는가.
+
+    프론트는 원화 평단 ÷ 매수시점 환율 = avg_price(달러) 로 환산해 저장하고,
+    원본 두 값을 krw_avg_price / krw_fx 에 남긴다. 계산에는 쓰이지 않지만
+    재편집·감사에 필요해서, 모델이 이 필드를 조용히 버리면 안 된다.
+    """
+
+    def test_holding_keeps_krw_record(self):
+        h = main.Holding(ticker='BTC-USD', name='비트코인', quantity=0.05,
+                         avg_price=64963.77, krw_avg_price=89_000_000, krw_fx=1370)
+        d = h.model_dump()
+        assert d['krw_avg_price'] == 89_000_000
+        assert d['krw_fx'] == 1370
+
+    def test_krw_record_defaults_to_zero(self):
+        """기존 보유(원화 입력 안 씀)는 0 — '미사용'을 뜻한다."""
+        h = main.Holding(ticker='AAPL', name='Apple', quantity=10, avg_price=180.5)
+        assert h.krw_avg_price == 0 and h.krw_fx == 0
+
+    def test_conversion_is_reproducible_from_record(self):
+        """기록만으로 avg_price 를 다시 만들 수 있어야 재편집이 성립한다."""
+        krw, fx = 89_000_000, 1370
+        h = main.Holding(ticker='BTC-USD', name='비트코인', quantity=0.05,
+                         avg_price=round(krw / fx, 8), krw_avg_price=krw, krw_fx=fx)
+        assert abs(h.krw_avg_price / h.krw_fx - h.avg_price) < 1e-6

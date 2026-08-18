@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPortfolio, savePortfolio } from '../api'
+import { getPortfolio, savePortfolio, getUsdKrw } from '../api'
 import { useAccounts } from '../utils/accounts'
 import * as XLSX from 'xlsx'
 
@@ -26,6 +26,8 @@ function rowsFromPortfolio(pf) {
         ticker: h.ticker || '', name: h.name || '',
         quantity: h.quantity ?? '', avg_price: h.avg_price ?? '',
         sector: h.sector || '',
+        // 원화 평단 입력 기록(있으면) — 저장 때 그대로 되돌려줘야 재편집이 된다
+        krw_avg_price: h.krw_avg_price || 0, krw_fx: h.krw_fx || 0,
       })
     }
   }
@@ -38,11 +40,15 @@ export default function AddTab() {
   const ACC_NAME_TO_KEY = React.useMemo(
     () => Object.fromEntries(accounts.map(a => [a.label, a.key])), [accounts])
   const { data: portfolio } = useQuery({ queryKey: ['portfolio'], queryFn: getPortfolio })
+  const { data: fx } = useQuery({ queryKey: ['usdkrw'], queryFn: getUsdKrw, staleTime: 5 * 60_000 })
+  const nowRate = Number(fx?.rate) || 0
 
   const [rows, setRows] = useState([])
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState(null)   // { type:'ok'|'err', text }
   const [dirty, setDirty] = useState(false)
+  // 원화 평단 환산기 — 열려 있는 행 하나만. { _k, krw, rate }
+  const [fxEdit, setFxEdit] = useState(null)
   const loadedRef = useRef(false)
   const fileRef = useRef(null)
 
@@ -59,16 +65,48 @@ export default function AddTab() {
     setDirty(false); setMsg(null)
   }
   function setCell(k, field, value) {
-    setRows(rs => rs.map(r => r._k === k ? { ...r, [field]: value } : r))
+    setRows(rs => rs.map(r => {
+      if (r._k !== k) return r
+      // 평단가를 손으로 고치면 '원화로 넣었다'는 기록은 더 이상 사실이 아니다 → 흔적 제거
+      const drop = field === 'avg_price' ? { krw_avg_price: 0, krw_fx: 0 } : null
+      return { ...r, [field]: value, ...(drop || {}) }
+    }))
     setDirty(true); setMsg(null)
   }
   function addRow() {
     setRows(rs => [...rs, {
       _k: ++_uid, account: accounts[0]?.key || ACCOUNTS[0] || '',
       ticker: '', name: '', quantity: '', avg_price: '', sector: '',
+      krw_avg_price: 0, krw_fx: 0,
     }])
     setDirty(true); setMsg(null)
   }
+  /* ── 원화 평단 → 달러 평단 환산 ──────────────────────────────
+     왜 필요한가: 업비트는 원화로 매수하는데 앱은 BTC-USD(달러 표시)로 시세를 받는다.
+     오너가 매번 손으로 나눠 넣던 것을 폼이 대신한다.
+     왜 '매수 시점' 환율인가: 현재 환율로 나누면 환율이 움직일 때마다 과거 매수 원가가
+     따라 흔들린다. 매수 시점 환율로 한 번 확정하면 avg_price(달러)는 그대로 고정된다.
+     — 이건 앱이 이미 미국 주식을 다루는 방식과 같다(원가는 달러, 평가만 현재 환율). */
+  function openFx(r) {
+    setFxEdit({
+      _k: r._k,
+      krw:  r.krw_avg_price > 0 ? String(r.krw_avg_price) : '',
+      rate: String(r.krw_fx > 0 ? r.krw_fx : (nowRate || '')),
+    })
+  }
+  function applyFx() {
+    const krw = parseFloat(fxEdit?.krw), rate = parseFloat(fxEdit?.rate)
+    if (!(krw > 0) || !(rate > 0)) {
+      setMsg({ type: 'err', text: '원화 평단과 환율을 모두 0보다 큰 값으로 입력하세요.' }); return
+    }
+    // 8자리: 사토시 단위(1e-8) 자산에서 반올림 손실이 보이지 않을 만큼
+    const usd = Math.round((krw / rate) * 1e8) / 1e8
+    setRows(rs => rs.map(r => r._k === fxEdit._k
+      ? { ...r, avg_price: usd, krw_avg_price: krw, krw_fx: rate } : r))
+    setFxEdit(null); setDirty(true)
+    setMsg({ type: 'ok', text: `원화 ${krw.toLocaleString()}원 ÷ ${rate.toLocaleString()} = $${usd.toLocaleString(undefined, { maximumFractionDigits: 8 })} 로 평단가를 채웠습니다. 아래 저장을 누르세요.` })
+  }
+
   function removeRow(k) {
     setRows(rs => rs.filter(r => r._k !== k))
     setDirty(true); setMsg(null)
@@ -94,11 +132,15 @@ export default function AddTab() {
         setMsg({ type: 'err', text: `${ACC_LABELS[r.account]} · ${ticker}: 같은 계좌에 중복된 종목이 있습니다.` }); return
       }
       seen.add(dupKey)
-      cleaned.push({
+      const rec = {
         account: r.account, ticker,
         name: String(r.name || '').trim() || ticker,
         quantity: qty, avg_price: avg, sector: String(r.sector || '').trim(),
-      })
+      }
+      if (r.krw_avg_price > 0 && r.krw_fx > 0) {
+        rec.krw_avg_price = Number(r.krw_avg_price); rec.krw_fx = Number(r.krw_fx)
+      }
+      cleaned.push(rec)
     }
 
     // 2) 계좌별 그룹핑 (모든 계좌 키 포함 — 비운 계좌는 [])
@@ -201,6 +243,7 @@ export default function AddTab() {
   }
 
   const filledCount = rows.filter(r => String(r.ticker || '').trim()).length
+  const fxRow = fxEdit ? rows.find(r => r._k === fxEdit._k) : null
 
   return (
     <div style={{ paddingTop: 8 }}>
@@ -260,8 +303,25 @@ export default function AddTab() {
                     onChange={e => setCell(r._k, 'quantity', e.target.value)} />
                 </td>
                 <td className="num">
-                  <input value={r.avg_price} type="number" step="any" inputMode="decimal" placeholder="150"
-                    onChange={e => setCell(r._k, 'avg_price', e.target.value)} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                    <input value={r.avg_price} type="number" step="any" inputMode="decimal" placeholder="150"
+                      style={{ minWidth: 0 }}
+                      onChange={e => setCell(r._k, 'avg_price', e.target.value)} />
+                    {/* 달러 표시 종목(암호화폐·해외주식)만 — 한국 종목은 이미 원화라 필요 없다 */}
+                    {!KR_RE.test(String(r.ticker).trim().toUpperCase()) && String(r.ticker).trim() && (
+                      <button type="button" onClick={() => openFx(r)}
+                        title={r.krw_fx > 0
+                          ? `원화 ${Number(r.krw_avg_price).toLocaleString()}원 ÷ 환율 ${Number(r.krw_fx).toLocaleString()} 으로 입력함 — 눌러서 수정`
+                          : '원화 평단으로 입력하기 (업비트 등)'}
+                        style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 4, padding: 0,
+                          border: '1px solid var(--clr-border-md)', cursor: 'pointer',
+                          background: r.krw_fx > 0 ? 'var(--clr-pos-bg-soft)' : 'transparent',
+                          color: r.krw_fx > 0 ? 'var(--clr-pos-darker)' : 'var(--clr-text-muted)',
+                          fontSize: 11.5, fontWeight: 800, fontFamily: 'inherit', lineHeight: 1 }}>
+                        ₩
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td>
                   <input value={r.sector} placeholder="AI·빅테크"
@@ -275,6 +335,65 @@ export default function AddTab() {
           </tbody>
         </table>
       </div>
+
+      {/* 원화 평단 환산기 — 표 바깥에 둔다(표는 가로 스크롤 컨테이너) */}
+      {fxRow && (
+        <div className="card" style={{ marginTop: 8, background: 'var(--m-surface-variant)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--clr-text-strong)', marginBottom: 6 }}>
+                원화 평단으로 입력 — {String(fxRow.ticker).trim().toUpperCase()}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <label style={{ flex: '1 1 130px', minWidth: 0, fontSize: 11, color: 'var(--clr-text-muted)' }}>
+                  원화 평균단가 (₩)
+                  <input type="number" step="any" inputMode="decimal" placeholder="89,000,000"
+                    value={fxEdit.krw}
+                    onChange={e => setFxEdit(f => ({ ...f, krw: e.target.value }))}
+                    style={{ width: '100%', marginTop: 3, padding: '7px 8px', borderRadius: 4,
+                      border: '1px solid var(--clr-border-md)', background: 'var(--clr-bg-card)',
+                      color: 'var(--clr-text)', fontSize: 12.5, fontFamily: 'inherit' }} />
+                </label>
+                <label style={{ flex: '1 1 130px', minWidth: 0, fontSize: 11, color: 'var(--clr-text-muted)' }}>
+                  매수 시점 환율 (₩/$)
+                  <input type="number" step="any" inputMode="decimal" placeholder={String(nowRate || 1380)}
+                    value={fxEdit.rate}
+                    onChange={e => setFxEdit(f => ({ ...f, rate: e.target.value }))}
+                    style={{ width: '100%', marginTop: 3, padding: '7px 8px', borderRadius: 4,
+                      border: '1px solid var(--clr-border-md)', background: 'var(--clr-bg-card)',
+                      color: 'var(--clr-text)', fontSize: 12.5, fontFamily: 'inherit' }} />
+                </label>
+              </div>
+              <div style={{ fontSize: 12, marginTop: 8, color: 'var(--clr-text-sub)' }}>
+                환산 평단가{' '}
+                <strong style={{ color: 'var(--clr-text-strong)' }}>
+                  {(parseFloat(fxEdit.krw) > 0 && parseFloat(fxEdit.rate) > 0)
+                    ? '$' + (parseFloat(fxEdit.krw) / parseFloat(fxEdit.rate))
+                        .toLocaleString(undefined, { maximumFractionDigits: 8 })
+                    : '—'}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <button type="button" className="btn-primary" onClick={applyFx}
+                  style={{ width: 'auto', padding: '7px 16px', fontSize: 12.5 }}>
+                  적용
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setFxEdit(null)}>
+                  취소
+                </button>
+                {nowRate > 0 && (
+                  <button type="button" className="btn-secondary"
+                    onClick={() => setFxEdit(f => ({ ...f, rate: String(nowRate) }))}>
+                    오늘 환율 {nowRate.toLocaleString()}
+                  </button>
+                )}
+              </div>
+              <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--clr-text-muted)',
+                marginTop: 8, lineHeight: 1.65 }}>
+                앱은 이 종목을 달러 시세로 받기 때문에 평단가도 달러로 저장합니다.<br />
+                매수 시점 환율로 나누면 원가가 그때 값으로 고정되어, 이후 환율이 움직여도 흔들리지 않습니다.<br />
+                환율을 모르면 오늘 환율을 써도 되지만, 그만큼 원가가 실제와 달라집니다.
+              </div>
+        </div>
+      )}
 
       {/* 행 추가 */}
       <button type="button" onClick={addRow}

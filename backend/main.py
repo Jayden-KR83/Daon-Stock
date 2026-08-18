@@ -3885,6 +3885,11 @@ class Holding(BaseModel):
     asset_type: str = ''      # ''(미지정=상장) | LISTED_STOCK | LISTED_ETF | UNLISTED_FUND
     nav: float | None = None      # 비상장 펀드 기준가(1좌당). None=미수신
     nav_date: str | None = None   # 기준가 기준일 'YYYY-MM-DD'
+    # 원화로 매수한 달러표시 자산(업비트 BTC 등)의 '입력 원본' 기록 — 계산에는 쓰지 않는다.
+    # avg_price(달러)가 여전히 유일한 원가 기준이고, 아래 둘은 재편집·감사용 흔적일 뿐이다.
+    # (환율이 변해도 avg_price 가 흔들리지 않게 하려는 의도. krw_avg_price / krw_fx = avg_price)
+    krw_avg_price: float = 0   # 사용자가 입력한 원화 평단(0=미사용)
+    krw_fx: float = 0          # 그 원화 평단을 나눌 때 쓴 매수시점 환율(0=미사용)
 
 class WatchlistItem(BaseModel):
     ticker: str; name: str; exchange: str = ''; qtype: str = ''
