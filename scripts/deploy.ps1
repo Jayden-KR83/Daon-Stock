@@ -47,9 +47,18 @@ Write-Host "  OK — main.py, requirements.txt" -ForegroundColor Green
 Write-Host "[ 3/4 ] React 빌드 파일 업로드 중..." -ForegroundColor Yellow
 Invoke-Expression "$SCP `"$STATIC\index.html`" `"$STATIC\presentation.html`" ${SERVER}:${REMOTE}/backend/static/"
 if ($LASTEXITCODE -ne 0) { Write-Host "  ERROR: HTML 업로드 실패" -ForegroundColor Red; exit 1 }
+
+# PWA 런타임 — 2026-08-18 사고: 이 블록이 없어서 index.html 만 갱신되고 sw.js 는 서버에
+# 남아 있었다. 서비스워커가 **구버전 번들을 프리캐시**한 채로 계속 서빙 → 설치형(PWA)
+# 사용자만 옛 화면을 보는, 브라우저 새로고침으로는 안 고쳐지는 유형의 버그.
+# workbox-*.js 는 해시가 붙어 파일명이 바뀌므로 와일드카드로 전부 올린다.
+Invoke-Expression "$SCP `"$STATIC\sw.js`" `"$STATIC\push-sw.js`" `"$STATIC\manifest.webmanifest`" ${SERVER}:${REMOTE}/backend/static/"
+if ($LASTEXITCODE -ne 0) { Write-Host "  ERROR: PWA 런타임 업로드 실패" -ForegroundColor Red; exit 1 }
+Invoke-Expression "$SCP `"$STATIC\workbox-*.js`" ${SERVER}:${REMOTE}/backend/static/"
+if ($LASTEXITCODE -ne 0) { Write-Host "  ERROR: workbox 업로드 실패" -ForegroundColor Red; exit 1 }
 Invoke-Expression "$SCP -r `"$STATIC\assets`" ${SERVER}:${REMOTE}/backend/static/"
 if ($LASTEXITCODE -ne 0) { Write-Host "  ERROR: assets 업로드 실패" -ForegroundColor Red; exit 1 }
-Write-Host "  OK — index.html, presentation.html, assets/" -ForegroundColor Green
+Write-Host "  OK — index.html, presentation.html, assets/, sw.js, workbox, manifest" -ForegroundColor Green
 
 # ── 4. 서버 설정 & 재시작 ──
 Write-Host "[ 4/4 ] 서버 서비스 구성 및 재시작 중..." -ForegroundColor Yellow
