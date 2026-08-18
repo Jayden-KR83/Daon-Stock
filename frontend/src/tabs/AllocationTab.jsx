@@ -13,6 +13,7 @@ import HealthScoreCard from '../components/HealthScoreCard'
 import AlertsCard from '../components/AlertsCard'
 import DividendsCard from '../components/DividendsCard'
 import PortfolioSummaryBanner from '../components/PortfolioSummaryBanner'
+import CompassBanner from '../components/CompassBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
 import { effPrice, priceableTickers, qtyUnit } from '../utils/effPrice'
@@ -412,6 +413,9 @@ export default function AllocationTab() {
 
   return (
     <div style={{ paddingTop: 8 }}>
+      {/* 투자 나침반 — 판단이 바뀐 보유 종목이 있을 때만 나타난다(없으면 렌더 0) */}
+      <CompassBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
+
       {/* 한눈에 보이는 포트폴리오 요약 (M3 banner) — 항상 최상단 */}
       {allHoldings.length > 0 && (
         <PortfolioSummaryBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />

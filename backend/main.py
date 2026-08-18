@@ -317,6 +317,22 @@ def _init_db():
             PRIMARY KEY(snapshot_date, ticker)        -- 일자별 랭킹 스냅샷 → 포워드테스트 토대
         );
         CREATE INDEX IF NOT EXISTS idx_dischist_date ON discovery_history(snapshot_date, composite_score DESC);
+        -- 투자 나침반 신호 (설계안 A) — 일 1회 분석 갱신에서 '판단이 바뀐 순간'만 남긴다.
+        -- 종목 단위(사용자 무관)라 개인정보가 없다. '내 포트폴리오 의미'는 프론트가
+        -- 보유·시세와 교차해 비중을 계산하는 방식으로 붙인다.
+        -- 왜 신호만 남기나: 매일 쏟아지는 요약을 다 보여주면 그게 곧 정보 과부하다.
+        -- '어제 보유 → 오늘 매도'처럼 **바뀐 것**만이 행동을 바꾼다.
+        CREATE TABLE IF NOT EXISTS compass_signals (
+            ticker      TEXT NOT NULL,
+            changed_at  REAL NOT NULL,
+            name        TEXT NOT NULL DEFAULT '',
+            prev_reco   TEXT NOT NULL DEFAULT '',   -- 직전 추천 ('' = 첫 분석)
+            new_reco    TEXT NOT NULL DEFAULT '',
+            headline    TEXT NOT NULL DEFAULT '',   -- 근거 1문장 (분석 summary 첫 문장)
+            source_url  TEXT NOT NULL DEFAULT '',   -- 출처 없으면 표시하지 않는다는 규율
+            PRIMARY KEY(ticker, changed_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_compass_time ON compass_signals(changed_at DESC);
         """)
 
 _init_db()
@@ -8107,6 +8123,65 @@ def _holdings_tickers_for_refresh(user_ids: list) -> list:
     return [(t, n) for t, n in seen.items()]
 
 
+_SENT_END = re.compile(r'(?<=[.!?])\s+')
+
+
+def _first_sentence(text: str, limit: int = 160) -> str:
+    """근거 1문장. 숫자 소수점에 걸리지 않도록 문장부호+공백을 경계로 삼는다."""
+    t = ' '.join(str(text or '').split())
+    if not t:
+        return ''
+    first = _SENT_END.split(t, 1)[0]
+    return first if len(first) <= limit else first[:limit - 1] + '…'
+
+
+def _record_compass_signal(ticker: str, name: str, prev_reco: str, res: dict) -> bool:
+    """추천이 바뀐 순간만 나침반 신호로 남긴다. 남겼으면 True.
+
+    왜 '바뀐 것'만인가: 매일 갱신되는 요약을 전부 띄우면 그게 곧 정보 과부하다.
+    보유→매도처럼 **판단이 뒤집힌 순간**만이 사용자의 행동을 바꾼다.
+    출처가 없으면 기록하지 않는다 — 근거 없는 제안은 나침반이 아니라 소음이다.
+    """
+    new_reco = str(res.get('recommendation') or '').strip()
+    if not new_reco or new_reco == (prev_reco or '').strip():
+        return False
+    sources = res.get('sources') or []
+    url = ''
+    if isinstance(sources, list) and sources and isinstance(sources[0], dict):
+        url = str(sources[0].get('url') or '')
+    if not url:
+        return False
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO compass_signals"
+                "(ticker,changed_at,name,prev_reco,new_reco,headline,source_url) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (ticker.upper(), time(), name or '', prev_reco or '', new_reco,
+                 _first_sentence(res.get('summary')), url)
+            )
+        return True
+    except Exception:
+        return False
+
+
+@app.get("/api/compass/signals")
+def get_compass_signals(days: float = 3.0, cu: dict = Depends(get_current_user)):
+    """최근 나침반 신호. 종목 단위(사용자 무관) — '내 보유와의 교차'는 프론트가 한다.
+
+    프론트가 이미 보유·시세·환율을 쥐고 있으므로, 비중 계산을 서버로 옮기면
+    같은 계산이 두 곳에 생긴다. 여기서는 신호만 준다.
+    """
+    since = time() - max(0.0, float(days)) * 86400.0
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ticker,changed_at,name,prev_reco,new_reco,headline,source_url "
+            "FROM compass_signals WHERE changed_at>=? ORDER BY changed_at DESC LIMIT 30",
+            (since,)
+        ).fetchall()
+    return {'signals': [dict(r) for r in rows]}
+
+
 @app.post("/api/cron/refresh_holdings_analysis")
 def cron_refresh_holdings_analysis(req: RefreshHoldingsReq):
     """일 1회 cron 호출. 보유 종목 AI 분석을 웹 검색으로 갱신."""
@@ -8140,11 +8215,16 @@ def cron_refresh_holdings_analysis(req: RefreshHoldingsReq):
     aged.sort(key=lambda x: x[0])          # ts 오름차순 = 가장 오래된 분석 먼저
 
     targets = aged[:max(0, int(req.max_tickers))]
-    refreshed, failed = 0, []
+    refreshed, signals, failed = 0, 0, []
     for _ts, t, name in targets:
         try:
-            _generate_stock_analysis(t, name, api_key)
+            # 갱신 '전' 추천을 먼저 읽어둔다 — 캐시는 덮어쓰기라 이후엔 알 수 없다
+            prev, _ = _get_stock_cache_by_ticker(t)
+            prev_reco = str((prev or {}).get('recommendation') or '')
+            res = _generate_stock_analysis(t, name, api_key)
             refreshed += 1
+            if _record_compass_signal(t, name, prev_reco, res):
+                signals += 1
         except Exception as e:
             failed.append({'ticker': t, 'error': str(e)[:200]})
 
@@ -8153,10 +8233,11 @@ def cron_refresh_holdings_analysis(req: RefreshHoldingsReq):
     # 배치가 실제 사용자의 월 무료 쿼터를 갉아먹으면 안 된다.
     _log_event('__cron__', 'cron_holdings_refresh', {
         'refreshed': refreshed, 'candidates': len(candidates),
-        'due': len(aged), 'failed_count': len(failed),
+        'due': len(aged), 'signals': signals, 'failed_count': len(failed),
     })
     return {
         'refreshed':  refreshed,
+        'signals':    signals,
         'candidates': len(candidates),
         'due':        len(aged),
         'skipped_recent': len(candidates) - len(aged),

@@ -202,4 +202,8 @@ export const upsertGoal  = (body) => api.post('/goals', body).then(r => r.data)
 export const deleteGoal  = (id)   => api.delete(`/goals/${id}`).then(r => r.data)
 export const projectGoal = (body) => api.post('/goals/project', body).then(r => r.data)
 
+// 투자 나침반 — 최근 '판단이 바뀐' 신호 (종목 단위, 사용자 무관)
+export const getCompassSignals = (days = 3) =>
+  api.get('/compass/signals', { params: { days } }).then(r => r.data)
+
 export default api
