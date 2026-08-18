@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import Depends, FastAPI, Header, HTTPException, Body
+from fastapi import Depends, FastAPI, Header, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -333,6 +333,14 @@ def _init_db():
             PRIMARY KEY(ticker, changed_at)
         );
         CREATE INDEX IF NOT EXISTS idx_compass_time ON compass_signals(changed_at DESC);
+        -- 로그인 시도 기록 (무차별 대입 차단). 성공 시 해당 이메일 기록은 지운다.
+        -- 사용자 1명짜리 앱이라 '계정 하나 뚫림 = 전 재산 내역 유출'이다.
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            key  TEXT NOT NULL,          -- 'email:foo@bar.com' | 'ip:1.2.3.4'
+            ts   REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_login_attempts ON login_attempts(key, ts);
         """)
 
 _init_db()
@@ -1535,15 +1543,90 @@ def auth_demo():
         "demo": True,
     }
 
+# ─── 로그인 무차별 대입 차단 ──────────────────────────────────────
+# 2026-06 보안 감사에서 권고됐으나 미이행 상태로 남아 있던 항목(2026-08-18 구현).
+# 위협모델: 사용자가 사실상 1명이라 '대규모 유출'이 아니라 **계정 하나 탈취 = 전부 상실**이다.
+# Cloudflare WAF 는 조악한 자동화만 막고, 느리게 분산된 시도는 그대로 통과한다.
+LOGIN_WINDOW_SEC   = 15 * 60
+LOGIN_MAX_PER_MAIL = 5     # 한 계정에 대한 시도 — 오탈자 여유는 주되 자동화는 막는 선
+LOGIN_MAX_PER_IP   = 20    # 여러 계정을 훑는 시도까지 잡는 상위 그물
+
+
+def _client_ip(request: Request) -> str:
+    """실제 클라이언트 IP. Cloudflare 뒤에 있으므로 CF 헤더를 우선한다.
+
+    주의: 이 헤더들은 위조 가능하다. 앞단이 Cloudflare 라는 전제에서만 신뢰할 수 있고,
+    위조하면 자기 카운터만 흩뜨릴 뿐 남의 계정 잠금(LOGIN_MAX_PER_MAIL)은 못 피한다.
+    """
+    for h in ('cf-connecting-ip', 'x-real-ip'):
+        v = (request.headers.get(h) or '').strip()
+        if v:
+            return v[:64]
+    xff = (request.headers.get('x-forwarded-for') or '').strip()
+    if xff:
+        return xff.split(',')[0].strip()[:64]
+    return (getattr(request.client, 'host', '') or 'unknown')[:64]
+
+
+def _login_lock_remaining(keys: list) -> float:
+    """잠겨 있으면 남은 초, 아니면 0. keys = [('email:x', 5), ('ip:y', 20)]"""
+    now = time()
+    since = now - LOGIN_WINDOW_SEC
+    worst = 0.0
+    with _db() as conn:
+        conn.execute("DELETE FROM login_attempts WHERE ts < ?", (since,))
+        for key, limit in keys:
+            rows = conn.execute(
+                "SELECT ts FROM login_attempts WHERE key=? AND ts>=? ORDER BY ts ASC",
+                (key, since)
+            ).fetchall()
+            if len(rows) >= limit:
+                # 가장 오래된 시도가 창을 벗어나야 다시 시도할 수 있다
+                worst = max(worst, (rows[0]['ts'] + LOGIN_WINDOW_SEC) - now)
+    return max(0.0, worst)
+
+
+def _record_login_failure(email: str, ip: str):
+    now = time()
+    with _db() as conn:
+        conn.executemany("INSERT INTO login_attempts(key,ts) VALUES(?,?)",
+                         [(f'email:{email}', now), (f'ip:{ip}', now)])
+
+
+def _clear_login_failures(email: str):
+    """성공 로그인은 그 계정의 실패 기록을 지운다.
+
+    IP 기록은 **일부러 남긴다** — 한 계정 비밀번호를 아는 공격자가 로그인 성공으로
+    IP 카운터를 초기화한 뒤 다른 계정을 계속 훑는 걸 막는다.
+    """
+    with _db() as conn:
+        conn.execute("DELETE FROM login_attempts WHERE key=?", (f'email:{email}',))
+
+
 @app.post("/api/auth/login")
-def auth_login(req: LoginReq):
+def auth_login(req: LoginReq, request: Request):
     email = req.email.lower().strip()
+    ip    = _client_ip(request)
+
+    # 비밀번호를 검사하기 **전에** 잠금부터 본다 — 검사 자체가 비용(PBKDF2 10만회)이다
+    remain = _login_lock_remaining([(f'email:{email}', LOGIN_MAX_PER_MAIL),
+                                    (f'ip:{ip}',       LOGIN_MAX_PER_IP)])
+    if remain > 0:
+        mins = max(1, int(remain // 60) + 1)
+        _log_event('', 'login_locked', {'email': email, 'ip': ip})
+        raise HTTPException(
+            429,
+            f"로그인 시도가 너무 많습니다 — 약 {mins}분 후 다시 시도해주세요.",
+            headers={"Retry-After": str(int(remain))},
+        )
+
     with _db() as conn:
         row = conn.execute(
             "SELECT user_id, name, pw_hash, status FROM users WHERE email=?", (email,)
         ).fetchone()
     if not row or not _verify_password(req.password, row['pw_hash']):
-        _log_event('', 'login_fail', {'email': email})
+        _record_login_failure(email, ip)
+        _log_event('', 'login_fail', {'email': email, 'ip': ip})
         raise HTTPException(401, "이메일 또는 비밀번호가 올바르지 않습니다")
 
     status = row['status'] if 'status' in row.keys() else 'approved'
@@ -1563,6 +1646,7 @@ def auth_login(req: LoginReq):
             "INSERT INTO sessions(token,user_id,expires) VALUES(?,?,?)",
             (token, row['user_id'], time() + 30 * 86400)
         )
+    _clear_login_failures(email)
     _bump_login(row['user_id'])
     _log_event(row['user_id'], 'login', {})
     return {"token": token, "user": {"user_id": row['user_id'], "email": email, "name": row['name']}}
