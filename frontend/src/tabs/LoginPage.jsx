@@ -27,6 +27,9 @@ export default function LoginPage() {
   const [pwShow, setPwShow] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // 2단계 인증 — 서버가 '2FA_REQUIRED' 를 주면 코드 입력 단계로 넘어간다
+  const [needTotp, setNeedTotp] = useState(false)
+  const [totpCode, setTotpCode] = useState('')
   const [pendingMessage, setPendingMessage] = useState('')
   const authRef = useRef(null)
 
@@ -39,7 +42,9 @@ export default function LoginPage() {
     e.preventDefault()
     setError(''); setPendingMessage(''); setLoading(true)
     try {
-      const body = { email, password, ...(mode === 'register' ? { name, invite_code: inviteCode } : {}) }
+      const body = { email, password,
+        ...(mode === 'login' && totpCode ? { totp_code: totpCode.trim() } : {}),
+        ...(mode === 'register' ? { name, invite_code: inviteCode } : {}) }
       const res = mode === 'login' ? await authLogin(body) : await authRegister(body)
       if (mode === 'register' && (!res.token || res.status === 'pending')) {
         setPendingMessage(res.message || '가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.')
@@ -48,7 +53,13 @@ export default function LoginPage() {
       }
       setAuth(res.token, res.user)
     } catch (err) {
-      setError(err?.response?.data?.detail || '오류가 발생했습니다. 다시 시도해주세요.')
+      const detail = err?.response?.data?.detail || ''
+      if (detail === '2FA_REQUIRED') {
+        // 비밀번호는 맞았고 코드만 남았다 — 화면을 코드 입력 단계로 바꾼다
+        setNeedTotp(true); setError('')
+        return
+      }
+      setError(detail || '오류가 발생했습니다. 다시 시도해주세요.')
     } finally { setLoading(false) }
   }
 
@@ -141,6 +152,19 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
+
+              {mode === 'login' && needTotp && (
+                <div className="dl-field" style={{ marginBottom: 18 }}>
+                  <label className="dl-label">인증 코드</label>
+                  <input className="dl-input" type="text" inputMode="numeric" autoFocus
+                    placeholder="인증 앱의 6자리"
+                    value={totpCode} onChange={e => setTotpCode(e.target.value)}
+                    autoComplete="one-time-code" />
+                  <div style={{ fontSize: 11, color: 'var(--outline)', marginTop: 6, lineHeight: 1.6 }}>
+                    인증 앱을 잃어버렸다면 <strong>복구 코드</strong>를 여기에 그대로 입력하세요.
+                  </div>
+                </div>
+              )}
 
               {mode === 'register' && (
                 <div className="dl-field" style={{ marginBottom: 18 }}>

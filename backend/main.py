@@ -4,7 +4,7 @@ Yahoo Finance v8 chart API 직접 호출 (yfinance 429 문제 완전 해결)
 """
 from __future__ import annotations
 
-import hashlib, json, os, re, secrets, sqlite3, urllib.parse, math, uuid
+import base64, hashlib, hmac, json, os, re, secrets, sqlite3, struct, urllib.parse, math, uuid
 import concurrent.futures as _cf
 from contextlib import contextmanager
 
@@ -369,6 +369,16 @@ def _migrate_schema():
             conn.execute("ALTER TABLE users ADD COLUMN ai_call_count INTEGER NOT NULL DEFAULT 0")
         if 'approved_at' not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN approved_at REAL NOT NULL DEFAULT 0")
+        # 2단계 인증(TOTP). 비밀번호가 통째로 유출돼도 계정이 열리지 않게 하는 마지막 방어선.
+        # ⚠️ 복구 코드를 반드시 함께 발급한다 — 오너는 2026-07 GitHub 2FA 분실로 3주간
+        #    푸시가 막힌 전례가 있다. 인증 앱을 잃으면 끝나는 설계는 이 프로젝트에선 금물이다.
+        if 'totp_secret' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''")
+        if 'totp_enabled' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0")
+        if 'totp_recovery' not in cols:
+            # 복구코드 해시 JSON 배열. 1회용 — 쓰면 목록에서 제거된다
+            conn.execute("ALTER TABLE users ADD COLUMN totp_recovery TEXT NOT NULL DEFAULT '[]'")
         # watchlist 그룹화 (C1)
         wl_cols = {row['name'] for row in conn.execute("PRAGMA table_info(watchlist)").fetchall()}
         if 'group_name' not in wl_cols:
@@ -1325,6 +1335,7 @@ class RegisterReq(BaseModel):
 class LoginReq(BaseModel):
     email: str
     password: str
+    totp_code: str = ''      # 2FA 활성 계정만 필요. 복구 코드도 이 필드로 받는다
 
 def _seed_default_accounts(uid: str):
     """신규 사용자에게 기본 계좌 4종을 시드. 관리자가 승인 시점에 호출."""
@@ -1543,6 +1554,147 @@ def auth_demo():
         "demo": True,
     }
 
+# ─── 2단계 인증 (TOTP, RFC 6238) ──────────────────────────────────
+# 외부 라이브러리를 쓰지 않는다: 서버에 pip 설치를 추가하면 배포·의존성 관리가 늘고,
+# 알고리즘 자체는 표준 hmac/hashlib 로 20줄이면 끝난다(RFC 테스트벡터로 검증).
+TOTP_STEP    = 30    # 초. 인증 앱 표준
+TOTP_DIGITS  = 6
+TOTP_DRIFT   = 1     # 앞뒤 1스텝(±30초) 허용 — 폰 시계 오차 흡수
+RECOVERY_N   = 8     # 복구 코드 개수
+
+
+def _b32_secret() -> str:
+    """인증 앱에 넣을 base32 시크릿 (패딩 없이 — 앱들이 패딩을 싫어한다)."""
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip('=')
+
+
+def _totp_at(secret_b32: str, counter: int) -> str:
+    key = base64.b32decode(secret_b32 + '=' * (-len(secret_b32) % 8), casefold=True)
+    mac = hmac.new(key, struct.pack('>Q', counter), hashlib.sha1).digest()
+    off = mac[-1] & 0x0F
+    code = (struct.unpack('>I', mac[off:off + 4])[0] & 0x7FFFFFFF) % (10 ** TOTP_DIGITS)
+    return str(code).zfill(TOTP_DIGITS)
+
+
+def _totp_verify(secret_b32: str, code: str, now: float = None) -> bool:
+    """시계 오차 ±1스텝 허용. 비교는 compare_digest 로 — 자릿수 일치 여부가
+    응답 시간으로 새어나가지 않게 한다."""
+    code = ''.join(ch for ch in str(code or '') if ch.isdigit())
+    if len(code) != TOTP_DIGITS or not secret_b32:
+        return False
+    ctr = int((now if now is not None else time()) // TOTP_STEP)
+    for d in range(-TOTP_DRIFT, TOTP_DRIFT + 1):
+        if secrets.compare_digest(_totp_at(secret_b32, ctr + d), code):
+            return True
+    return False
+
+
+def _make_recovery_codes() -> tuple:
+    """(사용자에게 보여줄 평문 목록, DB 에 넣을 해시 JSON) — 평문은 이때 딱 한 번만 나간다."""
+    plain = ['-'.join(secrets.token_hex(2) for _ in range(3)) for _ in range(RECOVERY_N)]
+    return plain, json.dumps([_hash_password(c) for c in plain])
+
+
+def _consume_recovery_code(user_id: str, code: str, stored_json: str) -> bool:
+    """복구 코드는 1회용 — 맞으면 목록에서 즉시 제거한다."""
+    code = str(code or '').strip().lower()
+    if not code:
+        return False
+    try:
+        hashes = json.loads(stored_json or '[]')
+    except Exception:
+        return False
+    for h in list(hashes):
+        if _verify_password(code, h):
+            hashes.remove(h)
+            with _db() as conn:
+                conn.execute("UPDATE users SET totp_recovery=? WHERE user_id=?",
+                             (json.dumps(hashes), user_id))
+            return True
+    return False
+
+
+def _totp_uri(email: str, secret_b32: str) -> str:
+    label = urllib.parse.quote(f"다온:{email}")
+    return (f"otpauth://totp/{label}?secret={secret_b32}&issuer="
+            f"{urllib.parse.quote('다온')}&algorithm=SHA1&digits={TOTP_DIGITS}&period={TOTP_STEP}")
+
+
+class TotpCodeReq(BaseModel):
+    code: str = ''
+    password: str = ''
+
+
+@app.post("/api/auth/2fa/setup")
+def totp_setup(cu: dict = Depends(get_current_user)):
+    """시크릿 발급(아직 켜지 않음). 사용자가 코드 1회를 맞혀야 enable 로 넘어간다 —
+    앱에 제대로 등록됐는지 확인하지 않고 켜면 그 자리에서 잠긴다."""
+    with _db() as conn:
+        row = conn.execute("SELECT totp_enabled, email FROM users WHERE user_id=?",
+                           (cu['user_id'],)).fetchone()
+    if row and row['totp_enabled']:
+        raise HTTPException(400, "이미 2단계 인증이 켜져 있습니다. 끄고 다시 설정하세요.")
+    secret = _b32_secret()
+    with _db() as conn:
+        conn.execute("UPDATE users SET totp_secret=? WHERE user_id=?", (secret, cu['user_id']))
+    return {"secret": secret, "otpauth_uri": _totp_uri(row['email'] if row else '', secret),
+            "digits": TOTP_DIGITS, "period": TOTP_STEP}
+
+
+@app.post("/api/auth/2fa/enable")
+def totp_enable(req: TotpCodeReq, cu: dict = Depends(get_current_user)):
+    """코드 검증 후 활성화 + 복구 코드 발급. 복구 코드는 **이 응답에서만** 볼 수 있다."""
+    with _db() as conn:
+        row = conn.execute("SELECT totp_secret, totp_enabled FROM users WHERE user_id=?",
+                           (cu['user_id'],)).fetchone()
+    if not row or not row['totp_secret']:
+        raise HTTPException(400, "먼저 2단계 인증 설정을 시작하세요.")
+    if row['totp_enabled']:
+        raise HTTPException(400, "이미 켜져 있습니다.")
+    if not _totp_verify(row['totp_secret'], req.code):
+        raise HTTPException(400, "코드가 올바르지 않습니다. 인증 앱의 6자리를 다시 확인하세요.")
+    plain, hashed = _make_recovery_codes()
+    with _db() as conn:
+        conn.execute("UPDATE users SET totp_enabled=1, totp_recovery=? WHERE user_id=?",
+                     (hashed, cu['user_id']))
+    _log_event(cu['user_id'], '2fa_enabled', {})
+    return {"ok": True, "recovery_codes": plain,
+            "warning": "이 복구 코드는 지금만 볼 수 있습니다. 인증 앱을 잃으면 이것만이 유일한 복구 수단입니다."}
+
+
+@app.post("/api/auth/2fa/disable")
+def totp_disable(req: TotpCodeReq, cu: dict = Depends(get_current_user)):
+    """끄려면 비밀번호 + (코드 또는 복구코드). 세션만 탈취한 공격자가 못 끄게 한다."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT pw_hash, totp_secret, totp_enabled, totp_recovery FROM users WHERE user_id=?",
+            (cu['user_id'],)).fetchone()
+    if not row or not row['totp_enabled']:
+        raise HTTPException(400, "2단계 인증이 켜져 있지 않습니다.")
+    if not _verify_password(req.password, row['pw_hash']):
+        raise HTTPException(401, "비밀번호가 올바르지 않습니다.")
+    ok = _totp_verify(row['totp_secret'], req.code) or          _consume_recovery_code(cu['user_id'], req.code, row['totp_recovery'])
+    if not ok:
+        raise HTTPException(400, "코드가 올바르지 않습니다.")
+    with _db() as conn:
+        conn.execute("UPDATE users SET totp_enabled=0, totp_secret='', totp_recovery='[]' "
+                     "WHERE user_id=?", (cu['user_id'],))
+    _log_event(cu['user_id'], '2fa_disabled', {})
+    return {"ok": True}
+
+
+@app.get("/api/auth/2fa/status")
+def totp_status(cu: dict = Depends(get_current_user)):
+    with _db() as conn:
+        row = conn.execute("SELECT totp_enabled, totp_recovery FROM users WHERE user_id=?",
+                           (cu['user_id'],)).fetchone()
+    try:
+        left = len(json.loads(row['totp_recovery'] or '[]')) if row else 0
+    except Exception:
+        left = 0
+    return {"enabled": bool(row and row['totp_enabled']), "recovery_left": left}
+
+
 # ─── 로그인 무차별 대입 차단 ──────────────────────────────────────
 # 2026-06 보안 감사에서 권고됐으나 미이행 상태로 남아 있던 항목(2026-08-18 구현).
 # 위협모델: 사용자가 사실상 1명이라 '대규모 유출'이 아니라 **계정 하나 탈취 = 전부 상실**이다.
@@ -1622,12 +1774,28 @@ def auth_login(req: LoginReq, request: Request):
 
     with _db() as conn:
         row = conn.execute(
-            "SELECT user_id, name, pw_hash, status FROM users WHERE email=?", (email,)
+            "SELECT user_id, name, pw_hash, status, totp_enabled, totp_secret, totp_recovery "
+            "FROM users WHERE email=?", (email,)
         ).fetchone()
     if not row or not _verify_password(req.password, row['pw_hash']):
         _record_login_failure(email, ip)
         _log_event('', 'login_fail', {'email': email, 'ip': ip})
         raise HTTPException(401, "이메일 또는 비밀번호가 올바르지 않습니다")
+
+    # ── 2단계 인증 ── 비밀번호가 맞아도 여기서 한 번 더 막는다
+    keys = row.keys()
+    if 'totp_enabled' in keys and row['totp_enabled']:
+        code = str(req.totp_code or '').strip()
+        if not code:
+            # 프론트가 '코드 입력' 화면으로 전환할 수 있도록 식별 가능한 detail 을 준다.
+            # 비밀번호가 맞았다는 사실은 이미 알려진 셈이지만, 2FA 의 목적이 바로
+            # '비밀번호를 알아도 못 들어온다'이므로 이 노출은 설계상 허용된다.
+            raise HTTPException(401, "2FA_REQUIRED")
+        ok = _totp_verify(row['totp_secret'], code) or              _consume_recovery_code(row['user_id'], code, row['totp_recovery'])
+        if not ok:
+            _record_login_failure(email, ip)   # 6자리 무차별 대입도 잠금 대상이다
+            _log_event(row['user_id'], 'login_fail_2fa', {'ip': ip})
+            raise HTTPException(401, "인증 코드가 올바르지 않습니다")
 
     status = row['status'] if 'status' in row.keys() else 'approved'
     if status == 'pending':

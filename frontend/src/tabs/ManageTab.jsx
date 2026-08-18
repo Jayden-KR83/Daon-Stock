@@ -6,6 +6,7 @@ import { getPortfolio, saveApiKey, authLogout,
          getAccounts, addAccount, updateAccount, deleteAccount } from '../api'
 import { useStore } from '../store'
 import { useAccounts } from '../utils/accounts'
+import TwoFactorCard from '../components/TwoFactorCard'
 
 export default function ManageTab() {
   const qc = useQueryClient()
@@ -28,6 +29,9 @@ export default function ManageTab() {
 
   return (
     <div style={{ paddingTop: 8 }}>
+      {/* 2단계 인증 — 로그인 잠금(무차별 대입 차단)과 짝이 되는 계정 방어선 */}
+      {currentUser && <TwoFactorCard />}
+
       {/* 프로필 관리 (총 투자금 통합) */}
       {currentUser && (
         <ProfileCard

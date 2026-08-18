@@ -206,4 +206,10 @@ export const projectGoal = (body) => api.post('/goals/project', body).then(r => 
 export const getCompassSignals = (days = 3) =>
   api.get('/compass/signals', { params: { days } }).then(r => r.data)
 
+// 2단계 인증 (TOTP)
+export const totpStatus  = ()     => api.get('/auth/2fa/status').then(r => r.data)
+export const totpSetup   = ()     => api.post('/auth/2fa/setup').then(r => r.data)
+export const totpEnable  = (body) => api.post('/auth/2fa/enable', body).then(r => r.data)
+export const totpDisable = (body) => api.post('/auth/2fa/disable', body).then(r => r.data)
+
 export default api
