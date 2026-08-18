@@ -8498,6 +8498,56 @@ def cron_refresh_holdings_analysis(req: RefreshHoldingsReq):
     }
 
 
+# ─── 분석 관리 (구독 생성 파이프라인 지원) ────────────────────────
+# 오늘(2026-08-18) 51종목을 구독으로 채우며 확인된 것: 이 작업의 병목은 AI 가 아니라
+# '어느 종목이 낡았는지 찾고, 프롬프트를 만들고, 결과를 넣는' 기계적 왕복이었다.
+# 그 왕복을 앱과 스크립트가 공유하는 엔드포인트로 만든다.
+# 생성 자체(비용 발생 지점)는 여전히 밖에서 한다 — 구독은 서버가 빌려 쓸 수 없다.
+
+@app.get("/api/admin/analysis/gap")
+def analysis_gap(cu: dict = Depends(require_admin)):
+    """보유 종목의 분석 노후도. 오래된 순으로 반환한다."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ticker, name, sector, quantity, avg_price FROM portfolios").fetchall()
+    held = {}
+    for r in rows:
+        t = str(r['ticker']).upper()
+        if t not in held:
+            held[t] = {'ticker': t, 'name': r['name'] or '', 'sector': r['sector'] or '',
+                       'cost': 0.0}
+        held[t]['cost'] += (r['quantity'] or 0) * (r['avg_price'] or 0)
+
+    now = time()
+    out = []
+    for t, h in held.items():
+        _, ts = _get_stock_cache_by_ticker(t)
+        h['age_days'] = None if ts == 0 else round((now - ts) / 86400, 1)
+        h['computed_at'] = ts or None
+        h['cost'] = round(h['cost'])
+        out.append(h)
+    # 분석 없는 것 먼저, 그다음 오래된 순
+    out.sort(key=lambda x: (x['age_days'] is not None, x['age_days'] or 0), reverse=True)
+    return {'holdings': out,
+            'missing': sum(1 for x in out if x['age_days'] is None),
+            'total': len(out)}
+
+
+@app.get("/api/admin/analysis/prompt")
+def analysis_prompt(ticker: str, name: str = '', cu: dict = Depends(require_admin)):
+    """해당 종목의 분석 프롬프트. 운영 엔드포인트와 **같은 소스**를 쓴다.
+
+    프롬프트를 화면에서 복사해 구독(Claude Code/앱)에 붙여넣는 용도.
+    복제본을 만들면 프롬프트 개선 시 한쪽만 고치게 되므로 반드시 공유한다.
+    """
+    t = normalize_crypto(str(ticker or '').strip().upper())
+    if not t:
+        raise HTTPException(400, "ticker 가 필요합니다")
+    prompt, company_name = _build_stock_analysis_prompt(t, str(name or '').strip())
+    return {'ticker': t, 'company_name': company_name, 'prompt': prompt,
+            'schema_hint': {'required': sorted(REQUIRED_FIELDS)}}
+
+
 # ─── AI 캐시 외부 import (Claude Code/채팅에서 만든 분석 결과 주입) ────
 # 사용 시나리오: API 호출 비용/rate limit 없이 무료 Claude로 분석 →
 #                결과 JSON을 본 endpoint로 inject → 종목 탭이 즉시 표시.

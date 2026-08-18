@@ -212,4 +212,9 @@ export const totpSetup   = ()     => api.post('/auth/2fa/setup').then(r => r.dat
 export const totpEnable  = (body) => api.post('/auth/2fa/enable', body).then(r => r.data)
 export const totpDisable = (body) => api.post('/auth/2fa/disable', body).then(r => r.data)
 
+// 분석 관리 (admin) — 구독으로 분석을 채우는 왕복 지원
+export const analysisGap    = ()               => api.get('/admin/analysis/gap').then(r => r.data)
+export const analysisPrompt = (ticker, name='') =>
+  api.get('/admin/analysis/prompt', { params: { ticker, name } }).then(r => r.data)
+
 export default api

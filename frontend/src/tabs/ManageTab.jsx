@@ -7,6 +7,7 @@ import { getPortfolio, saveApiKey, authLogout,
 import { useStore } from '../store'
 import { useAccounts } from '../utils/accounts'
 import TwoFactorCard from '../components/TwoFactorCard'
+import AnalysisAdminCard from '../components/AnalysisAdminCard'
 
 export default function ManageTab() {
   const qc = useQueryClient()
@@ -29,6 +30,9 @@ export default function ManageTab() {
 
   return (
     <div style={{ paddingTop: 8 }}>
+      {/* 분석 관리 — 구독으로 분석을 채우는 왕복을 앱 안에서 끝낸다 (admin 전용) */}
+      {currentUser?.is_admin && <AnalysisAdminCard />}
+
       {/* 2단계 인증 — 로그인 잠금(무차별 대입 차단)과 짝이 되는 계정 방어선 */}
       {currentUser && <TwoFactorCard />}
 
