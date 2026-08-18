@@ -96,6 +96,12 @@ sleep 3
 sudo systemctl is-active portfolio
 '@
 
+# 원격 bash 에 보내기 전 CR 제거 — 2026-08-18 사고:
+# 이 파일이 CRLF 로 저장되자 here-string 내용에 \r 이 섞여 원격에서
+#   bash: $'\r': command not found / Invalid unit name "portfolio\r"
+# 가 나고 **systemctl restart 가 실패**했다. 파일은 업로드됐는데 서비스는 구버전으로
+# 계속 돌아, 배포가 끝난 것처럼 보이는 게 최악이었다. 줄바꿈에 의존하지 않게 만든다.
+$REMOTE_CMD = $REMOTE_CMD -replace "`r", ""
 Invoke-Expression "$SSH $SERVER '$REMOTE_CMD'"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: 서비스 시작 실패" -ForegroundColor Red

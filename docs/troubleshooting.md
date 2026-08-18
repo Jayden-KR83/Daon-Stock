@@ -1,5 +1,33 @@
 # 다온 — 트러블슈팅 · 흔한 함정 · 검증
 
+
+### 배포는 "완료"인데 서버는 구버전 (2026-08-18)
+
+**증상 2가지 — 둘 다 "배포 성공" 메시지가 나온다는 게 최악이다.**
+
+**① `sw.js` 미업로드 → PWA만 옛 화면**
+`deploy.ps1` 이 `index.html`·`assets/` 만 올리고 `sw.js`·`workbox-*.js` 를 안 올렸다.
+서비스워커가 **구버전 번들을 프리캐시**한 채 계속 서빙 → 설치형(PWA) 사용자만 옛 화면.
+브라우저 새로고침으로 안 고쳐진다.
+- 확인: `curl -s https://daonwealth.com/sw.js | grep -o 'index-[A-Za-z0-9_-]*\.js'` 와
+  `curl -s https://daonwealth.com/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'` 가 같은가
+- 조치: deploy.ps1 3단계에 PWA 런타임 업로드 추가(완료)
+
+**② deploy.ps1 이 CRLF 로 저장되면 `systemctl restart` 가 실패**
+here-string 안의 원격 bash 명령에 `` 이 섞여:
+```
+bash: $'': command not found
+Invalid unit name "portfolio" ... Failed to restart
+```
+파일은 업로드됐는데 **서비스는 재시작되지 않아 구 프로세스가 계속 돈다.**
+스크립트는 "배포 완료!"를 출력한다(마지막 `is-active` 는 통과하므로).
+- 원인: git `core.autocrlf` 가 체크아웃 때 LF→CRLF 로 바꾼다. 파일을 한 번 손대면 재발
+- 조치: 원격 전송 직전 `$REMOTE_CMD = $REMOTE_CMD -replace "`r", ""` (완료).
+  줄바꿈 설정에 의존하지 않게 만든 것이 핵심 — 파일을 LF 로 고치는 건 임시방편이다
+- **배포 후 반드시**: `systemctl is-active` 만 보지 말고 `journalctl -u portfolio -n 5` 로
+  **재시작 시각**을 확인하거나, 배포한 코드에만 있는 엔드포인트를 실제로 때려본다
+  (없는 경로 404 대비 신규 경로 401/403 이면 배포된 것)
+
 ## 1. 자체검증 — UI 변경 9 체크리스트 (시트/모달/오버레이)
 
 | # | 항목 | 확인 방법 |
