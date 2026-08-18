@@ -4719,6 +4719,51 @@ def _build_stock_analysis_prompt(ticker: str, name_hint: str):
     return prompt, company_name
 
 
+def _generate_stock_analysis(ticker: str, name_hint: str, api_key: str) -> dict:
+    """종목 분석 1건을 실제로 생성하고 캐시에 기록한다. (비용 발생 지점)
+
+    사용자 요청(analyze_stock)과 일 1회 배치 갱신(cron_refresh_holdings_analysis)이
+    **같은 경로**를 쓰도록 뽑아낸 것이다. 배치가 자체 프롬프트·자체 파싱을 갖게 되면
+    두 결과가 조용히 달라지고, 프롬프트를 고칠 때 한쪽만 고치게 된다.
+    쿼터 차감·감사 로그는 호출자 책임 — 여기서는 하지 않는다.
+    """
+    # ── 1~2) 컨텍스트 수집 + 프롬프트 조립 (배치와 공유하는 단일 소스) ──
+    prompt, company_name = _build_stock_analysis_prompt(ticker, name_hint)
+
+    # ── 3) Claude Sonnet 4.6 + web_search 호출 ────────────────────
+    text, citations = _call_claude_with_search(
+        api_key=api_key,
+        model="claude-sonnet-4-6",
+        prompt=prompt,
+        max_tokens=8000,
+        max_searches=4,
+        timeout=180,
+    )
+    try:
+        res = _parse_claude_json(text)
+    except Exception:
+        # JSON 파싱 실패 — 영어 사고 과정이 raw text로 들어가는 것 방지.
+        # 캐시하지 않고 명시적 에러 반환 → 사용자가 재시도 가능.
+        raise HTTPException(
+            502,
+            "AI 분석 결과를 정상 형식으로 받지 못했습니다. 다시 시도해주세요.",
+        )
+
+    # 필수 필드 기본값 보강
+    for key in ("recommendation", "summary", "company_overview", "earnings_ir",
+                "backlog", "analyst_views", "verdict"):
+        if not isinstance(res.get(key), str):
+            res[key] = ""
+    for key in ("catalysts_short", "catalysts_medium", "bull", "bear"):
+        if not isinstance(res.get(key), list):
+            res[key] = []
+
+    # 출처 (web_search 결과 + 인용)
+    res["sources"] = citations[:12]
+    _set_ai_cache(f"stock_v2:{ticker.upper()}:{(name_hint or '').strip()}", res)
+    return res
+
+
 @app.post("/api/stock/{ticker}/analyze")
 def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_approved)):
     api_key = req.api_key or _stored_api_key()
@@ -4757,41 +4802,9 @@ def analyze_stock(ticker: str, req: StockAnalyzeReq, cu: dict = Depends(require_
     _bump_ai_call(cu['user_id'])
 
     try:
-        # ── 1~2) 컨텍스트 수집 + 프롬프트 조립 (배치와 공유하는 단일 소스) ──
-        prompt, company_name = _build_stock_analysis_prompt(ticker, name_hint)
-
-        # ── 3) Claude Sonnet 4.6 + web_search 호출 ────────────────────
-        text, citations = _call_claude_with_search(
-            api_key=api_key,
-            model="claude-sonnet-4-6",
-            prompt=prompt,
-            max_tokens=8000,
-            max_searches=4,
-            timeout=180,
-        )
-        try:
-            res = _parse_claude_json(text)
-        except Exception:
-            # JSON 파싱 실패 — 영어 사고 과정이 raw text로 들어가는 것 방지.
-            # 캐시하지 않고 명시적 에러 반환 → 사용자가 재시도 가능.
-            raise HTTPException(
-                502,
-                "AI 분석 결과를 정상 형식으로 받지 못했습니다. 다시 시도해주세요.",
-            )
-
-        # 필수 필드 기본값 보강
-        for key in ("recommendation", "summary", "company_overview", "earnings_ir",
-                    "backlog", "analyst_views", "verdict"):
-            if not isinstance(res.get(key), str):
-                res[key] = ""
-        for key in ("catalysts_short", "catalysts_medium", "bull", "bear"):
-            if not isinstance(res.get(key), list):
-                res[key] = []
-
-        # 출처 (web_search 결과 + 인용)
-        res["sources"] = citations[:12]
-        _set_ai_cache(cache_key, res)
+        res = _generate_stock_analysis(ticker, name_hint, api_key)
         # 응답 메타데이터
+        res = dict(res)
         res["_cached"] = False
         res["_computed_at"] = time()
         return res
@@ -8048,6 +8061,108 @@ def cron_weekly_rebalance(req: TriggerReq):
         except Exception:
             pass
     return {'processed': processed, 'eligible_users': len(users)}
+
+
+# ─── 보유 종목 분석 일 1회 갱신 (웹 검색 기반) ──────────────────────
+# 왜 필요한가: 종목 분석은 캐시가 TTL 없이 남아 있어(_get_stock_cache_by_ticker),
+# 사용자가 직접 '재분석'을 누르지 않으면 몇 달 전 분석을 계속 본다. 보유 종목만큼은
+# 매일 최신 뉴스·실적을 반영해 자동으로 갱신한다.
+#
+# 비용 통제 (서버 2코어/1GB, AI 과금) — 아래 네 겹으로 막는다:
+#   ① ai_enabled 승인 사용자의 보유 종목만
+#   ② 티커 기준 중복 제거 — 분석 캐시는 사용자별이 아니라 티커별 공유다
+#   ③ min_age_hours(기본 20h) 안에 갱신된 티커는 건너뜀 = 사실상 '일 1회'
+#   ④ max_tickers(기본 12) 상한. 초과분은 '가장 오래된 분석 먼저' 순서라
+#      다음 날 자연히 순번이 돌아온다(라운드로빈)
+# 1건당 대략 web_search 4회($10/1,000건 → 약 $0.04) + Sonnet 토큰.
+#
+# cron 등록은 서버에서 오너가 직접 (docs/deployment.md §4). 기존 작업과 시간 분리:
+#   발굴 스캔 22:00 UTC / 리밸런싱 월 09:00 UTC → 본 작업은 19:00 UTC 권장.
+
+class RefreshHoldingsReq(BaseModel):
+    cron_secret:   str   = ''
+    max_tickers:   int   = 12     # 1회 실행 상한 (비용/시간)
+    min_age_hours: float = 20.0   # 이보다 최근에 갱신된 티커는 건너뜀
+
+
+def _holdings_tickers_for_refresh(user_ids: list) -> list:
+    """갱신 대상 티커 목록 — (ticker, name) 중복 제거. 비상장 펀드는 제외.
+
+    분석 캐시는 티커 단위로 모든 사용자가 공유하므로, 같은 종목을 두 사람이
+    보유해도 생성은 1회만 하면 된다.
+    """
+    seen: dict = {}
+    for uid in user_ids:
+        try:
+            ud = _load_user_data(uid)
+        except Exception:
+            continue
+        for holdings in (ud.get('portfolios') or {}).values():
+            for h in (holdings or []):
+                t = str(h.get('ticker') or '').strip().upper()
+                if not t or is_unlisted(h.get('asset_type')):
+                    continue      # 비상장 펀드는 시세도 뉴스도 없다
+                if t not in seen:
+                    seen[t] = str(h.get('name') or '').strip()
+    return [(t, n) for t, n in seen.items()]
+
+
+@app.post("/api/cron/refresh_holdings_analysis")
+def cron_refresh_holdings_analysis(req: RefreshHoldingsReq):
+    """일 1회 cron 호출. 보유 종목 AI 분석을 웹 검색으로 갱신."""
+    secret = ''
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='cron_secret'"
+        ).fetchone()
+        if row: secret = row['value']
+    if not secret or req.cron_secret != secret:
+        raise HTTPException(403, "invalid cron secret")
+    api_key = _stored_api_key()
+    if not api_key:
+        return {'refreshed': 0, 'reason': 'no_api_key'}
+
+    with _db() as conn:
+        users = conn.execute(
+            "SELECT user_id FROM users WHERE ai_enabled=1 AND status='approved'"
+        ).fetchall()
+    candidates = _holdings_tickers_for_refresh([u['user_id'] for u in users])
+
+    # 마지막 분석 시각을 붙여 '오래된 것 먼저' 정렬 — 상한에 걸려도 순번이 돈다
+    now = time()
+    cutoff = float(req.min_age_hours) * 3600.0
+    aged = []
+    for t, name in candidates:
+        _, ts = _get_stock_cache_by_ticker(t)
+        if now - ts < cutoff:
+            continue              # 오늘 이미 갱신됨
+        aged.append((ts, t, name))
+    aged.sort(key=lambda x: x[0])          # ts 오름차순 = 가장 오래된 분석 먼저
+
+    targets = aged[:max(0, int(req.max_tickers))]
+    refreshed, failed = 0, []
+    for _ts, t, name in targets:
+        try:
+            _generate_stock_analysis(t, name, api_key)
+            refreshed += 1
+        except Exception as e:
+            failed.append({'ticker': t, 'error': str(e)[:200]})
+
+    # 감사 로그 — user_id·kind 모두 사용자 경로와 다르게 둔다.
+    # _monthly_fresh_analyze_count 가 user_id + 'stock_analyze' 로 집계하므로,
+    # 배치가 실제 사용자의 월 무료 쿼터를 갉아먹으면 안 된다.
+    _log_event('__cron__', 'cron_holdings_refresh', {
+        'refreshed': refreshed, 'candidates': len(candidates),
+        'due': len(aged), 'failed_count': len(failed),
+    })
+    return {
+        'refreshed':  refreshed,
+        'candidates': len(candidates),
+        'due':        len(aged),
+        'skipped_recent': len(candidates) - len(aged),
+        'deferred':   max(0, len(aged) - len(targets)),
+        'failed':     failed,
+    }
 
 
 # ─── AI 캐시 외부 import (Claude Code/채팅에서 만든 분석 결과 주입) ────

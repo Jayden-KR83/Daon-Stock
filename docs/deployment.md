@@ -79,7 +79,26 @@ WantedBy=multi-user.target
 # 일별 KST 07:00(UTC 22:00) — 신규 종목 발굴 GARP 스캔 (US 마감 후·저트래픽, 공용 캐시)
 # 주의: 월요일 09:00 UTC 리밸런싱과 시간 분리 — 두 무거운 작업 동시 실행 시 1GB VM OOM 위험
 0 22 * * * /usr/local/bin/daon-discover-scan.sh
+# 일별 KST 04:00(UTC 19:00) — 보유 종목 AI 분석 갱신 (웹 검색, ai_enabled 사용자)
+# 주의: 22:00 UTC 발굴 스캔·09:00 UTC 리밸런싱과 3시간 이상 간격 — 1GB VM OOM 회피
+0 19 * * * /usr/local/bin/daon-refresh-holdings.sh
 ```
+
+**daon-refresh-holdings.sh** (신규 — `/usr/local/bin/`, 실행권한 필요):
+
+```bash
+#!/bin/sh
+# 보유 종목 AI 분석 일 1회 갱신. max_tickers 로 1회 비용 상한을 건다.
+curl -fsS -X POST http://127.0.0.1:8501/api/cron/refresh_holdings_analysis   -H 'Content-Type: application/json'   -d "{\"cron_secret\":\"$DAON_CRON_SECRET\",\"max_tickers\":12,\"min_age_hours\":20}"
+```
+
+- **비용**: 1종목당 web_search 약 4회(1,000건당 $10 → 약 $0.04) + Sonnet 토큰.
+  12종목/일 기준 검색비만 월 $15 내외. `max_tickers` 가 유일한 하드 상한이다.
+- **갱신 대상 선별**: ai_enabled 승인 사용자의 보유 종목 → 티커 중복 제거(분석 캐시는
+  티커별 공유) → 비상장 펀드 제외 → `min_age_hours` 내 갱신분 제외 → **오래된 분석 먼저**
+  정렬 후 `max_tickers` 만큼. 상한을 넘긴 종목은 다음 날 순번이 돌아온다(라운드로빈).
+- **쿼터 무관**: 배치는 `user_id='__cron__'` · `event_type='cron_holdings_refresh'` 로
+  기록해, 사용자의 월 무료 분석 쿼터(`stock_analyze` 집계)를 갉아먹지 않는다.
 
 - 인증 cron(check-alerts·weekly-rebalance)은 cron_secret POST. cache-warm은 공개 GET이라 secret 불필요.
 - **cache-warm**: 무거운 KR 스크래핑 엔드포인트(콜드 2~6초)를 5분마다 미리 호출 → 30분 캐시를 늘 데워둠 → 사용자는 캐시 hit(~0.05초)만 만남.
