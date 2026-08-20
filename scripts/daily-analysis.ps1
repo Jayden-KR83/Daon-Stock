@@ -64,33 +64,44 @@ if (Test-Path $outFile) { Remove-Item $outFile }
 $promptTemplate = Get-Content (Join-Path $PSScriptRoot "daily-analysis-prompt.md") -Raw -Encoding utf8
 $prompt = $promptTemplate -replace '\{\{TARGETS\}\}', $list -replace '\{\{OUTFILE\}\}', ($outFile -replace '\\','/')
 
-# ── 3. 생성 (구독 사용) ───────────────────────────────────────────
+# ── 3~4. 생성 + 검증 (실패 시 1회 재시도) ─────────────────────────
 # --tools 로 Bash 를 빼서 파일 쓰기와 웹 조사만 가능하게 제한한다.
 # 무인 실행이므로 권한 프롬프트가 뜨면 그대로 멈춘다 → acceptEdits 로 파일 쓰기 허용.
-Log "분석 생성 중... (종목당 1~2분 소요)"
-$claudeArgs = @(
-    '-p', $prompt,
-    '--tools', 'WebSearch,WebFetch,Write,Read',
-    '--permission-mode', 'acceptEdits',
-    '--add-dir', $WORK,
-    '--model', 'sonnet'
-)
-& claude @claudeArgs 2>&1 | Tee-Object -Variable claudeOut | Out-Null
-Log "생성 종료"
+#
+# 재시도를 두는 이유: 2026-08-20 실행에서 생성 결과가 필드명을 camelCase 로 바꾸고
+# (analystViews) 절반을 누락해 검증에 걸렸다. 검증기가 막아 데이터는 안전했지만
+# 그날 갱신이 통째로 버려졌다. 무인 작업에서는 한 번의 흔들림으로 하루를 날리지 않게
+# 재시도가 필요하다. 단 2회까지만 — 계속 실패하면 프롬프트나 스키마 문제이므로
+# 조용히 반복하기보다 로그를 남기고 멈추는 편이 낫다.
+$maxTry = 2
+$ok = $false
+for ($try = 1; $try -le $maxTry; $try++) {
+    if (Test-Path $outFile) { Remove-Item $outFile }
+    Log "분석 생성 중... (시도 $try/$maxTry · 종목당 1~2분 소요)"
 
-if (-not (Test-Path $outFile)) {
-    Log "payload.json 이 생성되지 않았습니다. claude 출력 마지막 400자:"
-    Log (($claudeOut -join "`n") | Select-Object -Last 1).ToString().Substring(0, [Math]::Min(400, (($claudeOut -join "`n")).Length))
-    exit 1
+    $p = $prompt
+    if ($try -gt 1) {
+        $p = $prompt + "`n`n[재시도] 직전 시도는 필수 키를 빠뜨리거나 이름을 camelCase 로 바꿔 거부됐습니다. 13개 키 이름을 snake_case 그대로 전부 넣었는지 저장 후 Read 로 반드시 확인하세요."
+    }
+    $claudeArgs = @(
+        '-p', $p,
+        '--tools', 'WebSearch,WebFetch,Write,Read',
+        '--permission-mode', 'acceptEdits',
+        '--add-dir', $WORK,
+        '--model', 'sonnet'
+    )
+    & claude @claudeArgs 2>&1 | Out-Null
+
+    if (-not (Test-Path $outFile)) { Log "  payload.json 이 생성되지 않음"; continue }
+
+    # 검증기는 UTF-8 파일로 분리해 둔다 — here-string 에 한글을 심으면 리터럴이 깨져
+    # 정상 payload 를 불합격 처리한다(2026-08-18 실제 발생).
+    $vr = & python (Join-Path $PSScriptRoot "validate_analysis_payload.py") $outFile 2>&1
+    Log ($vr -join "`n")
+    if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+    Log "  검증 실패 (시도 $try/$maxTry)"
 }
-
-# ── 4. 검증 (주입 전 로컬에서) ────────────────────────────────────
-# 하나라도 어긋나면 아무것도 넣지 않는다. 절반만 들어간 상태가 가장 나쁘다.
-# ⚠️ 검증기를 여기 here-string 으로 심었다가 한글 리터럴이 깨져 정상 payload 를
-#    불합격 처리한 적이 있다(2026-08-18). 한글 코드는 반드시 UTF-8 파일로 분리한다.
-$vr = & python (Join-Path $PSScriptRoot "validate_analysis_payload.py") $outFile 2>&1
-Log ($vr -join "`n")
-if ($LASTEXITCODE -ne 0) { Log "검증 실패 — 주입하지 않고 종료"; exit 1 }
+if (-not $ok) { Log "검증 실패 — 주입하지 않고 종료"; exit 1 }
 
 if ($DryRun) { Log "DryRun — 주입 생략. 결과: $outFile"; exit 0 }
 
@@ -107,9 +118,15 @@ Log "=== 완료 ==="
 #  $act = New-ScheduledTaskAction -Execute "powershell.exe" `
 #      -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\Users\user\AgentDev\daon\scripts\daily-analysis.ps1"'
 #  $trg = New-ScheduledTaskTrigger -Daily -At 6:00AM
-#  $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries
+#  $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries `
+#             -AllowStartIfOnBatteries -MultipleInstances IgnoreNew `
+#             -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 #  Register-ScheduledTask -TaskName "다온 일일 분석 갱신" -Action $act -Trigger $trg -Settings $set
 #
+#  ⚠️ -AllowStartIfOnBatteries 가 **반드시** 필요하다. 이걸 빼면 기본값이
+#     DisallowStartIfOnBatteries=True 라 노트북이 배터리 상태면 아예 시작하지 않는다.
+#     2026-08-20 확인: 이 옵션 없이 등록한 작업이 6시 창을 두 번 넘기고도 한 번도
+#     실행되지 않았다(LastRunTime 없음). -DontStopIfGoingOnBatteries 만으로는 부족하다.
 #  -StartWhenAvailable: PC 가 꺼져 있어 놓친 실행을 켜진 뒤 따라잡는다.
 #  로그: scripts\daily-analysis.log
 # ============================================================
