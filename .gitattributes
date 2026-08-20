@@ -1,0 +1,6 @@
+# core.autocrlf=true 인 Windows 작업 환경에서 체크아웃하면 .sh 가 CRLF 로 풀린다.
+# 그 파일을 그대로 서버에 scp 하면 bash 가 '\r' 때문에 죽는다
+# (`bad interpreter: /bin/bash^M`). 리눅스로 올라가는 파일은 LF 로 고정한다.
+* text=auto
+
+*.sh text eol=lf
