@@ -16,6 +16,8 @@ _backup/
 *.pem
 .env
 .env.*
+# daon-backup-restore.sh 가 복호화한 DB 를 여기에 푼다
+restored/
 
 # ────────────────────────────────────────
 # Build artifacts (CI builds these)

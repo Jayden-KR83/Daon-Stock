@@ -53,16 +53,24 @@
 - **admin 2FA 켜짐**(복구코드 8개 발급)
 - 집현전 원격 백업 정상(`Jayden-KR83/jiphyeonjeon` private, 완전 동기화)
 - 투자 나침반 A안(판단 변경 배너) — 무료 경로에도 신호 기록 배선 완료
+- **`gitleaks` 전체 히스토리 스캔(2026-08-20) — 실제 시크릿 0건.** 탐지 5건은 전부 모델 ID 오탐.
+  `.gitleaks.toml` 로 규칙화 + CI 차단 게이트 상시화
+- **백업 암호화(2026-08-20) 완료** — 공개키 암호화, 개인키는 오너 PC 에만.
+  복원 왕복 검증까지 통과. 상세 `docs/backup-restore.md`
 
 ## 남은 것 (우선순위)
 1. **`/api/cron/*` 외부 차단** — Cloudflare 규칙. 오너 작업.
    실측: 4개 엔드포인트 전부 공개 도달(403), **`warm_prices` 는 인증 없이 200**.
    cron 은 전부 `127.0.0.1` 로 부르므로 **막아도 지장 없다.**
-2. 백업 암호화 · `gitleaks` 히스토리 스캔 · PBKDF2 100k→상향 · 세션 30일 만료 단축
-   (근거: `docs/security-review.md`)
-3. R5 앱폭(360~400px) 실기기 육안 확인 — 분석 탭
-4. R1ب 전수 정리 80건 (borderRadius 8+/boxShadow/gradient) — 시각 변화 커서 승인 필요
-5. 투자 나침반 B안(매크로 탭) — 미착수. 설계는 `docs/investment-compass-design.md`
+2. **백업 개인키 오프라인 사본** — 오너 작업. `C:\Users\user\.daon-backup-key\` 두 파일을
+   USB/비밀번호 관리자에 복사. **이 키를 잃으면 백업 전부 복호화 불가.**
+3. Dependabot 보안경보 스위치 ON — GitHub 웹에서 1분. 오너 작업.
+4. PBKDF2 100k→상향 · 세션 30일 만료 단축 (근거: `docs/security-review.md` §4)
+5. R5 앱폭(360~400px) 실기기 육안 확인 — 분석 탭
+6. R1ب 전수 정리 80건 (borderRadius 8+/boxShadow/gradient) — 시각 변화 커서 승인 필요
+7. 투자 나침반 B안(매크로 탭) — 미착수. 설계는 `docs/investment-compass-design.md`
+8. 백업을 서버 밖으로 복사(오프사이트) — 암호화가 끝났으니 이제 그냥 복사해도 안전하다.
+   현재 백업은 **서버 한 대에만** 있어서 서버가 죽으면 같이 죽는다.
 
 ## 🚫 하지 말 것
 - **중복 보유 지적 금지.** 나스닥100 3중(QQQ·QQQM·133690) 등은 **오너가 의도한 장기 배분**이며
@@ -82,6 +90,11 @@
    유지돼, `cd` 가 빠지면 엉뚱한 저장소를 보고도 눈치채기 어렵다(집현전 오진의 원인).
 6. **`is-active` 만 보고 배포 완료로 판단 금지.** 배포한 코드에만 있는 엔드포인트를 실제로
    때려본다(없는 경로 404 대비 신규 경로 401/403/405).
+7. **Git Bash 의 `/usr/bin/ssh` 는 Windows ssh-agent 를 못 본다** → `Permission denied
+   (publickey)`. 서버 접속은 PowerShell 이나 `C:\Windows\System32\OpenSSH\ssh.exe` 로.
+   2026-08-20 복원 스크립트에서 또 밟았다(해결: 스크립트가 Windows OpenSSH 를 직접 호출).
+8. **PowerShell 에서 ssh 원격 명령에 큰따옴표·파이프를 섞지 말 것.** 인용부호가 벗겨져
+   엉뚱한 명령이 원격에서 실행된다. 여러 줄이면 `.sh` 파일로 만들어 `scp` 후 실행.
 
 ---
 

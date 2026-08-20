@@ -18,3 +18,10 @@ os.chdir(_TMP_ROOT)
 # 2) backend/ 를 sys.path 앞에 두어 `import main` 가능
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
+
+# 3) 프로젝트 루트도 등록 — 일부 테스트는 `import backend.main` 형태를 쓴다.
+#    루트에서 `python -m pytest` 로 돌릴 때는 cwd 덕에 우연히 통과하지만,
+#    CI 처럼 backend/ 안에서 실행하면 ModuleNotFoundError('backend') 로 죽는다.
+#    (2026-08-20 CI backend 잡이 이 이유로 실패 중이던 것을 발견해 수정)
+if _PROJECT_DIR not in sys.path:
+    sys.path.insert(0, _PROJECT_DIR)

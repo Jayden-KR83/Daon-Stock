@@ -4730,7 +4730,9 @@ def analyze(req: AnalyzeReq, cu: dict = Depends(require_ai_enabled)):
     api_key = req.api_key or _stored_api_key()
     if not api_key:
         raise HTTPException(400, "Anthropic API key required")
-    _fp = hashlib.md5(json.dumps(sorted(h.get('ticker','') for h in req.holdings)).encode()).hexdigest()
+    # usedforsecurity=False — 캐시 키 지문일 뿐 인증/서명이 아니다 (bandit B324)
+    _fp = hashlib.md5(json.dumps(sorted(h.get('ticker','') for h in req.holdings)).encode(),
+                      usedforsecurity=False).hexdigest()
     # 캐시 키에 user_id 포함 — 다른 사용자가 동일 구성으로 우연히 결과 공유 방지
     cache_key = f"portfolio_analyze:{cu['user_id']}:{_fp}"
     cached = _get_ai_cache(cache_key)
@@ -5202,7 +5204,8 @@ def _metrics_fingerprint(holdings: list) -> str:
         (h.ticker, round(float(h.avg_price), 4), round(float(h.quantity), 4), h.account or '')
         for h in holdings
     ])
-    return hashlib.md5(json.dumps(items).encode()).hexdigest()
+    # usedforsecurity=False — 캐시 키 지문일 뿐 인증/서명이 아니다 (bandit B324)
+    return hashlib.md5(json.dumps(items).encode(), usedforsecurity=False).hexdigest()
 
 def _strategy_fingerprint(holdings: list, prices: dict, years, inflow) -> str:
     """AI 전략 리포트 캐시 지문. 평가액을 결정하는 모든 입력(수량·평단·현재가)을 포함해야
@@ -5215,7 +5218,9 @@ def _strategy_fingerprint(holdings: list, prices: dict, years, inflow) -> str:
             or (h.get('manual_price') or 0) or h.get('avg_price', 0)
         return [tkr, round(float(h.get('quantity', 0) or 0), 4),
                 round(float(h.get('avg_price', 0) or 0), 4), round(float(cur or 0), 2)]
-    return hashlib.md5(json.dumps([sorted(sig(h) for h in holdings), years, inflow]).encode()).hexdigest()
+    # usedforsecurity=False — 캐시 키 지문일 뿐 인증/서명이 아니다 (bandit B324)
+    return hashlib.md5(json.dumps([sorted(sig(h) for h in holdings), years, inflow]).encode(),
+                       usedforsecurity=False).hexdigest()
 
 @app.get("/api/portfolio/metrics/cached")
 def portfolio_metrics_cached(scope: str = 'ALL', cu: dict = Depends(get_current_user)):

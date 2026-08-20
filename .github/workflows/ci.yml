@@ -8,6 +8,48 @@ on:
   workflow_dispatch:
 
 jobs:
+  security:
+    name: Security (gitleaks + bandit + pip-audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 전체 커밋 히스토리를 봐야 과거에 심긴 시크릿을 잡는다
+
+      # 차단 O — 시크릿이 1건이라도 나오면 CI 실패.
+      # 2026-08-20 기준 히스토리 전체 0건이며, .gitleaks.toml 이 오탐 규칙을 담고 있다.
+      - name: gitleaks — 시크릿 스캔 (전체 히스토리)
+        run: |
+          set -e
+          VER=8.30.1
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks git . --config .gitleaks.toml --redact --log-level warn
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 정적 분석 도구 설치
+        run: pip install --upgrade pip bandit pip-audit
+
+      # 참고용 전체 리포트 — 실패시켜도 노이즈만 되므로 출력만 한다
+      - name: bandit — 전체 리포트 (참고)
+        continue-on-error: true
+        run: bandit -r backend -x backend/tests -f screen
+
+      # 차단 O — 심각도 HIGH & 확신도 HIGH 만. 도입 시점 노이즈를 줄이려는 의도적 문턱이며,
+      # MEDIUM 이하는 위 참고 리포트에서 눈으로 본다.
+      - name: bandit — HIGH/HIGH 만 차단
+        run: bandit -r backend -x backend/tests -lll -iii
+
+      # 차단 X — 전이 의존성에 새 CVE 가 뜨면 무관한 배포까지 막힌다.
+      # 추적은 Dependabot 이 맡고, 여기서는 로그로만 남긴다.
+      - name: pip-audit — 의존성 CVE (보고 전용)
+        continue-on-error: true
+        run: pip-audit -r backend/requirements.txt
+
   backend:
     name: Backend (syntax + pytest)
     runs-on: ubuntu-latest

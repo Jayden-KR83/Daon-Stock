@@ -66,8 +66,8 @@ WantedBy=multi-user.target
 
 ```cron
 # /var/spool/cron/crontabs/ubuntu
-# 일별 KST 04:00 — daon.db 백업
-0 19 * * * cp ~/portfolio/daon.db ~/portfolio/backup/daon-$(date +\%Y\%m\%d).db
+# 일별 KST 04:00 — daon.db 백업 (tar.gz → 공개키 암호화, 30일 보관)
+0 19 * * * /home/ubuntu/daon-backup.sh >> /home/ubuntu/portfolio_backups/cron.log 2>&1
 # 일별 KST 17:00 — 자산 추이 스냅샷
 0 8  * * * /usr/local/bin/daon-daily-snapshot.sh
 # 5분 간격 — 가격 알림 체크 (cron_secret POST)
