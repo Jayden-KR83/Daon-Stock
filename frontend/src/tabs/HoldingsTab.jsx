@@ -121,11 +121,12 @@ export default function HoldingsTab() {
   return (
     <div className="holdings-tab">
       {/* Hero */}
-      <div className="hero-card" style={{ position: 'relative', overflow: 'hidden' }}>
+      <div className="hero-card" data-tour="hero" style={{ position: 'relative', overflow: 'hidden' }}>
         {/* 큰 양수 수익률(+10% 이상) 일 때 Sparkles로 시각적 보상 */}
         <Sparkles active={!privacyMode && (profitPct ?? 0) >= 10} count={4} />
         {/* 가림/표시 토글 — 우측 상단 (양방향) */}
         <button
+          data-tour="privacy"
           onClick={(e) => { e.stopPropagation(); togglePrivacy() }}
           title={privacyMode ? '금액 보이기' : '금액 가리기'}
           aria-label={privacyMode ? '금액 보이기' : '금액 가리기'}
@@ -282,6 +283,7 @@ export default function HoldingsTab() {
             티커(예: AAPL, 005930)나 종목명으로 자유롭게 추가하세요.
           </div>
           <button onClick={() => setActiveTab(5)} className="btn-primary"
+            data-tour="empty-add"
             style={{ padding: '10px 22px' }}>
             첫 종목 추가하기 →
           </button>
@@ -298,7 +300,7 @@ export default function HoldingsTab() {
           animate="show"
         >
         <AnimatePresence initial={false}>
-        {sorted.map(h => {
+        {sorted.map((h, _rowIdx) => {
           // 모든 숫자 필드를 안전하게 변환 — DB 또는 외부 API가 string·null·NaN 반환해도 NaN 전파 차단
           const ticker = String(h.ticker || '')
           const qty    = Number(h.quantity) || 0
@@ -360,6 +362,7 @@ export default function HoldingsTab() {
               exit={{ opacity: 0, x: -24, transition: { duration: 0.18 } }}
               transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }}
               className="holding-row"
+              data-tour={_rowIdx === 0 ? 'holding-row' : undefined}
             >
               {/* 1. Avatar */}
               <div className="h-avatar" onClick={() => setChartTicker(h.ticker)}>

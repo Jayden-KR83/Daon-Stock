@@ -54,6 +54,9 @@ export default function ManageTab() {
         />
       )}
 
+      {/* 앱 사용 안내 다시 보기 — 최초 로그인 때 한 번 자동으로 뜨는 그 투어 */}
+      <TourCard />
+
       {/* 테마 전환 */}
       <ThemeToggleCard />
 
@@ -829,4 +832,29 @@ function miniBtnStyle(variant) {
     background: v.bg, color: v.fg, border: `1px solid ${v.bd}`,
     cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
   }
+}
+
+/* ──────────────────────────────────────────────────────
+   앱 사용 안내(온보딩 투어) 다시 보기
+   최초 로그인 시 1회 자동 실행되며, 건너뛴 뒤에도 여기서 다시 볼 수 있다.
+   ────────────────────────────────────────────────────── */
+function TourCard() {
+  const openTour = useStore(s => s.openTour)
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)', marginBottom: 6 }}>
+        앱 사용 안내
+      </div>
+      {/* R6 — 문장마다 줄바꿈 */}
+      <div className="ko-keep" style={{ fontSize: 12, color: 'var(--clr-text-muted)',
+        lineHeight: 1.6, marginBottom: 10 }}>
+        <div>화면을 하나씩 짚어가며 어디에 뭐가 있는지 알려줍니다.</div>
+        <div>주식이 처음인 분께 먼저 권합니다.</div>
+      </div>
+      <button className="btn-primary" style={{ fontSize: 13, padding: '8px 14px' }}
+        onClick={openTour}>
+        안내 다시 보기
+      </button>
+    </div>
+  )
 }

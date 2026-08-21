@@ -108,6 +108,7 @@ export default function SideNavBar() {
             return (
               <button
                 key={item.idx}
+                data-tour={`side-nav-${item.idx}`}
                 className={`side-nav-btn ${activeTab === item.idx ? 'active' : ''}`}
                 onClick={() => setActiveTab(item.idx)}
               >

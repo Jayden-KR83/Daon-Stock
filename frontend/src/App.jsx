@@ -16,6 +16,8 @@ import HoldingsTab from './tabs/HoldingsTab'        // 첫 진입 즉시 필요 
 import LoginPage from './tabs/LoginPage'            // 인증 게이트 — eager
 import KeyboardShortcuts from './components/KeyboardShortcuts'
 import ChangelogModal from './components/ChangelogModal'
+import Tour, { isTourDone } from './components/Tour'
+import changelog from './changelog.json'
 import { capturePnLSnapshot } from './api'
 import './App.css'
 
@@ -217,6 +219,35 @@ export default function App() {
     capturePnLSnapshot(payload).catch(() => {})
   }, [snapPortfolio, snapPrices, snapTickers, usdKrw])
 
+  // ── 최초 로그인 온보딩 투어 ──
+  // 사용자별로 1회만 자동 실행한다(localStorage). 계정을 바꾸면 그 계정 기준으로 다시 판단.
+  // 첫 화면의 데이터가 어느 정도 자리잡은 뒤에 띄운다 — 빈 화면을 가리키면 설명이 헛돈다.
+  const openTour = useStore(s => s.openTour)
+  const tourOpen = useStore(s => s.tourOpen)
+  const tourUserRef  = React.useRef(null)
+  const tourTimerRef = React.useRef(0)
+  // 투어를 띄울지 판단이 끝나기 전에는 '새 소식' 모달을 렌더하지 않는다.
+  // 먼저 뜨면 신규 사용자가 읽는 도중 투어가 열려 모달을 빼앗는다.
+  const [chromeReady, setChromeReady] = React.useState(false)
+  useEffect(() => {
+    const uid = currentUser?.user_id
+    if (!authToken || !uid) return
+    if (tourUserRef.current === uid) return
+    tourUserRef.current = uid
+    if (isTourDone(uid)) { setChromeReady(true); return }
+    // 신규 사용자에게 '새 소식' 모달은 의미가 없다(전부 새 것). 투어와 겹치지 않게 본 것으로 처리.
+    try { localStorage.setItem('daon_last_seen_version', changelog[0]?.version || '') } catch {}
+    // ⚠️ 타이머를 이 effect 의 cleanup 으로 지우면 안 된다.
+    // currentUser 는 authMe 응답마다 **새 객체**로 바뀌어 effect 가 재실행되는데,
+    // 그때 cleanup 이 타이머를 취소하고 재실행분은 위 ref 가드에 걸려 조기 반환한다
+    // → 투어가 영영 안 뜬다(2026-08-21 실제로 이 증상으로 안 열렸다).
+    // 타이머는 ref 에 두고 언마운트에서만 정리한다.
+    clearTimeout(tourTimerRef.current)
+    tourTimerRef.current = setTimeout(() => openTour(), 900)
+    setChromeReady(true)   // 이 시점엔 last_seen_version 을 이미 써 둬서 모달이 스스로 안 뜬다
+  }, [authToken, currentUser, openTour])
+  useEffect(() => () => clearTimeout(tourTimerRef.current), [])
+
   // 관리자 상태 폴링 (1분마다 — TTL이 1시간이라 짧게 폴링하지 않아도 됨)
   const { data: adminData } = useQuery({
     queryKey: ['admin-status'],
@@ -293,7 +324,8 @@ export default function App() {
         </div>
         <InstallPrompt />
         <KeyboardShortcuts />
-        <ChangelogModal />
+        {chromeReady && !tourOpen && <ChangelogModal />}
+        <Tour />
       </div>
     )
   }
@@ -323,7 +355,8 @@ export default function App() {
       <BottomNav />
       <InstallPrompt />
       <KeyboardShortcuts />
-      <ChangelogModal />
+      {chromeReady && !tourOpen && <ChangelogModal />}
+      <Tour />
     </div>
   )
 }

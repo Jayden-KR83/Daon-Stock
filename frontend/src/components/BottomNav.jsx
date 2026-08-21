@@ -151,6 +151,7 @@ export default function BottomNav() {
               return (
                 <button key={tab.idx}
                   ref={el => { btnRefs.current[tab.idx] = el }}
+                  data-tour={`nav-${tab.idx}`}
                   className={`nav-btn ${active ? 'active' : ''}`}
                   aria-current={active ? 'page' : undefined}
                   onClick={() => go(tab.idx)}>

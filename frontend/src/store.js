@@ -80,6 +80,11 @@ export const useStore = create((set, get) => ({
   ],
   setAccounts: (acc) => set({ accounts: acc }),
 
+  // 온보딩 투어 — 최초 로그인 시 자동 1회, 설정에서 다시 보기 가능
+  tourOpen: false,
+  openTour:  () => set({ tourOpen: true }),
+  closeTour: () => set({ tourOpen: false }),
+
   // 테마 — light | dark | pro | auto (OS 따라감)
   theme: savedTheme,
   setTheme: (v) => {

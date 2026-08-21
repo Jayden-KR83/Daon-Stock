@@ -1,0 +1,141 @@
+/* 온보딩 투어 — design.md 준수: radius 4 · 1px hairline · 그림자/그라데이션 없음 */
+
+.tour-root {
+  position: fixed;
+  inset: 0;
+  /* 앱에서 가장 높은 레이어여야 한다.
+     하단바 9999·전체메뉴 시트 10000·InfoTip 10001·Changelog 9999 가 이미 쓰고 있어,
+     낮게 잡으면 어두운 막이 하단바를 못 덮고 '다음' 버튼 클릭까지 하단바가 가로챈다
+     (2026-08-21 실제로 관심 탭 단계에서 nav-1 이 클릭을 삼켰다). */
+  z-index: 20000;
+}
+
+/* 어두운 막 4분할 (구멍 주변) */
+.tour-scrim {
+  position: fixed;
+  background: rgba(15, 23, 42, .62);
+  cursor: pointer;
+}
+.tour-scrim-full { inset: 0; width: auto; height: auto; }
+
+/* 하이라이트 구멍 — 투명 버튼. 누르면 다음 단계 */
+.tour-hole {
+  position: fixed;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+/* 구멍 테두리 링 — 어디를 보라는 건지 알려주는 유일한 장식 */
+.tour-ring {
+  position: fixed;
+  pointer-events: none;
+  border: 2px solid var(--m-primary);
+  border-radius: 4px;
+  animation: tour-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tour-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+
+/* 말풍선 */
+.tour-tip {
+  position: fixed;
+  background: var(--m-surface);
+  border: 1px solid var(--m-outline-variant);
+  border-radius: 4px;
+  padding: 14px 16px 12px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.tour-tip.is-ready { opacity: 1; }
+
+.tour-tip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.tour-step-count {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: var(--m-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.tour-skip {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--m-text-tertiary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.tour-skip:hover { color: var(--m-text); }
+
+.tour-tip-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  color: var(--m-text);
+  margin-bottom: 8px;
+  word-break: keep-all;
+}
+
+/* R6 — 한 문장 한 줄 */
+.tour-tip-body { margin-bottom: 12px; }
+.tour-line {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--m-text-secondary);
+  word-break: keep-all;
+}
+.tour-line + .tour-line { margin-top: 3px; }
+
+/* 진행 점 */
+.tour-dots {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.tour-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--m-outline-variant);
+}
+.tour-dot.on { background: var(--m-primary); }
+
+/* 액션 — R4: 주 액션은 .btn-primary 하나, 보조는 .btn-secondary */
+.tour-tip-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.tour-btn {
+  min-width: 72px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+/* 좁은 화면(360~400px) — 버튼이 밀리지 않도록 폭을 나눈다 */
+@media (max-width: 420px) {
+  .tour-tip { padding: 12px 14px 10px; }
+  .tour-tip-title { font-size: 14.5px; }
+  .tour-line { font-size: 12.5px; }
+  .tour-btn { flex: 1; min-width: 0; }
+}
+
+/* 모션 최소화 선호 시 깜빡임 제거 */
+@media (prefers-reduced-motion: reduce) {
+  .tour-ring { animation: none; }
+  .tour-tip { transition: none; }
+}
