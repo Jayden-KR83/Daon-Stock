@@ -413,6 +413,15 @@ def _migrate_schema():
                 conn.execute("ALTER TABLE portfolios ADD COLUMN nav REAL")
             if 'nav_date' not in pf_cols:
                 conn.execute("ALTER TABLE portfolios ADD COLUMN nav_date TEXT")
+        # 계좌별 예수금(현금 잔고). 계좌 통화 기준 금액이며, 총자산·현금비중 계산에 쓰인다.
+        # 주식 평가액과 섞지 않고 별도 컬럼으로 둔다 — 손익률은 여전히 '주식만' 기준이어야
+        # 하기 때문이다(현금은 사거나 판 것이 아니라 수익률 분모가 될 수 없다).
+        ac_cols = {row['name'] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+        if ac_cols and 'cash' not in ac_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN cash REAL NOT NULL DEFAULT 0")
+        if ac_cols and 'cash_updated_at' not in ac_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN cash_updated_at REAL NOT NULL DEFAULT 0")
+
         # 마이그레이션 직후, 기존 사용자(이미 가입된 자)는 자동 approved + ai_enabled (legacy compat)
         if added_status:
             conn.execute(
@@ -1527,6 +1536,12 @@ def _seed_demo_user():
         conn.execute("UPDATE users SET ai_enabled=1, status='approved', is_admin=0 WHERE user_id=?",
                      (DEMO_UID,))
     _seed_default_accounts(DEMO_UID)
+    # 예수금도 샘플로 리셋 (계좌 통화 기준: US 는 달러, 나머지는 원)
+    with _db() as conn:
+        for k, v in (('US', 3200.0), ('KR_RETIRE', 1250000.0),
+                     ('KR_PERSONAL', 480000.0), ('KR_ISA', 0.0)):
+            conn.execute("UPDATE accounts SET cash=? WHERE user_id=? AND key=?",
+                         (v, DEMO_UID, k))
     # 매 진입마다 샘플로 리셋 — 외부 검증자가 데이터를 바꿔도 다음 진입 시 깨끗
     ud = _load_user_data(DEMO_UID)
     ud['portfolios'] = {acc: [dict(h) for h in hs] for acc, hs in _DEMO_HOLDINGS.items()}
@@ -2208,7 +2223,7 @@ def get_accounts(cu: dict = Depends(require_approved)):
     """현재 사용자의 계좌 목록 — 없으면 기본 4종 자동 시드."""
     with _db() as conn:
         rows = conn.execute(
-            "SELECT key, label, currency, sort_order FROM accounts "
+            "SELECT key, label, currency, sort_order, cash, cash_updated_at FROM accounts "
             "WHERE user_id=? ORDER BY sort_order, key",
             (cu['user_id'],)
         ).fetchall()
@@ -2216,7 +2231,7 @@ def get_accounts(cu: dict = Depends(require_approved)):
         _seed_default_accounts(cu['user_id'])
         with _db() as conn:
             rows = conn.execute(
-                "SELECT key, label, currency, sort_order FROM accounts "
+                "SELECT key, label, currency, sort_order, cash, cash_updated_at FROM accounts "
                 "WHERE user_id=? ORDER BY sort_order, key",
                 (cu['user_id'],)
             ).fetchall()
@@ -2259,6 +2274,39 @@ def update_account(key: str, req: AccountUpsertReq, cu: dict = Depends(require_a
     if cur.rowcount == 0:
         raise HTTPException(404, "계좌를 찾을 수 없습니다")
     return {'ok': True}
+
+
+class AccountCashReq(BaseModel):
+    cash: float = 0.0      # 계좌 통화 기준 금액 (USD 계좌면 달러)
+
+
+@app.put("/api/accounts/{key}/cash")
+def update_account_cash(key: str, req: AccountCashReq, cu: dict = Depends(require_approved)):
+    """계좌 예수금 갱신.
+
+    금액은 **그 계좌의 통화 기준**이다(USD 계좌면 달러). 원화 환산은 프론트가
+    표시 시점 환율로 처리한다 — 서버가 환산해 저장하면 환율이 바뀔 때마다
+    과거 입력값이 왜곡된다.
+
+    음수도 허용한다. 미수금·마이너스 잔고가 실제로 존재하기 때문이다.
+    """
+    try:
+        cash = float(req.cash)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "금액이 올바르지 않습니다")
+    if cash != cash or cash in (float('inf'), float('-inf')):   # NaN·무한대 차단
+        raise HTTPException(400, "금액이 올바르지 않습니다")
+    if abs(cash) > 1e15:
+        raise HTTPException(400, "금액이 너무 큽니다")
+
+    with _db() as conn:
+        cur = conn.execute(
+            "UPDATE accounts SET cash=?, cash_updated_at=? WHERE user_id=? AND key=?",
+            (cash, time(), cu['user_id'], key)
+        )
+    if cur.rowcount == 0:
+        raise HTTPException(404, "계좌를 찾을 수 없습니다")
+    return {'ok': True, 'key': key, 'cash': cash}
 
 
 @app.delete("/api/accounts/{key}")

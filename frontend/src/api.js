@@ -107,6 +107,9 @@ export const getAccounts    = ()        => api.get('/accounts').then(r => r.data
 export const addAccount     = (body)    => api.post('/accounts', body).then(r => r.data)
 export const updateAccount  = (key, body) => api.put(`/accounts/${key}`, body).then(r => r.data)
 export const deleteAccount  = (key)     => api.delete(`/accounts/${key}`).then(r => r.data)
+// 예수금 — 금액은 그 계좌의 통화 기준(USD 계좌면 달러)
+export const updateAccountCash = (key, cash) =>
+  api.put(`/accounts/${key}/cash`, { cash }).then(r => r.data)
 
 // 종목별 메모/투자노트 (P0-3)
 export const getNote     = (ticker) => api.get(`/notes/${ticker}`).then(r => r.data)

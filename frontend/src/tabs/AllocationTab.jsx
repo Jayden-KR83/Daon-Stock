@@ -17,6 +17,7 @@ import CompassBanner from '../components/CompassBanner'
 import ShimmerButton from '../components/ShimmerButton'
 import { useAccounts } from '../utils/accounts'
 import { effPrice, priceableTickers, qtyUnit } from '../utils/effPrice'
+import { cashToKrw } from '../components/AccountCashCard'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import './TrendsTab.css'   // tt-ai-widget 스타일 공유 사용
 
@@ -94,7 +95,7 @@ function _strategyToMd(s) {
   }
   return out.join('\n') || '_(전략 내용 없음)_'
 }
-function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy }) {
+function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKrw = 0 }) {
   const totalVal = rows.reduce((s, r) => s + r.value, 0)
   const acc = {}, sec = {}
   for (const r of rows) { acc[r.account] = (acc[r.account] || 0) + r.value; sec[r.sector] = (sec[r.sector] || 0) + r.value }
@@ -105,7 +106,14 @@ function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy }) {
   L.push(`- **용도**: 타 LLM 교차검증 — 분석 정합성·오류·품질 향상`)
   L.push(`- ⚠️ 본 문서는 **개인 보유 데이터**를 포함합니다. 공유 시 주의.`, ``)
   L.push(`## 1. 보유 구성`)
-  L.push(`- 총 평가액(KRW 환산): **${_won(totalVal)}** · 보유 **${rows.length}종**`, ``)
+  L.push(`- 총 평가액(KRW 환산): **${_won(totalVal)}** · 보유 **${rows.length}종**`)
+  // 현금 비중은 교차검증에서 자주 묻는 항목이라 총자산과 함께 명시한다
+  if (cashKrw) {
+    const totalAssets = totalVal + cashKrw
+    L.push(`- 예수금(KRW 환산): **${_won(cashKrw)}** · **총자산 ${_won(totalAssets)}** ` +
+           `(현금 비중 ${_pct(cashKrw, totalAssets).toFixed(1)}%)`)
+  }
+  L.push(``)
   L.push(`### 계좌별`, `| 계좌 | 평가액 | 비중 |`, `|---|--:|--:|`)
   for (const [k, v] of Object.entries(acc).sort((a, b) => b[1] - a[1])) L.push(`| ${k} | ${_won(v)} | ${_pct(v, totalVal).toFixed(1)}% |`)
   L.push(``, `### 섹터별`, `| 섹터 | 평가액 | 비중 |`, `|---|--:|--:|`)
@@ -185,6 +193,22 @@ export default function AllocationTab() {
     return h.quantity * cur * (isUs(h) ? usdKrw : 1)
   }
 
+  // 예수금 — 현금도 자산 배분의 일부다. 주식만으로 비중을 그리면
+  // '현금 30%를 들고 있는 사람'과 '전액 투자한 사람'이 똑같은 그림으로 보인다.
+  const accountsList = useStore(s => s.accounts)
+  const cashByAccount = React.useMemo(() => {
+    const m = {}
+    for (const a of accountsList) {
+      const v = cashToKrw(a.cash, a.currency, usdKrw)
+      if (v) m[a.key] = v
+    }
+    return m
+  }, [accountsList, usdKrw])
+  const cashForView = React.useMemo(() => {
+    if (accFilter === 'ALL') return Object.values(cashByAccount).reduce((s, v) => s + v, 0)
+    return cashByAccount[accFilter] || 0
+  }, [cashByAccount, accFilter])
+
   // 뷰에 따른 데이터 (accFilter 적용)
   const filteredForView = React.useMemo(() => {
     if (view === '계좌별') return allHoldings
@@ -199,6 +223,11 @@ export default function AllocationTab() {
         const k = ACC_LABELS[h.account] || h.account
         map[k] = (map[k] || 0) + val(h)
       }
+      // 계좌별 뷰에서는 현금을 그 계좌 몫에 합친다 (= 계좌의 실제 총액)
+      for (const [key, v] of Object.entries(cashByAccount)) {
+        const k = ACC_LABELS[key] || key
+        map[k] = (map[k] || 0) + v
+      }
       return Object.entries(map).map(([name, value]) => ({ name, value: Math.round(value) }))
         .sort((a, b) => b.value - a.value)
     }
@@ -208,6 +237,7 @@ export default function AllocationTab() {
         const k = h.sector || '기타'
         map[k] = (map[k] || 0) + val(h)
       }
+      if (cashForView) map['현금'] = (map['현금'] || 0) + cashForView
       return Object.entries(map).map(([name, value]) => ({ name, value: Math.round(value) }))
         .sort((a, b) => b.value - a.value)
     }
@@ -226,11 +256,18 @@ export default function AllocationTab() {
       map[key].quantity += Number(h.quantity) || 0
       map[key].accounts += 1
     }
-    return Object.values(map)
+    const top = Object.values(map)
       .map(d => ({ ...d, value: Math.round(d.value) }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 15)
-  }, [filteredForView, view, allHoldings, prices, usdKrw])
+    // 현금은 상위 15 컷 뒤에 붙인다 — 컷에 걸려 사라지면 '전액 투자'처럼 보인다
+    if (cashForView) {
+      top.push({ name: '현금', ticker: 'CASH', value: Math.round(cashForView),
+                 quantity: 0, accounts: 0 })
+      top.sort((a, b) => b.value - a.value)
+    }
+    return top
+  }, [filteredForView, view, allHoldings, prices, usdKrw, cashByAccount, cashForView])
 
   const total = pieData.reduce((s, d) => s + d.value, 0)
 
@@ -267,6 +304,7 @@ export default function AllocationTab() {
         alerts: aR.status === 'fulfilled' ? aR.value : null,
         div:    dR.status === 'fulfilled' ? dR.value : null,
         strategy: strategyReport,
+        cashKrw: Object.values(cashByAccount).reduce((sum, v) => sum + v, 0),
       })
       const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
       const url = URL.createObjectURL(blob)
@@ -552,7 +590,7 @@ export default function AllocationTab() {
               pointerEvents: 'none',
             }}>
               <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--clr-text-muted)',
-                letterSpacing: '.1em', textTransform: 'uppercase' }}>총 평가액</div>
+                letterSpacing: '.1em', textTransform: 'uppercase' }}>{cashForView ? '총 자산' : '총 평가액'}</div>
               <div style={{ fontSize: 14, fontWeight: 900, color: 'var(--clr-text-strong)',
                 letterSpacing: '-.02em', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
                 ₩{(total / 1e8 >= 1

@@ -8,6 +8,7 @@ import { useStore } from '../store'
 import { useAccounts } from '../utils/accounts'
 import TwoFactorCard from '../components/TwoFactorCard'
 import AnalysisAdminCard from '../components/AnalysisAdminCard'
+import AccountCashCard from '../components/AccountCashCard'
 
 export default function ManageTab() {
   const qc = useQueryClient()
@@ -53,6 +54,9 @@ export default function ManageTab() {
           }}
         />
       )}
+
+      {/* 계좌별 예수금 — 총자산·현금비중의 입력원 */}
+      {currentUser && <AccountCashCard />}
 
       {/* 앱 사용 안내 다시 보기 — 최초 로그인 때 한 번 자동으로 뜨는 그 투어 */}
       <TourCard />

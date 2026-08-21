@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, deleteHolding, addHolding } from '../api'
 import { useStore } from '../store'
+import { cashToKrw } from '../components/AccountCashCard'
 import LogoCircle from '../components/LogoCircle'
 import Sparkline from '../components/Sparkline'
 import NumberTicker from '../components/NumberTicker'
@@ -88,6 +89,17 @@ export default function HoldingsTab() {
     return { totalCur, totalInvest, profit: totalCur - totalInvest }
   }, [filtered, prices, usdKrw])
 
+  // 예수금 — 계좌 필터를 그대로 따른다(특정 계좌를 보면 그 계좌 현금만).
+  // 손익/수익률에는 넣지 않는다. 현금은 사고판 것이 아니라 수익률의 분모가 될 수 없다.
+  const accountsList = useStore(s => s.accounts)
+  const cashKrw = React.useMemo(() => {
+    const list = accFilter === '전체'
+      ? accountsList
+      : accountsList.filter(a => a.key === accFilter)
+    return list.reduce((sum, a) => sum + cashToKrw(a.cash, a.currency, usdKrw), 0)
+  }, [accountsList, accFilter, usdKrw])
+  const totalAssets = totalCur + cashKrw
+
   const profitPct   = totalInvest > 0 ? profit / totalInvest * 100 : 0
   const profitColor = profit >= 0 ? '#16A34A' : '#DC2626'
   const isUsd       = currencyMode === 'USD'
@@ -104,6 +116,14 @@ export default function HoldingsTab() {
       return sortOrder === '높은순' ? diff : -diff
     })
   }, [filtered, prices, usdKrw, sortOrder])
+
+  // 표시용 분해 — 각 항목을 따로 반올림하면 '주식 + 예수금'이 총자산과 1원씩 어긋난다.
+  // 총자산과 예수금을 먼저 반올림하고 주식은 그 차이로 낸다(합이 반드시 맞는다).
+  const toUnit      = (krwAmt) => (currencyMode === 'USD' ? krwAmt / usdKrw : krwAmt)
+  const fmtUnitInt  = (n) => (currencyMode === 'USD' ? '$' : '₩') + n.toLocaleString()
+  const dispTotal   = Math.round(toUnit(totalCur + cashKrw))
+  const dispCash    = Math.round(toUnit(cashKrw))
+  const dispStock   = dispTotal - dispCash
 
   // 금액 포맷 (KRW or USD)
   const fmtVal = (krwAmt) => {
@@ -187,7 +207,7 @@ export default function HoldingsTab() {
           }}>
           <div>
             <div className="hero-label">
-              총 평가액 {privacyMode && (
+              총 자산 {privacyMode && (
                 <span style={{ fontSize: 9, opacity: .65, fontWeight: 600, marginLeft: 4 }}>
                   · 탭하여 표시
                 </span>
@@ -195,9 +215,17 @@ export default function HoldingsTab() {
             </div>
             <div className="hero-value">
               {privacyMode
-                ? mask(fmtVal(totalCur))
-                : <NumberTicker value={totalCur} format={fmtVal} duration={0.9} />}
+                ? mask(fmtVal(totalAssets))
+                : <NumberTicker value={totalAssets} format={fmtVal} duration={0.9} />}
             </div>
+            {/* 예수금이 있을 때만 내역을 덧붙인다 — 0이면 총자산 = 주식 평가액이라 사족이다 */}
+            {Math.round(cashKrw) !== 0 && (
+              <div style={{ fontSize: 11, color: 'var(--clr-text-muted)', marginTop: 2,
+                fontVariantNumeric: 'tabular-nums' }}
+                title="주식 평가액 + 예수금">
+                주식 {mask(fmtUnitInt(dispStock))} · 예수금 {mask(fmtUnitInt(dispCash))}
+              </div>
+            )}
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="hero-label">손익</div>
