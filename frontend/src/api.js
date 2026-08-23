@@ -206,7 +206,9 @@ export const deleteGoal  = (id)   => api.delete(`/goals/${id}`).then(r => r.data
 export const projectGoal = (body) => api.post('/goals/project', body).then(r => r.data)
 
 // 투자 나침반 — 최근 '판단이 바뀐' 신호 (종목 단위, 사용자 무관)
-export const getCompassSignals = (days = 3) =>
+// 기본 7일 — 3일이면 주말·연휴를 끼고 신호를 통째로 놓친다.
+// (2026-08-24: 실제로 5일 지난 신호 2건이 창 밖이라 배너가 안 떴다)
+export const getCompassSignals = (days = 7) =>
   api.get('/compass/signals', { params: { days } }).then(r => r.data)
 
 // 2단계 인증 (TOTP)

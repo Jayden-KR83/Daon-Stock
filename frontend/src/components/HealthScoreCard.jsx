@@ -15,7 +15,13 @@ const S_GRADE_TIPS = {
  * Portfolio Health Score — 0-100 종합 점수 + 등급 + 4개 하위 지표 + 약점 코멘트.
  * 비중 탭의 NetWorthChart 다음에 임베드.
  */
-export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw = 1380 }) {
+/* compact — 기본은 한 줄 배지로만 보여주고, 누르면 전체가 펼쳐진다.
+   왜: '72점'이라는 종합 점수 자체는 다음 행동을 지시하지 못한다. 행동은 아래
+   리밸런싱 경고에서 나온다. 그래서 점수는 경고 위 한 줄로 축약하고, 하위 지표
+   해설은 원할 때만 펼치도록 했다(정보는 유지, 화면 길이는 회수). */
+export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw = 1380,
+                                          compact = false }) {
+  const [expanded, setExpanded] = useState(!compact)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
@@ -52,6 +58,41 @@ export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw 
 
   if (allHoldings.length === 0) return null
 
+  // ── 한 줄 배지 (compact 기본 상태) ──
+  if (compact && !expanded) {
+    const score = data?.overall
+    return (
+      <div className="mono-card" style={{ marginBottom: 12, padding: '10px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.04em',
+            color: 'var(--m-text-secondary)' }}>건강도</span>
+          {score == null ? (
+            <span style={{ fontSize: 12, color: 'var(--m-text-tertiary)' }}>
+              {loading ? '계산 중…' : (err || '계산 대기')}
+            </span>
+          ) : (
+            <>
+              <span style={{ fontSize: 18, fontWeight: 900, letterSpacing: '-.02em',
+                color: data.grade_color || 'var(--m-text)', fontVariantNumeric: 'tabular-nums' }}>
+                {score}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: data.grade_color || 'var(--m-text)' }}>
+                {data.grade}
+              </span>
+              {data.weakest && (
+                <span className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)' }}>
+                  · 가장 약한 축 <strong style={{ color: 'var(--m-text-secondary)' }}>{data.weakest}</strong>
+                </span>
+              )}
+            </>
+          )}
+          <button onClick={() => setExpanded(true)} className="mono-pill"
+            style={{ marginLeft: 'auto', cursor: 'pointer' }}>자세히</button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="mono-card" style={{ marginBottom: 12 }}>
       <div className="mono-section-header">
@@ -61,10 +102,16 @@ export default function HealthScoreCard({ allHoldings = [], prices = {}, usdKrw 
             분산도·섹터·변동성·위험조정 수익 종합 100점 평가
           </div>
         </div>
-        <button onClick={run} disabled={loading} className="mono-pill"
-          style={{ cursor: loading ? 'wait' : 'pointer' }}>
-          {loading ? '계산 중…' : '재계산'}
-        </button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button onClick={run} disabled={loading} className="mono-pill"
+            style={{ cursor: loading ? 'wait' : 'pointer' }}>
+            {loading ? '계산 중…' : '재계산'}
+          </button>
+          {compact && (
+            <button onClick={() => setExpanded(false)} className="mono-pill"
+              style={{ cursor: 'pointer' }}>접기</button>
+          )}
+        </div>
       </div>
 
       {err && (

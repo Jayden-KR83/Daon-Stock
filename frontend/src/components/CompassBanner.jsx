@@ -31,7 +31,7 @@ export default function CompassBanner({ allHoldings, prices, usdKrw }) {
   const [dismissed, setDismissed] = React.useState(loadDismissed)
   const { data } = useQuery({
     queryKey: ['compass-signals'],
-    queryFn: () => getCompassSignals(3),
+    queryFn: () => getCompassSignals(7),
     staleTime: 10 * 60_000,
   })
 
@@ -70,6 +70,9 @@ export default function CompassBanner({ allHoldings, prices, usdKrw }) {
   const tone = pick.new_reco === '매도' ? 'var(--m-negative)'
              : pick.new_reco === '매수' ? 'var(--m-positive)'
              : 'var(--m-text-secondary)'
+  // prev_reco 가 비어 있으면 '판단이 바뀐' 것이 아니라 그 종목의 **첫 분석**이다.
+  // 둘을 같은 문장으로 쓰면("분석 없음 → 보유로 바뀌었습니다") 사실과 어긋난다.
+  const isFirst = !String(pick.prev_reco || '').trim()
 
   function dismiss() {
     const next = new Set(dismissed); next.add(pick._key)
@@ -81,7 +84,7 @@ export default function CompassBanner({ allHoldings, prices, usdKrw }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
         <div className="mono-section-title" style={{ color: tone }}>투자 나침반</div>
         <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)' }}>
-          보유 종목 판단 변경
+          {isFirst ? '보유 종목 첫 분석' : '보유 종목 판단 변경'}
         </span>
         <button type="button" onClick={dismiss} className="btn-secondary"
           style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: 11 }}>
@@ -92,13 +95,21 @@ export default function CompassBanner({ allHoldings, prices, usdKrw }) {
       <div className="ko-keep" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6,
         color: 'var(--m-text)' }}>
         <strong>{pick.name || pick.ticker}</strong>
-        {' '}판단이{' '}
-        <span style={{ color: 'var(--m-text-tertiary)' }}>
-          {pick.prev_reco || '분석 없음'}
-        </span>
-        {' → '}
-        <strong style={{ color: tone }}>{pick.new_reco}</strong>
-        {' '}로 바뀌었습니다.<br />
+        {isFirst ? (
+          <>
+            {' '}첫 분석 결과는{' '}
+            <strong style={{ color: tone }}>{pick.new_reco}</strong>
+            {' '}입니다.<br />
+          </>
+        ) : (
+          <>
+            {' '}판단이{' '}
+            <span style={{ color: 'var(--m-text-tertiary)' }}>{pick.prev_reco}</span>
+            {' → '}
+            <strong style={{ color: tone }}>{pick.new_reco}</strong>
+            {' '}로 바뀌었습니다.<br />
+          </>
+        )}
         내 포트폴리오에서 <strong>{pick._pct.toFixed(1)}%</strong> 비중입니다.
       </div>
 

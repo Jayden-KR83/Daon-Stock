@@ -6,7 +6,6 @@ import { useStore } from '../store'
 import LogoCircle from '../components/LogoCircle'
 import InfoTip from '../components/InfoTip'
 import BorderBeam from '../components/BorderBeam'
-import BacktestSection from '../components/BacktestSection'
 import NetWorthChart from '../components/NetWorthChart'
 import GoalsCard from '../components/GoalsCard'
 import HealthScoreCard from '../components/HealthScoreCard'
@@ -159,6 +158,9 @@ export default function AllocationTab() {
 
   const [view,       setView]       = useState('계좌별')
   const [accFilter,  setAccFilter]  = useState('ALL')  // for 섹터별/종목별
+  // 진단(경고·건강도) 범위. 기본은 'ALL' — 계좌 단위로만 보면 분산이 실제보다
+  // 나빠 보인다(ISA에 반도체만·퇴직에 채권만이면 각각은 쏠림이지만 합치면 균형).
+  const [diagAcc,    setDiagAcc]    = useState('ALL')
   const [expandedKey, setExpandedKey] = useState(null) // 클릭 시 펼쳐지는 그룹 키
   const [metrics,    setMetrics]    = useState(null)  // { metrics: [...], summary: {...}, computed_at, fingerprint }
   const [metricsLoading, setMetricsLoading] = useState(false)
@@ -208,6 +210,11 @@ export default function AllocationTab() {
     if (accFilter === 'ALL') return Object.values(cashByAccount).reduce((s, v) => s + v, 0)
     return cashByAccount[accFilter] || 0
   }, [cashByAccount, accFilter])
+
+  // 진단 대상 — 계좌 필터 적용본
+  const diagHoldings = React.useMemo(() => (
+    diagAcc === 'ALL' ? allHoldings : allHoldings.filter(h => h.account === diagAcc)
+  ), [allHoldings, diagAcc])
 
   // 뷰에 따른 데이터 (accFilter 적용)
   const filteredForView = React.useMemo(() => {
@@ -459,31 +466,16 @@ export default function AllocationTab() {
         <PortfolioSummaryBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
       )}
 
-      {/* 분석 리포트 MD 내보내기 — 타 LLM 교차검증용 */}
-      {allHoldings.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-          <button onClick={exportReport} disabled={exporting} style={{
-            padding: '7px 14px', borderRadius: 2, background: 'transparent',
-            border: '1px solid var(--m-outline-variant)', color: 'var(--m-text-secondary)',
-            fontSize: 12, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
-            opacity: exporting ? 0.5 : 1, fontFamily: 'inherit' }}
-            title="현재 분석 결과(보유구성·Health·경고·배당·AI전략)를 마크다운으로 내려받아 다른 LLM에 교차검증 의뢰">
-            {exporting ? '리포트 생성 중… (최대 20초)' : '분석 리포트 MD 내보내기'}
-          </button>
-        </div>
-      )}
-
-      {/* ━━ Ⅰ. 포트폴리오 스냅샷 — 현황 한눈에 ━━ */}
-      <ChapterHeader n="Ⅰ" title="포트폴리오 스냅샷" sub="자산 추이 · 배당 · 비중 구성" />
+      {/* ━━ Ⅰ. 지금 내 상태 ━━
+          현황만 담는다. 문제 제기(Ⅱ)·실행(Ⅲ)과 섞지 않는다. */}
+      <ChapterHeader n="Ⅰ" title="지금 내 상태" sub="자산 추이 · 비중 구성" />
 
       {/* Net Worth 추이 */}
       <NetWorthChart />
 
-      {/* 배당금 이력 + 캘린더 */}
-      {allHoldings.length > 0 && (
-        <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
-      )}
-      {/* (이어서 아래에 비중 — 계좌·섹터·종목 분해가 표시됩니다) */}
+      {/* (이어서 비중 — 계좌·섹터·종목 분해)
+          배당은 Ⅲ장으로 옮겼다. '과거 배당 이력'과 '목표 배당 시뮬'이 서로 다른
+          장에 떨어져 있으면 "지금 얼마 → 목표 얼마 → 그러려면 이렇게"가 이어지지 않는다. */}
 
 
       {/* View toggle */}
@@ -719,24 +711,66 @@ export default function AllocationTab() {
         </>
       )}
 
-      {/* ━━ Ⅱ. 리스크 진단 · 건강도 ━━ */}
+      {/* ━━ Ⅱ. 무엇이 문제인가 ━━
+          결정론(룰 엔진) 경고를 먼저, AI 진단을 그다음에.
+          백테스트는 삭제했다 — 지금 보유한 종목은 이미 살아남은 종목이라 과거 성과가
+          구조적으로 과대평가되고(생존 편향), '내 실제 성과'는 Ⅰ장 자산 추이가 이미 보여준다. */}
       {allHoldings.length > 0 && (
         <>
-          <ChapterHeader n="Ⅱ" title="리스크 진단 · 건강도"
-            sub="종합 건강 점수 · 자동 리밸런싱 경고 · 백테스트" />
-          <HealthScoreCard allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
-          <AlertsCard allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
+          <ChapterHeader n="Ⅱ" title="무엇이 문제인가"
+            sub="리밸런싱 경고 · 건강도 · AI 리스크 진단" />
+
+          {/* 진단 범위 — 계좌 단위로 좁혀 볼 수 있다 */}
+          <div className="seg-ctrl" style={{ marginBottom: 8 }}>
+            {['ALL', ...ACCOUNTS].map(acc => (
+              <button key={acc} className={`seg-btn ${diagAcc === acc ? 'active' : ''}`}
+                onClick={() => setDiagAcc(acc)}>
+                {acc === 'ALL' ? '전체' : (ACC_LABELS[acc] || acc)}
+              </button>
+            ))}
+          </div>
+          {diagAcc !== 'ALL' && (
+            <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
+              lineHeight: 1.6, marginBottom: 10 }}>
+              <div>이 진단은 <strong>{ACC_LABELS[diagAcc] || diagAcc}</strong> 계좌만 기준입니다.</div>
+              <div>계좌 하나만 보면 분산이 실제보다 나빠 보일 수 있습니다 — 전체 기준도 함께 확인하세요.</div>
+            </div>
+          )}
+
+          {diagHoldings.length === 0 ? (
+            <div className="mono-card ko-keep" style={{ marginBottom: 12, fontSize: 12,
+              color: 'var(--m-text-tertiary)' }}>
+              이 계좌에는 보유 종목이 없습니다.
+            </div>
+          ) : (
+            <>
+              {/* 건강도 = 한 줄 배지. 점수 자체는 행동을 지시하지 못하므로 축약하고,
+                  실제 행동은 바로 아래 경고에서 나온다. */}
+              <HealthScoreCard key={`h-${diagAcc}`} compact
+                allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
+              <AlertsCard key={`a-${diagAcc}`}
+                allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
+            </>
+          )}
+
+          {/* AI 리스크 진단 — 생성 버튼은 Ⅲ장에 있다.
+              결과가 이 위치(Ⅱ장)에 붙으므로, 리포트가 없을 때는 어디서 만드는지 알려준다.
+              안내가 없으면 Ⅱ장이 그냥 빈 채로 끝나 사용자가 기능의 존재를 모른다. */}
+          {strategyReport ? (
+            <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} part="diagnosis" />
+          ) : (
+            <div className="mono-card ko-keep" style={{ marginBottom: 12, fontSize: 11.5,
+              color: 'var(--m-text-tertiary)', lineHeight: 1.6 }}>
+              <div>AI 리스크 진단은 아직 없습니다.</div>
+              <div>아래 Ⅲ장의 <strong>Portfolio Strategy Report</strong>를 실행하면 여기에 표시됩니다.</div>
+            </div>
+          )}
         </>
       )}
 
-      {/* 백테스트 시뮬레이션 */}
-      {allHoldings.length > 0 && (
-        <BacktestSection allHoldings={allHoldings} />
-      )}
-
-      {/* ━━ Ⅲ. 액션 플랜 & 목표 ━━ */}
-      <ChapterHeader n="Ⅲ" title="액션 플랜 & 목표"
-        sub="목표 기반 계획 · AI 시계열 전략 · 리밸런싱 · 액션" />
+      {/* ━━ Ⅲ. 그래서 무엇을 할까 ━━ */}
+      <ChapterHeader n="Ⅲ" title="그래서 무엇을 할까"
+        sub="목표 · 자산배분 · 배당 · 추천 액션" />
       <GoalsCard />
 
       {/* 다온 AI 전략 리포트 — Portfolio Strategy Report 스타일 */}
@@ -852,10 +886,42 @@ export default function AllocationTab() {
               transition={{ duration: 0.45, ease: [0.22, 0.61, 0.36, 1] }}
               style={{ marginBottom: 16 }}
             >
-              <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} />
+              {/* ① 5년 단위 자산배분 */}
+              <DaonAIReport data={strategyReport} part="alloc" />
             </motion.div>
           )}
         </>
+      )}
+
+      {/* ② 배당 — "지금 얼마 받고 있나 → 목표를 넣으면 → 이렇게 배분하면 된다"
+          한 흐름으로 붙인다. 예전에는 이력이 Ⅰ장, 시뮬이 Ⅲ장에 떨어져 있었다. */}
+      {allHoldings.length > 0 && (
+        <>
+          <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
+          {strategyReport && (
+            <DaonAIReport data={strategyReport} part="dividend" />
+          )}
+        </>
+      )}
+
+      {/* ③ 결론 — 추천 액션 */}
+      {strategyReport && (
+        <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} part="actions" />
+      )}
+
+      {/* ━━ 부록 ━━ 자주 쓰지 않는 도구는 맨 아래로 */}
+      {allHoldings.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end',
+          marginTop: 8, marginBottom: 12 }}>
+          <button onClick={exportReport} disabled={exporting} style={{
+            padding: '7px 14px', borderRadius: 2, background: 'transparent',
+            border: '1px solid var(--m-outline-variant)', color: 'var(--m-text-secondary)',
+            fontSize: 12, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+            opacity: exporting ? 0.5 : 1, fontFamily: 'inherit' }}
+            title="현재 분석 결과(보유구성·Health·경고·배당·AI전략)를 마크다운으로 내려받아 다른 LLM에 교차검증 의뢰">
+            {exporting ? '리포트 생성 중… (최대 20초)' : '분석 리포트 MD 내보내기'}
+          </button>
+        </div>
       )}
     </div>
   )
@@ -1213,58 +1279,6 @@ function VerifiedFacts({ vf }) {
   )
 }
 
-/* 저점발굴 시계열 매칭 — 단/중/장기 지평선별 고위험 혁신주 위성 후보(백엔드 결정론값).
-   가드레일 대신 '시간 지평선 가중치'로 성격을 바꾸는 구조: 단기=생존력, 중기=R&D알파, 장기=0% 수렴. */
-function DiscoveryHorizon({ dh }) {
-  if (!dh || ((dh.short?.length || 0) === 0 && (dh.mid?.length || 0) === 0)) return null
-  const Chips = ({ items, meta }) => (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-      {items.map((c, i) => (
-        <span key={i} style={{ fontSize: 11, color: 'var(--m-text)',
-          border: '1px solid var(--m-outline-variant)', borderRadius: 2, padding: '3px 7px' }}>
-          <strong>{c.ticker}</strong>
-          <span style={{ color: 'var(--m-text-tertiary)', marginLeft: 4 }}>{meta(c)}</span>
-        </span>
-      ))}
-    </div>
-  )
-  const Row = ({ label, desc, children }) => (
-    <div style={{ padding: '8px 0', borderTop: '1px solid var(--m-outline-variant)' }}>
-      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--m-text)', marginBottom: 2 }}>{label}</div>
-      <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
-        marginBottom: 6, lineHeight: 1.5 }}>{desc}</div>
-      {children}
-    </div>
-  )
-  return (
-    <div className="mono-card" style={{ marginBottom: 12 }}>
-      <div className="mono-section-title is-accent" style={{ marginBottom: 2 }}>
-        저점발굴 시계열 매칭
-      </div>
-      <div className="mono-section-sub ko-keep" style={{ marginBottom: 6 }}>
-        고위험 혁신주(AI·바이오)를 지평선별 <strong>위성(satellite)</strong> 비중으로만 — 핵심 자산 아님.
-      </div>
-      {dh.short?.length > 0 && (
-        <Row label="단기 (1~3년) · 안정성 우선"
-          desc="생존 런웨이 3년 초과 + 바닥다지기 80 초과 — 부도·증자 리스크 낮은 종목만, 소액(≤5%) 분산">
-          <Chips items={dh.short} meta={c => `런웨이 ${c.runway_years}y · 바닥 ${c.base_building}`} />
-        </Row>
-      )}
-      {dh.mid?.length > 0 && (
-        <Row label="중기 (5~10년) · 구조적 알파"
-          desc="R&D 집중도 최상위 — AI·바이오 메가트렌드 상업화(≈5년) 알파 포착">
-          <Chips items={dh.mid} meta={c => `R&D ${c.rnd_intensity}`} />
-        </Row>
-      )}
-      <Row label="장기 (11~15년·은퇴 임박) · 0% 수렴"
-        desc={dh.long_rule || '고위험 혁신주 비중 0%로 수렴 — 자본손실 위험 동결'}>
-        <span style={{ fontSize: 11, color: 'var(--m-negative)', fontWeight: 700 }}>
-          목표 비중 0% (Decay)
-        </span>
-      </Row>
-    </div>
-  )
-}
 
 /* 월 배당 전환 시뮬레이터 — AI 제안(계좌·자산·비중)을 시드로, 사용자가 비중·가정 배당률을
    직접 조정하면 예상 월 현금흐름을 결정론으로 즉시 재계산. 예상월 = 총액 × 비중% × 배당률% ÷ 12. */
@@ -1351,128 +1365,131 @@ function _fmtKstDateTime(epochSec) {
   })
 }
 
-function DaonAIReport({ data, computedAt = 0 }) {
+/* AI 전략 리포트 — 챕터별로 나눠 렌더한다.
+ *
+ * part: 'diagnosis' | 'alloc' | 'dividend' | 'actions'
+ *
+ * 왜 나눴나: 한 덩어리로 쏟으면 "지금 어떤가 → 뭐가 문제인가 → 그래서 뭘 할까"의
+ * 흐름이 끊긴다. 진단은 Ⅱ장(문제)에, 배분·배당·액션은 Ⅲ장(실행)에 놓기 위해
+ * 같은 data 를 파트별로 나눠 그린다(상태는 하나, 그림만 여러 곳).
+ *
+ * 2026-08-24 정리 — 카드 수를 줄였다(오너 판정):
+ *  · 전문가 총평 → '종합 리스크 진단'에 흡수 (같은 말을 두 카드가 반복)
+ *  · 주요 위험 요소 → 같은 진단 카드 안으로 (구조는 유지, 카드만 통합)
+ *  · 글로벌 매크로 포지셔닝 → 삭제 (예측이고, 개인 포트폴리오 행동을 바꾸지 않는다)
+ *  · 저점발굴 시계열 → 삭제 (발굴 탭이 따로 있어 중복. 투기 영역을 전략에 섞지 않는다)
+ */
+function DaonAIReport({ data, computedAt = 0, part = 'diagnosis' }) {
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
     MED:  { color: '#D97706', bg: 'rgba(217,119,6,.10)', label: '중기', desc: '1-3개월',  icon: '◆'  },
     LOW:  { color: '#16A34A', bg: 'rgba(22,163,74,.10)', label: '장기', desc: '6개월+',  icon: '✓'  },
   }
 
+  /* ── Ⅱ장: 진단 (총평 + 리스크 진단 + 위험 요소를 한 카드로) ── */
+  if (part === 'diagnosis') {
+    const items = [
+      ...splitToSentences(data.expert_review || ''),
+      ...splitToSentences(data.risk_diagnosis || ''),
+    ]
+    const risks = data.risk_factors || []
+    if (items.length === 0 && risks.length === 0) return null
+    return (
+      <div>
+        {computedAt > 0 && (
+          <div style={{ textAlign: 'right', fontSize: 10.5, color: 'var(--m-text-tertiary)',
+            marginBottom: 6 }}>
+            분석 기준 {_fmtKstDateTime(computedAt)}
+          </div>
+        )}
+        <div className="mono-card" style={{ marginBottom: 12 }}>
+          <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>
+            종합 리스크 진단
+          </div>
+          {items.length > 0 && (
+            <BulletList items={items}
+              color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
+          )}
+
+          {risks.length > 0 && (
+            <div style={{ marginTop: items.length > 0 ? 12 : 0 }}>
+              <SubLabel tone="negative">주요 위험 요소 {risks.length}</SubLabel>
+              {risks.map((r, i) => {
+                const sev = riskSeverity(r.title, r.detail)
+                return (
+                  <div key={i} className="mono-row">
+                    <div className="mono-row-content">
+                      <div className="mono-row-title ko-keep" style={{ display: 'flex',
+                        alignItems: 'center', gap: 6 }}>
+                        <span className={`sev-label is-${sev.level}`}>{sev.label}</span>
+                        <span style={{ color: 'var(--m-text)' }}>{r.title}</span>
+                      </div>
+                      <div className="mono-row-body ko-keep">
+                        <BulletList items={splitToSentences(r.detail)}
+                          color="var(--m-text)"
+                          bulletColor="var(--m-text-tertiary)" tone="neutral" small />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  /* ── Ⅲ장 ①: 5년 단위 자산배분 ── */
+  if (part === 'alloc') {
+    if (!(data.allocation_phases?.length > 0)) return null
+    return (
+      <div className="mono-card" style={{ marginBottom: 12 }}>
+        <div className="mono-section-title is-accent" style={{ marginBottom: 10 }}>
+          인생 타임라인 · 5년 단위 자산배분
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {data.allocation_phases.map((ph, i) => <AllocPhase key={i} phase={ph} idx={i} />)}
+        </div>
+      </div>
+    )
+  }
+
+  /* ── Ⅲ장 ②: 배당 — 목표를 넣으면 필요한 배분을 돌려준다 ── */
+  if (part === 'dividend') {
+    const sim = data.dividend_simulation
+    if (!sim || !(sim.rows?.length > 0 || sim.warning)) return null
+    return (
+      <div className="mono-card" style={{ marginBottom: 12 }}>
+        <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>
+          목표 배당 시뮬레이션
+        </div>
+        <div className="mono-section-sub ko-keep" style={{ marginBottom: 8 }}>
+          비중·가정 배당수익률을 직접 조정하면 예상 월 현금흐름이 즉시 다시 계산됩니다.
+        </div>
+        {sim.rows?.length > 0 && (
+          <DividendSimulator sim={sim}
+            totalKrw={data.verified_facts?.total_krw || data._metrics_summary?.total_krw || 0} />
+        )}
+        {sim.warning && (
+          <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--m-surface-variant)',
+            border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
+            <SubLabel tone="negative">월가의 경고</SubLabel>
+            <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)',
+              lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+              {breakSentences(String(sim.warning).replace(/^\s*\[?월가의 경고\]?\s*[:·-]?\s*/, ''))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  /* ── Ⅲ장 ③: 결론 — 추천 액션 + 예외 메모 ── */
+  if (!(data.rebalancing || data.actions?.length > 0
+        || (data.edge_notes && String(data.edge_notes).trim()))) return null
   return (
     <div>
-      {/* 분석 도출 시각 — 우측 작게. 사용자가 최신 정보로 업데이트할지 판단용 */}
-      {computedAt > 0 && (
-        <div style={{ textAlign: 'right', fontSize: 10.5, color: 'var(--m-text-tertiary)',
-          marginBottom: 6 }}>
-          분석 기준 {_fmtKstDateTime(computedAt)}
-        </div>
-      )}
-
-      {/* 전문가 총평 */}
-      <div className="mono-card" style={{ marginBottom: 12 }}>
-        <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>
-          전문가 총평
-        </div>
-        <BulletList items={splitToSentences(data.expert_review)}
-          color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
-      </div>
-
-      {/* [1] 종합 리스크 진단 — 타임라인 vs 현재 포지션 */}
-      {data.risk_diagnosis && (
-        <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>
-            종합 리스크 진단 · 타임라인 vs 현재 포지션
-          </div>
-          <BulletList items={splitToSentences(data.risk_diagnosis)}
-            color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
-        </div>
-      )}
-
-      {/* [2] 인생 타임라인 5년 단위 자산배분 */}
-      {data.allocation_phases?.length > 0 && (
-        <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-title is-accent" style={{ marginBottom: 10 }}>
-            인생 타임라인 · 5년 단위 자산배분
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {data.allocation_phases.map((ph, i) => <AllocPhase key={i} phase={ph} idx={i} />)}
-          </div>
-        </div>
-      )}
-
-      {/* 저점발굴 시계열 매칭 — 지평선별 위성(satellite) 후보 + 장기 decay */}
-      <DiscoveryHorizon dh={data.discovery_horizon} />
-
-      {/* [3] 월 배당 전환 시뮬레이션 */}
-      {data.dividend_simulation
-        && (data.dividend_simulation.rows?.length > 0 || data.dividend_simulation.warning) && (
-        <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>월 배당 전환 시뮬레이션</div>
-          <div className="mono-section-sub ko-keep" style={{ marginBottom: 8 }}>
-            비중·가정 배당수익률을 직접 조정하면 예상 월 현금흐름이 즉시 다시 계산됩니다.
-          </div>
-          {data.dividend_simulation.rows?.length > 0 && (
-            <DividendSimulator sim={data.dividend_simulation}
-              totalKrw={data.verified_facts?.total_krw || data._metrics_summary?.total_krw || 0} />
-          )}
-          {data.dividend_simulation.warning && (
-            <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--m-surface-variant)',
-              border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
-              <SubLabel tone="negative">월가의 경고</SubLabel>
-              <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)',
-                lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-                {breakSentences(String(data.dividend_simulation.warning).replace(/^\s*\[?월가의 경고\]?\s*[:·-]?\s*/, ''))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 매크로 뷰 */}
-      {data.macro_view && (
-        <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>
-            글로벌 매크로 포지셔닝
-          </div>
-          <BulletList items={splitToSentences(data.macro_view)}
-            color="var(--m-text)" bulletColor="var(--m-text-tertiary)" tone="neutral" />
-        </div>
-      )}
-
-      {/* 위험 요소 — sev-dot 제거, 우측 라벨만 */}
-      {data.risk_factors?.length > 0 && (
-        <div className="mono-card" style={{ marginBottom: 12 }}>
-          <div className="mono-section-header">
-            <div className="mono-section-title is-negative">
-              주요 위험 요소 <span style={{ color: 'var(--m-text-tertiary)',
-                fontWeight: 600, marginLeft: 4 }}>{data.risk_factors.length}</span>
-            </div>
-          </div>
-          {data.risk_factors.map((r, i) => {
-            const sev = riskSeverity(r.title, r.detail)
-            const sevClass = `is-${sev.level}`
-            return (
-              <div key={i} className="mono-row">
-                <div className="mono-row-content">
-                  {/* 배지 좌측 통일 (추천 액션과 동일 위치) */}
-                  <div className="mono-row-title ko-keep" style={{ display: 'flex',
-                    alignItems: 'center', gap: 6 }}>
-                    <span className={`sev-label ${sevClass}`}>{sev.label}</span>
-                    <span style={{ color: 'var(--m-text)' }}>{r.title}</span>
-                  </div>
-                  <div className="mono-row-body ko-keep">
-                    <BulletList items={splitToSentences(r.detail)}
-                      color="var(--m-text)"
-                      bulletColor="var(--m-text-tertiary)" tone="neutral" small />
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* 실행 가이드 — 리밸런싱(비중 조정) + 추천 액션 통합. 둘 다 "무엇을 할까"라 한 카드로. */}
       {(data.rebalancing || data.actions?.length > 0) && (
         <div className="mono-card" style={{ marginBottom: 12 }}>
           <div className="mono-section-header">
@@ -1482,7 +1499,6 @@ function DaonAIReport({ data, computedAt = 0 }) {
             </span>
           </div>
 
-          {/* 리밸런싱 = 비중 조정 제안 (4면 hairline 박스 — design.md R1) */}
           {data.rebalancing && (
             <div style={{ marginBottom: data.actions?.length > 0 ? 12 : 0,
               background: 'var(--m-surface-variant)',
@@ -1516,7 +1532,6 @@ function DaonAIReport({ data, computedAt = 0 }) {
         </div>
       )}
 
-      {/* 예외 처리 메모 — 마이크로캡 격리·환율 등 */}
       {data.edge_notes && String(data.edge_notes).trim() && (
         <div className="mono-card" style={{ marginBottom: 12 }}>
           <div className="mono-section-title" style={{ marginBottom: 6 }}>예외 처리 메모</div>
@@ -1528,8 +1543,6 @@ function DaonAIReport({ data, computedAt = 0 }) {
       <div style={{ fontSize: 10, color: 'var(--clr-border-strong)', textAlign: 'right', marginTop: 4 }}>
         {computedAt > 0 ? `분석 도출: ${_fmtKstDateTime(computedAt)}` : '생성됨'} · Claude Sonnet 4.6
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

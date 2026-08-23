@@ -85,20 +85,24 @@ export default function PortfolioSummaryBanner({ allHoldings, prices, usdKrw }) 
       padding: '16px 18px 14px',
       marginBottom: 14,
     }}>
-      {/* 상단 — 평가액 + 손익(작게) */}
+      {/* 상단 — 손익 + 구성 카운트.
+          총 평가액(큰 숫자)은 포트폴리오 탭 상단이 이미 같은 값을 크게 보여준다.
+          같은 숫자를 두 탭에서 반복하면 정보가 아니라 소음이 된다(2026-08-24 정리).
+          여기서는 '얼마인가'가 아니라 '어떻게 구성돼 있나'만 남긴다. */}
       <div style={{ display: 'flex', alignItems: 'flex-end',
         justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <div className="m3-label" style={{ marginBottom: 4 }}>총 평가액</div>
+          <div className="m3-label" style={{ marginBottom: 4 }}>평가 손익</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--m-text)',
-              letterSpacing: '-.035em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-              {fmtKrw(totalKrw)}
+            <span style={{ fontSize: 22, fontWeight: 900, lineHeight: 1,
+              color: isPositive ? 'var(--m-positive)' : 'var(--m-negative)',
+              letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums' }}>
+              {isPositive ? '▲' : '▼'} {fmtKrw(Math.abs(totalPnl))}
             </span>
-            <span style={{ fontSize: 12, fontWeight: 800,
+            <span style={{ fontSize: 13, fontWeight: 800,
               color: isPositive ? 'var(--m-positive)' : 'var(--m-negative)',
               fontVariantNumeric: 'tabular-nums' }}>
-              {isPositive ? '▲' : '▼'} {fmtKrw(Math.abs(totalPnl))} · {fmtPct(totalPnlPct)}
+              {fmtPct(totalPnlPct)}
             </span>
           </div>
         </div>
