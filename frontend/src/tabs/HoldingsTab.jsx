@@ -397,18 +397,25 @@ export default function HoldingsTab() {
                 <LogoCircle ticker={h.ticker} size={40} />
               </div>
 
-              {/* 2. Identity (이름 + 티커 inline) */}
-              <div className="h-identity" onClick={() => setChartTicker(h.ticker)}>
+              {/* 2. Identity
+                  주 이름 = 사용자가 실제로 그 종목을 부르는 말.
+                    한국 종목 → 한글 종목명 / 미국 종목 → 티커(AAPL·SPY).
+                  보조 식별자는 데스크톱에서만 옆에 붙는다. 앱(모바일) 폭에서는 둘 다 넣으면
+                  주 이름이 잘려 'TIGER 미국…' 이 된다 — 이름을 온전히 보여주는 쪽을 택했다.
+                  (앱 모드 규칙은 HoldingsTab.css 의 .app-mode-app 블록) */}
+              <div className="h-identity" onClick={() => setChartTicker(h.ticker)}
+                title={h.name && h.name !== h.ticker ? `${h.name} · ${h.ticker}` : h.ticker}>
                 {isKrTicker(h.ticker) && h.name ? (
                   <>
                     <span className="h-identity-name">{h.name}</span>
-                    <span className="h-identity-ticker">{h.ticker}</span>
+                    <span className="h-identity-ticker h-identity-alt">{h.ticker}</span>
                   </>
                 ) : (
                   <>
                     <span className="h-identity-name">{h.ticker}</span>
                     {h.name && h.name !== h.ticker && (
-                      <span className="h-identity-ticker" style={{ marginLeft: 8 }}>{h.name}</span>
+                      <span className="h-identity-ticker h-identity-alt"
+                        style={{ marginLeft: 8 }}>{h.name}</span>
                     )}
                   </>
                 )}
