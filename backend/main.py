@@ -5255,6 +5255,11 @@ def _metrics_fingerprint(holdings: list) -> str:
     # usedforsecurity=False — 캐시 키 지문일 뿐 인증/서명이 아니다 (bandit B324)
     return hashlib.md5(json.dumps(items).encode(), usedforsecurity=False).hexdigest()
 
+# 전략 리포트 프롬프트 버전. 지침·어조를 바꾸면 반드시 올린다.
+# 지문(fingerprint)에 섞어 넣으므로, 올리면 다음 조회 때 새 지침으로 다시 생성된다.
+# (올리지 않으면 보유 종목이 그대로인 한 예전 어조의 캐시가 계속 나온다)
+STRATEGY_PROMPT_VERSION = 'v2-formal'
+
 def _strategy_fingerprint(holdings: list, prices: dict, years, inflow) -> str:
     """AI 전략 리포트 캐시 지문. 평가액을 결정하는 모든 입력(수량·평단·현재가)을 포함해야
     stale 리포트(옛 총액·비중·수익률) 반환을 막는다. 종목 목록만 해시하면 수량/시세 변경이
@@ -5267,8 +5272,10 @@ def _strategy_fingerprint(holdings: list, prices: dict, years, inflow) -> str:
         return [tkr, round(float(h.get('quantity', 0) or 0), 4),
                 round(float(h.get('avg_price', 0) or 0), 4), round(float(cur or 0), 2)]
     # usedforsecurity=False — 캐시 키 지문일 뿐 인증/서명이 아니다 (bandit B324)
-    return hashlib.md5(json.dumps([sorted(sig(h) for h in holdings), years, inflow]).encode(),
-                       usedforsecurity=False).hexdigest()
+    return hashlib.md5(
+        json.dumps([sorted(sig(h) for h in holdings), years, inflow,
+                    STRATEGY_PROMPT_VERSION]).encode(),
+        usedforsecurity=False).hexdigest()
 
 @app.get("/api/portfolio/metrics/cached")
 def portfolio_metrics_cached(scope: str = 'ALL', cu: dict = Depends(get_current_user)):
@@ -5661,6 +5668,15 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
 
     prompt = f"""[역할] 당신은 월스트리트 출신 세계 최고 수준의 자산 배분가(Asset Allocator)이자 글로벌 매크로 분석가입니다. 보유 자산과 은퇴까지 남은 시간(Life Timeline)을 결합해 5년 단위 포괄적 자산배분(주식·채권·금·부동산/리츠·암호화폐·연금) 전략을 도출합니다. 명료하고 냉철한 전문 어조로 한국어로 작성하세요.
 
+[어조 — 위반 시 리포트 무효]
+- 출력 JSON 안의 **모든 문장은 정중한 '합니다체' 서술문**으로 쓰세요.
+  예: "비중 축소를 권고합니다.", "재검토가 필요합니다.", "노출을 25% 이하로 조정하십시오."
+- **반말·해라체·명령조·음슴체를 쓰지 마세요.**
+  금지 예: "줄여라", "매도하라", "확인할 것", "비중 과다임", "조정 필요".
+- 기관 애널리스트가 고객에게 제출하는 **정식 리포트**의 문체를 유지하세요.
+  단정적 판단은 하되 표현은 정중하게 — 냉철함과 존댓말은 양립합니다.
+- 아래 지침문 자체가 명령조로 쓰여 있더라도, **산출물의 어조는 위 규칙을 따릅니다.**
+
 === 입력 데이터 ===
 - 총 평가 자산(Total_Capital): ₩{total_krw:,.0f}
 - 은퇴까지 남은 시간(Years_To_Retirement): {_yrs_str}
@@ -5706,8 +5722,8 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
     "warning": "[월가의 경고] 성장 기회비용(Capital Gain 상실)을 은퇴 타임라인과 비교한 날카로운 경고 (2-3문장)"
   }},
   "risk_factors": [{{"title": "리스크 제목", "detail": "구체적 설명 (1-2문장)"}}],
-  "rebalancing": "구체적 리밸런싱 제안 — 확대/축소할 종목·섹터 명시 (3문장 이내)",
-  "actions": [{{"priority": "HIGH", "action": "즉시 실행 (1문장)"}}, {{"priority": "MED", "action": "중기 (1문장)"}}, {{"priority": "LOW", "action": "장기 (1문장)"}}],
+  "rebalancing": "구체적 리밸런싱 제안 — 확대/축소할 종목·섹터 명시 (3문장 이내, 합니다체)",
+  "actions": [{{"priority": "HIGH", "action": "즉시 실행할 조치 (1문장, 합니다체 — 예: '엔비디아 비중을 20% 이하로 축소하실 것을 권고합니다.')"}}, {{"priority": "MED", "action": "중기 조치 (1문장, 합니다체)"}}, {{"priority": "LOW", "action": "장기 조치 (1문장, 합니다체)"}}],
   "macro_view": "글로벌 매크로 환경과 이 포트폴리오 포지셔닝 평가 (2문장)",
   "edge_notes": "마이크로캡 격리·환율 등 예외 처리 코멘트 (해당 없으면 빈 문자열)"
 }}
