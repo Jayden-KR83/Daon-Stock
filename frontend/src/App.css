@@ -58,9 +58,14 @@
 }
 
 /* ── 웹 모드 레이아웃 ── */
+/* 앱 모드와 같은 이유로 높이를 고정한다. min-height 만 두면 콘텐츠가 길어질 때
+   문서 전체가 스크롤돼 상단 바(앱 모드 전환 버튼 포함)가 화면 밖으로 밀려난다.
+   .web-main-col 이 이미 overflow-y:auto 로 내부 스크롤을 맡고 있으므로
+   높이만 고정하면 상단 바·사이드바가 항상 남는다. */
 .web-root {
   display: flex; flex-direction: row;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   /* Mesh Gradient: 매우 낮은 opacity로 성능 영향 없음 */
   background:
     radial-gradient(ellipse 55% 45% at 8% 12%, rgba(34, 197, 94, .055) 0%, transparent 100%),
@@ -437,7 +442,17 @@ input.input, .btn-primary, .btn-secondary {
 /* 가로 오버플로 방지: 앱 모드 컨테이너에만 적용 (html/body 휠 스크롤 보존)
    주의: max-width 를 재설정하지 말 것 — 위의 .app-mode-app{max-width:480px} 를 덮어
    PC에서 앱(모바일) 모드가 전체 폭으로 펼쳐지는 버그 유발(2026-06 수정). */
-.app-mode-app { overflow-x: hidden; }
+/* ⚠️ overflow-x 만 지정하면 CSS 규칙상 overflow-y 가 auto 로 계산된다.
+   그러면 이 요소가 스크롤 컨테이너가 되는데, 정작 스크롤은 문서가 하고 있어
+   내부의 position:sticky(마켓바)가 통째로 무력화됐다. 상단 컨트롤(알림·테마·웹 전환)도
+   함께 밀려 올라가 스크롤만 하면 모드 전환 버튼이 사라졌다(2026-08-24 실측).
+   → 셸을 화면 높이에 고정하고 세로 스크롤은 .app-main 이 전담한다.
+     그러면 상단 컨트롤과 마켓바는 흐름 안에 있으면서도 항상 화면에 남는다. */
+.app-mode-app {
+  overflow-x: hidden;
+  overflow-y: hidden;
+  height: 100dvh;
+}
 
 /* ── 등록 탭: 엑셀식 인라인 편집 그리드 ── */
 .xls-editor { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 640px; }

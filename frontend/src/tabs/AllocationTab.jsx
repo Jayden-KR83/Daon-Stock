@@ -329,6 +329,14 @@ export default function AllocationTab() {
   const [strategyErr, setStrategyErr] = useState('')
   const [strategyAcc, setStrategyAcc] = useState('ALL')
   const [strategyComputedAt, setStrategyComputedAt] = useState(0)  // epoch seconds
+  // 리포트가 며칠 지났나 — 갱신 권장 표시용. 0 이면 '없음'.
+  // ⚠️ 반드시 strategyComputedAt 선언 **뒤**에 둔다. 위로 올리면 렌더 중 TDZ
+  //    ReferenceError 가 나서 탭 전체가 백지가 된다(2026-08-24 실제 발생).
+  //    빌드는 통과하므로 정적 검사로는 안 잡힌다 — 띄워봐야 보인다.
+  const strategyStaleDays = React.useMemo(() => {
+    if (!strategyComputedAt) return 0
+    return Math.floor((Date.now() / 1000 - strategyComputedAt) / 86400)
+  }, [strategyComputedAt])
   // 은퇴까지 기간·월 납입은 '목표 기반 포트폴리오' 카드에서 설정 → localStorage 공유(생성 시 읽음)
 
   // 계좌 필터/최초 진입 시: 저장된 전략 결과 미리보기
@@ -796,9 +804,33 @@ export default function AllocationTab() {
                 보유 종목 + 은퇴 타임라인을 결합해 5년 단위 자산배분·월배당 시뮬을 생성합니다. 소요 약 1~3분.
               </div>
 
+              {/* 이 리포트가 '언제 기준'인지 — 버튼 바로 옆에 둔다.
+                  아래 결과만 보고는 며칠 전 것인지 알 수 없어 최신 여부를 판단할 수 없었다.
+                  AI 리포트는 생성 시점의 보유·시세를 그대로 굳혀 저장하므로,
+                  생성 시각이 곧 데이터 기준 시각(cut-off)이다. */}
+              <div className="tt-ai-desc ko-keep" style={{ marginTop: 8, fontSize: 11.5 }}>
+                {strategyReport && strategyComputedAt > 0 ? (
+                  <>
+                    <strong style={{ color: 'rgba(248,250,252,.85)' }}>
+                      {_fmtKstDateTime(strategyComputedAt)}
+                    </strong>
+                    {' 기준 · '}
+                    {strategyAcc === 'ALL' ? '전체 계좌' : (ACC_LABELS[strategyAcc] || strategyAcc)}
+                    {strategyStaleDays >= 7 && (
+                      <span style={{ color: '#FCD34D', fontWeight: 700 }}>
+                        {' · '}{strategyStaleDays}일 지남 — 갱신을 권장합니다
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>아직 생성된 리포트가 없습니다 — 아래 버튼을 눌러 시작하세요.</>
+                )}
+              </div>
+
               {/* 은퇴 기간·월 납입은 위 '목표 기반 포트폴리오'에서 설정 → 여기선 그 값을 읽어 분석에만 반영 */}
               <div className="tt-ai-desc" style={{ marginTop: 8, fontSize: 11, opacity: 0.75 }}>
                 은퇴까지 기간·매월 납입액은 위 <strong>목표 기반 포트폴리오</strong>에서 설정한 값을 사용합니다.
+                계좌를 고르면 <strong>그 계좌의 보유 종목만</strong>으로 분석하며, 결과는 계좌별로 따로 저장됩니다.
               </div>
 
               {/* 분석 대상(드롭다운 필터) + 실행 버튼 — 같은 줄 */}
@@ -1357,12 +1389,18 @@ function DividendSimulator({ sim, totalKrw }) {
   )
 }
 
+/* '26. 08. 24. 오후 11:36' 은 연도가 2자리라 한눈에 안 읽힌다.
+   기준 시각은 리포트의 신선도를 판단하는 값이라 모호하면 안 된다 →
+   'YYYY-MM-DD HH:mm KST' 로 고정한다(24시간제, 타임존 명시). */
 function _fmtKstDateTime(epochSec) {
   if (!epochSec) return ''
-  return new Date(epochSec * 1000).toLocaleString('ko-KR', {
-    timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit',
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
-  })
+  }).formatToParts(new Date(epochSec * 1000))
+  const g = t => (p.find(x => x.type === t) || {}).value || ''
+  return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')} KST`
 }
 
 /* AI 전략 리포트 — 챕터별로 나눠 렌더한다.
