@@ -4,6 +4,7 @@ import { motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, pollPortfolioStrategy, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
 import { useStore } from '../store'
 import { usePrivacy, maskText } from '../utils/privacy'
+import SharedBulletList from '../components/BulletList'
 import LogoCircle from '../components/LogoCircle'
 import InfoTip from '../components/InfoTip'
 import BorderBeam from '../components/BorderBeam'
@@ -1782,26 +1783,11 @@ function AllocPhase({ phase, idx }) {
    - tone: 'pos' | 'neg' | 'neutral' — 숫자 강조 색상 결정
    - small: 더 작은 폰트 사용 */
 function BulletList({ items = [], color, bulletColor, tone = 'neutral', small = false }) {
-  if (!items || items.length === 0) return null
-  // 머릿글 마커 통일: 모든 문장(단일 포함)에 동일한 작은 정사각형 마커.
-  // 전문 자산관리 보고서 톤 + design.md 직사각형 원칙(원형 점 → 사각형).
+  /* 마커 자체는 components/BulletList.jsx 하나만 쓴다(종목 분석과 동일한 머릿글).
+     여기서는 AI 본문 전용 렌더러(**강조**·숫자 색상)만 얹는다. */
   return (
-    <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
-      {items.map((s, i) => (
-        <li key={i} className="ko-keep" style={{
-          position: 'relative', paddingLeft: 15,
-          marginBottom: i < items.length - 1 ? 7 : 0,
-          fontSize: small ? 12 : 13, color, lineHeight: 1.7,
-        }}>
-          <span style={{
-            position: 'absolute', left: 0, top: '0.6em',
-            width: 5, height: 5, borderRadius: 0,
-            background: bulletColor || color, opacity: 0.9,
-          }} />
-          <HighlightedText text={s} tone={tone} />
-        </li>
-      ))}
-    </ul>
+    <SharedBulletList items={items} color={color} bulletColor={bulletColor} small={small}
+      renderItem={(s) => <HighlightedText text={s} tone={tone} />} />
   )
 }
 

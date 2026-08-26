@@ -10,6 +10,7 @@ import { useAccounts } from '../utils/accounts'
 import TwoFactorCard from '../components/TwoFactorCard'
 import AnalysisAdminCard from '../components/AnalysisAdminCard'
 import AccountCashCard from '../components/AccountCashCard'
+import PushSetupCard from '../components/PushSetupCard'
 
 export default function ManageTab() {
   const qc = useQueryClient()
@@ -55,6 +56,10 @@ export default function ManageTab() {
           }}
         />
       )}
+
+      {/* 휴대폰 알림 — Web Push 는 예전부터 있었지만 켜는 곳이 알림 벨 시트 안쪽뿐이라
+          기능이 있는지조차 몰랐다. 설정 탭 상단으로 꺼낸다. */}
+      {currentUser && <PushSetupCard />}
 
       {/* 계좌별 예수금 — 총자산·현금비중의 입력원 */}
       {currentUser && <AccountCashCard />}

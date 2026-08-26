@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
+import BulletList, { splitToSentences } from '../components/BulletList'
+import { normalizeReco, recoColor as recoColorOf, RECO_HELP } from '../utils/reco'
+import InfoTip from '../components/InfoTip'
 import { useQuery } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { getStock, getNews, searchStocks, getPortfolio, getFundamentals, getPeers, analyzeStock, getCachedAnalysis, getFinancialsTrend, authMe } from '../api'
@@ -1035,8 +1038,9 @@ function breakSentences(text) {
 
 /* ── AI 분석 결과 (확장 스키마: 회사 동향·실적·호재·애널리스트·출처) ── */
 function AiStockResult({ data, isUs, cur }) {
-  const recColor = data.recommendation === '매수' ? '#16A34A'
-                 : data.recommendation === '매도' ? '#DC2626' : '#F59E0B'
+  /* 캐시에 남은 옛 표기('보유')를 화면에 그대로 찍지 않는다 — utils/reco.js 참조 */
+  const reco     = normalizeReco(data.recommendation)
+  const recColor = recoColorOf(reco)
   const sources = data.sources || []
   const fmtTarget = (v) => isUs
     ? `$${v.toFixed(2)}`
@@ -1057,8 +1061,17 @@ function AiStockResult({ data, isUs, cur }) {
         transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
         style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}
       >
-        <span style={{ fontSize: 16, fontWeight: 900, color: recColor, border: `2px solid ${recColor}`,
-          borderRadius: 4, padding: '3px 12px' }}>{data.recommendation}</span>
+        <span title={RECO_HELP}
+          style={{ fontSize: 16, fontWeight: 900, color: recColor, border: `2px solid ${recColor}`,
+            borderRadius: 4, padding: '3px 12px', cursor: 'help' }}>{reco}</span>
+        {/* 등급이 무슨 뜻인지 옆에 바로 적는다. '중립' 은 보유 여부에 따라 읽는 법이
+            달라서(유지 / 관망), 툴팁만으로는 오해가 남는다. */}
+        <InfoTip text={RECO_HELP} />
+        {reco === '중립' && (
+          <span style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>
+            보유 중이면 유지 · 미보유면 관망
+          </span>
+        )}
         {data.priceTarget > 0 && (
           <span style={{ fontSize: 12, color: 'var(--clr-text-sub)' }}>
             목표가: <NumberTicker value={data.priceTarget} format={fmtTarget} duration={1.0} />
@@ -1083,7 +1096,7 @@ function AiStockResult({ data, isUs, cur }) {
       {/* 핵심 요약 — 리포트의 첫 블록. 항상 펼침(접히면 결론부터 사라진다) */}
       {data.summary && (
         <Section title="핵심 요약" collapsible={false}>
-          <p style={{ ...proseStyle, fontSize: 13 }}>{breakSentences(data.summary)}</p>
+          <BulletList items={splitToSentences(data.summary)} />
         </Section>
       )}
 
@@ -1092,10 +1105,10 @@ function AiStockResult({ data, isUs, cur }) {
         const secs = []
         if (data.company_overview)
           secs.push({ title: '기업 개요 · 전략',
-            body: <p style={proseStyle}>{breakSentences(data.company_overview)}</p> })
+            body: <BulletList items={splitToSentences(data.company_overview)} small /> })
         if (data.earnings_ir)
           secs.push({ title: '실적 · 가이던스',
-            body: <p style={proseStyle}>{breakSentences(data.earnings_ir)}</p> })
+            body: <BulletList items={splitToSentences(data.earnings_ir)} small /> })
         if (((data.catalysts_short?.length || 0) + (data.catalysts_medium?.length || 0)) > 0)
           secs.push({ title: '투자 촉매', body: (
             <>
@@ -1115,10 +1128,10 @@ function AiStockResult({ data, isUs, cur }) {
           ) })
         if (data.backlog && data.backlog !== '확인 필요' && data.backlog.trim().length > 0)
           secs.push({ title: '수주 잔고 · 백로그',
-            body: <p style={proseStyle}>{breakSentences(data.backlog)}</p> })
+            body: <BulletList items={splitToSentences(data.backlog)} small /> })
         if (data.analyst_views)
           secs.push({ title: '애널리스트 컨센서스',
-            body: <p style={proseStyle}>{breakSentences(data.analyst_views)}</p> })
+            body: <BulletList items={splitToSentences(data.analyst_views)} small /> })
         if (data.bull?.length > 0)
           secs.push({ title: '강세 요인',
             body: data.bull.map((b, i) => <Bullet key={i}>{b}</Bullet>) })
@@ -1133,7 +1146,7 @@ function AiStockResult({ data, isUs, cur }) {
       {/* 최종 의견 — 리포트의 마지막 블록. 매수/보유/매도는 제목 글자색으로만 표현(R1) */}
       {data.verdict && (
         <Section title="투자 의견" accent={recColor} collapsible={false}>
-          <p style={{ ...proseStyle, lineHeight: 1.65 }}>{breakSentences(data.verdict)}</p>
+          <BulletList items={splitToSentences(data.verdict)} />
         </Section>
       )}
 
@@ -1235,16 +1248,19 @@ function Section({ title, accent, children, defaultOpen = true, collapsible = tr
 }
 
 /* 통일 불릿 — 행잉 인덴트(내어쓰기): 줄바꿈 시 본문이 마커가 아닌 텍스트 기준 정렬 */
-function Bullet({ children, markerColor = 'var(--clr-text-tertiary)' }) {
-  // 한 불릿이 여러 문장이면 문장마다 줄바꿈 (가독성)
-  const content = typeof children === 'string' ? breakSentences(children) : children
-  return (
-    <div style={{ display: 'flex', gap: 7, padding: '3px 0', fontSize: 12.5,
-      lineHeight: 1.62, color: 'var(--clr-text)' }}>
-      <span style={{ flexShrink: 0, color: markerColor, fontWeight: 700 }}>–</span>
-      <span style={{ flex: 1, whiteSpace: 'pre-line' }}>{content}</span>
-    </div>
-  )
+/* 머릿글은 components/BulletList.jsx 하나만 쓴다.
+   예전에는 여기서 대시(–)를 그렸는데 ① 분석 탭의 네모 마커와 달라서 같은 AI
+   리포트인데도 탭마다 생김새가 달랐고 ② 금융 화면에서 대시는 마이너스 부호와
+   헷갈렸다(-3.2% 와 – 3.2%). */
+function Bullet({ children }) {
+  // 한 항목이 여러 문장이면 문장마다 별도 항목으로 세운다(R6: 문장 단위 분리)
+  const items = typeof children === 'string'
+    ? (splitToSentences(children).length ? splitToSentences(children) : [children])
+    : null
+  if (!items) {
+    return <BulletList items={[' ']} small renderItem={() => children} />
+  }
+  return <BulletList items={items} small gap={5} />
 }
 
 /* 그룹 소제목 (단기/중기) — caps label, 모든 그룹 동일 */
@@ -1288,9 +1304,9 @@ function AnalystBar({ cur, low, high, avg, rec, analysts }) {
   const mn = Math.min(cur * 0.88, low), mx = Math.max(cur * 1.12, high), rng = mx - mn
   const pct = v => Math.max(2, Math.min(97, ((v - mn) / rng * 100)))
   const upside = ((avg - cur) / cur * 100).toFixed(1)
-  const REC_MAP = { strongbuy:'강매수', buy:'매수', hold:'보유', sell:'매도', strongsell:'강매도' }
-  const recKor = REC_MAP[rec?.toLowerCase()] || rec || '—'
-  const recColor = ['strongbuy','buy'].includes(rec?.toLowerCase()) ? '#16A34A' : rec?.toLowerCase() === 'hold' ? '#F59E0B' : '#DC2626'
+  // 야후 컨센서스도 앱 표기(매수/중립/매도)로 맞춘다 — utils/reco.js 가 정본
+  const recKor = rec ? normalizeReco(rec) : '—'
+  const recColor = recoColorOf(rec)
   return (
     <div className="chart-card" style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>

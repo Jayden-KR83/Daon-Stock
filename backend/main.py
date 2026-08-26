@@ -5036,7 +5036,7 @@ def _build_stock_analysis_prompt(ticker: str, name_hint: str):
             "메시지의 처음과 끝은 '{' 와 '}' 여야 합니다. 내부 모든 텍스트는 한국어.\n\n"
             "[JSON 스키마 — 정확히 이 키들만 사용]\n"
             "{\n"
-            '  "recommendation": "매수" | "보유" | "매도",\n'
+            '  "recommendation": "매수" | "중립" | "매도",\n'
             '  "priceTarget": null 또는 숫자 (USD 또는 KRW 단위, 표시 통화에 맞게),\n'
             '  "summary": "한국어 3-4문장. 투자 논거의 핵심을 서술형으로.",\n'
             '  "company_overview": "한국어 5-7줄 상세 서술. 사업 구조·최근 동향·신사업·미래 전략을 인과관계와 핵심 수치로 설명. 단어 나열 금지, 완결된 문장으로.",\n'
@@ -5047,7 +5047,7 @@ def _build_stock_analysis_prompt(ticker: str, name_hint: str):
             '  "analyst_views": "한국어 4-5줄 상세. 최근 애널리스트 보고서를 기관명·목표가·의견 변동과 그 논거까지 서술.",\n'
             '  "bull": ["강세 논거 3개 — 각 항목을 1-2문장으로 근거와 함께 서술 (단어 조각 금지)"],\n'
             '  "bear": ["리스크 3개 — 각 항목을 1-2문장으로 근거·발생 가능성과 함께 서술"],\n'
-            '  "verdict": "한국어 2-3문장 최종 의견 — 매수/보유/매도 판단의 핵심 근거와 조건."\n'
+            '  "verdict": "한국어 2-3문장 최종 의견 — 매수/중립/매도 판단의 핵심 근거와 조건."\n'
             "}\n"
             "[규칙]\n"
             "- 【분량·깊이 필수】 company_overview·earnings_ir·analyst_views·backlog 각 필드는 **최소 4문장 이상** 상세 서술. "
@@ -8481,6 +8481,23 @@ def _first_sentence(text: str, limit: int = 160) -> str:
     return first if len(first) <= limit else first[:limit - 1] + '…'
 
 
+# ── 투자의견 어휘 정규화 (2026-08-27) ─────────────────────────────────────
+# 예전에는 Hold 를 '보유' 로 표기했다. 보유하지 않은 종목의 분석에도 '보유' 가
+# 찍히니, 사용자는 "사서 들고 있으라는 뜻인가?" 로 읽었다. 증권업계 표준 표기인
+# '중립' 으로 바꾼다.
+#   ※ '유보' 는 '의견 유보 = 의견을 내지 않음' 이라는 다른 뜻이라 등급명으로는
+#     맞지 않는다. 등급은 매수 / 중립 / 매도 세 가지가 맞다.
+#
+# ⚠ 캐시에 남아 있는 옛 '보유' 를 그대로 비교하면, 재분석 때마다 보유→중립 이
+#   '판단 뒤집힘' 으로 잡혀 나침반 신호가 잘못 뜬다. 비교 전에 반드시 통과시킬 것.
+_RECO_ALIASES = {'보유': '중립', 'hold': '중립', '홀드': '중립', '유지': '중립'}
+
+
+def _normalize_reco(v: str) -> str:
+    t = str(v or '').strip()
+    return _RECO_ALIASES.get(t.lower(), _RECO_ALIASES.get(t, t))
+
+
 def _record_compass_signal(ticker: str, name: str, prev_reco: str, res: dict) -> bool:
     """추천이 바뀐 순간만 나침반 신호로 남긴다. 남겼으면 True.
 
@@ -8488,8 +8505,9 @@ def _record_compass_signal(ticker: str, name: str, prev_reco: str, res: dict) ->
     보유→매도처럼 **판단이 뒤집힌 순간**만이 사용자의 행동을 바꾼다.
     출처가 없으면 기록하지 않는다 — 근거 없는 제안은 나침반이 아니라 소음이다.
     """
-    new_reco = str(res.get('recommendation') or '').strip()
-    if not new_reco or new_reco == (prev_reco or '').strip():
+    new_reco = _normalize_reco(res.get('recommendation'))
+    # 어휘만 바뀐 것(보유→중립)은 판단이 뒤집힌 게 아니다 — 신호로 남기지 않는다
+    if not new_reco or new_reco == _normalize_reco(prev_reco):
         return False
     sources = res.get('sources') or []
     url = ''

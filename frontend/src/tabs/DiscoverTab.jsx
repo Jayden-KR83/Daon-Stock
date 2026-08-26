@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react'
+import { normalizeReco } from '../utils/reco'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { useStore } from '../store'
@@ -180,7 +181,12 @@ const FAIL_KO = { 'PEG>1.5': '성장 대비 비쌈', 'EPS성장≤0': '이익 �
 
 const mktKo = (m) => (m === 'KR' ? '한국' : m === 'US' ? '미국' : m)
 // AI 심층 분석 추천 색상 (매수 긍정 / 매도 부정 / 보유 중립)
-const recoColor = (r) => r === '매수' ? 'var(--m-positive)' : r === '매도' ? 'var(--m-negative)' : 'var(--m-text-secondary)'
+// 옛 캐시의 '보유' 도 '중립' 으로 맞춰 표기한다 — utils/reco.js 가 정본
+const recoColor = (r) => {
+  const t = normalizeReco(r)
+  return t.includes('매수') ? 'var(--m-positive)'
+       : t.includes('매도') ? 'var(--m-negative)' : 'var(--m-text-secondary)'
+}
 // 임상 단계 바이오 — PSR·런웨이로 못 잡는 이진 임상 이벤트 리스크. 백엔드 _BIO_CLINICAL_CATS와 일치.
 const BIO_CLINICAL = new Set(['AI 신약', 'AI 항체', '유전자편집', '유전자치료', '유전체', '합성생물학'])
 // 종합점수 → 컨빅션 등급 (투자자가 한눈에 강도를 알 수 있게)
@@ -662,18 +668,21 @@ export default function DiscoverTab() {
                           {Math.round(row.composite_score)}
                           <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--m-text-tertiary)', marginLeft: 2 }}>·{row.data_completeness}/{isEtf ? 3 : isInnov ? 4 : 5}</span>
                         </div>
-                        {(row.ai_reco || (isInnov && BIO_CLINICAL.has(row.sector))) && (
-                          <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end', alignItems: 'center', marginTop: 2 }}>
+                        {/* ⚠ 배지 줄은 배지가 없어도 항상 자리를 차지한다.
+                            조건부로 렌더하면 배지가 있는 행만 17px 높아져 목록 간격이
+                            들쭉날쭉해진다(52px / 35px). 모바일에서는 오른쪽 열이
+                            잘려 보여서, 간격만 제멋대로인 것처럼 보인다. */}
+                        <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end',
+                          alignItems: 'center', marginTop: 2, minHeight: 15 }}>
                             {isInnov && BIO_CLINICAL.has(row.sector) && (
                               <span title="임상 이벤트 리스크 — PSR·런웨이로 측정 불가. 임상 성패 발표 시 주가가 하루에 ±30% 이상 급변할 수 있습니다."
                                 style={{ fontSize: 8.5, fontWeight: 800, padding: '0 4px', borderRadius: 2, lineHeight: 1.5, cursor: 'help',
                                   color: 'var(--m-negative)', border: '1px solid var(--m-negative)' }}>⚠ 임상</span>)}
                             {row.ai_reco && (
-                              <span title={`AI 심층 분석 의견: ${row.ai_reco} — 정량 점수와 별개의 질적 판단입니다. 행을 펼쳐 근거를 확인하세요.`}
+                              <span title={`AI 심층 분석 의견: ${normalizeReco(row.ai_reco)} — 정량 점수와 별개의 질적 판단입니다. 행을 펼쳐 근거를 확인하세요.`}
                                 style={{ fontSize: 8.5, fontWeight: 800, padding: '0 4px', borderRadius: 2, lineHeight: 1.5,
-                                  color: recoColor(row.ai_reco), border: `1px solid ${recoColor(row.ai_reco)}` }}>AI {row.ai_reco}</span>)}
-                          </div>
-                        )}
+                                  color: recoColor(row.ai_reco), border: `1px solid ${recoColor(row.ai_reco)}` }}>AI {normalizeReco(row.ai_reco)}</span>)}
+                        </div>
                       </td>
                     </tr>
                     {open && (

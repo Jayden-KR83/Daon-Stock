@@ -291,7 +291,10 @@ export default function AddTab() {
                   </select>
                 </td>
                 <td>
-                  <input value={r.ticker} placeholder="AAPL"
+                  {/* 암호화폐도 받는다 — 'BTC' 를 넣으면 저장 시 'BTC-USD' 로 정규화된다.
+                      placeholder 에 세 형태를 같이 보여줘야 "코인은 안 되나?" 를 없앤다. */}
+                  <input value={r.ticker} placeholder="AAPL · 005930 · BTC"
+                    title="미국 티커(AAPL) · 한국 6자리 코드(005930) · 암호화폐 심볼(BTC·ETH)"
                     onChange={e => setCell(r._k, 'ticker', e.target.value)} />
                 </td>
                 <td>
