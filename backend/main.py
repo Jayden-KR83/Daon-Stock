@@ -4523,8 +4523,28 @@ def audit_tickers(cu: dict = Depends(require_admin)):
             'invalid': bad, 'exempt': exempt, 'name_mismatch': mismatch}
 
 
+def _require_local_caller(request: Request):
+    """서버 자신이 부른 요청만 통과시킨다 (cron 전용 엔드포인트 보호).
+
+    2026-08-27 점검에서 나온 것: `/api/cron/warm_prices` 는 인증이 없고 한 번
+    호출에 13.6초가 걸린다. 개인정보는 안 나가지만, 아무나 반복 호출하면 1GB
+    서버의 CPU·메모리를 그대로 먹는다(비용·가용성 문제). cron 은 서버 안에서
+    127.0.0.1 로 부르므로 바깥에서 오는 요청만 막으면 된다.
+
+    ⚠ 리버스 프록시가 앞에 있으면 client.host 는 모두 127.0.0.1 로 보인다.
+      그래서 '프록시가 붙이는 헤더가 하나라도 있으면 외부' 로 함께 판정한다.
+      서버 안의 curl 은 이 헤더들을 붙이지 않는다.
+    """
+    fwd_headers = ('x-forwarded-for', 'cf-connecting-ip', 'x-real-ip')
+    if any(h in request.headers for h in fwd_headers):
+        raise HTTPException(status_code=403, detail='내부 호출 전용')
+    host = (request.client.host if request.client else '') or ''
+    if host not in ('127.0.0.1', '::1', 'localhost'):
+        raise HTTPException(status_code=403, detail='내부 호출 전용')
+
+
 @app.get("/api/cron/warm_prices")
-def cron_warm_prices():
+def cron_warm_prices(request: Request):
     """모든 사용자의 보유·관심 종목 시세를 미리 조회해 프로세스 캐시를 데워둔다.
 
     왜 필요한가: 시세 캐시는 프로세스 메모리에 있고 KR fresh TTL 이 5분이다.
@@ -4533,7 +4553,8 @@ def cron_warm_prices():
     채워두면 사용자는 항상 워밍 상태만 만난다.
 
     UNLISTED_FUND 는 거래소 시세가 없으므로 대상에서 제외한다.
-    공개 GET (개인정보 미노출 — 티커 집합만 사용). cache-warm.sh 와 동일 패턴.
+    호출자는 서버 자신으로 제한한다(_require_local_caller) — 개인정보는 안 나가지만
+    한 번에 13초씩 걸려서 바깥에 열어두면 그 자체가 자원 소모 통로다.
 
     ⚠️ 반드시 '천천히' 돌아야 한다. 처음엔 일반 배치(20 워커)로 한 번에 긁었는데,
     2코어 VM 에서 Naver 스크래핑 + BeautifulSoup 파싱(CPU 바운드)이 GIL 을 잡아
@@ -4542,6 +4563,7 @@ def cron_warm_prices():
     → 작은 청크 + 낮은 동시성 + 청크 사이 양보로 바꿨다. 총 소요는 길어지지만
       5분 주기 안에 끝나기만 하면 되고, 그 사이 사용자 요청은 영향받지 않는다.
     """
+    _require_local_caller(request)
     t0 = time()
     with _db() as conn:
         rows = conn.execute(
