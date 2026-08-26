@@ -13,11 +13,29 @@ const savedPrivacy  = true
 // 테마: 'light' | 'dark' | 'pro' — 기본 light
 const savedTheme    = localStorage.getItem('theme') || 'light'
 
+/* 사용자가 바뀔 때 반드시 지워야 하는 **개인값** — 브라우저에 남는 것들.
+   이 키들은 사용자 구분 없이 저장되므로, 로그아웃/계정 전환 후에도 남아 있으면
+   다음 사람(데모 포함)의 화면에 앞사람의 값이 그대로 쓰인다.
+   2026-08-26 개인 자산 노출 사고의 재발 방지 조치. 새 개인값을 추가할 때는
+   반드시 이 배열에도 넣을 것. */
+const PERSONAL_LOCAL_KEYS = [
+  'daon_retire_years',    // 은퇴까지 남은 햇수
+  'daon_monthly_inflow',  // 매월 납입액(원)
+  'recentTickers',        // 최근 조회 종목 — 보유 구성이 유추된다
+]
+
+function wipePersonalLocal() {
+  try { PERSONAL_LOCAL_KEYS.forEach(k => localStorage.removeItem(k)) } catch {}
+}
+
 export const useStore = create((set, get) => ({
   // Auth
   authToken:    savedToken,
   currentUser:  null,
   setAuth: (token, user) => {
+    // 토큰이 실제로 바뀔 때(로그인·로그아웃·계정 전환)만 개인값을 비운다.
+    // authMe 응답마다 같은 토큰으로 재호출되므로 매번 지우면 정상 사용 중에도 값이 날아간다.
+    if (get().authToken !== token) wipePersonalLocal()
     if (token) localStorage.setItem('authToken', token)
     else localStorage.removeItem('authToken')
     set({ authToken: token, currentUser: user })

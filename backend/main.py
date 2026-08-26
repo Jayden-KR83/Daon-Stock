@@ -750,7 +750,26 @@ _ai_cache: Dict[str, Any]      = {}
 _ai_cache_ts: Dict[str, float] = {}
 _AI_TTL = 86400  # 24시간
 
+# ai_cache 는 **모든 사용자가 공유**하는 캐시다(stock_v2 = 종목 분석, 개인정보 아님).
+# 여기에 개인 스코프 결과(전략 리포트·포트폴리오 분석)를 넣으면 안 된다.
+#
+# 2026-08-26 사고: 오너의 전략 리포트 전문(총자산·계좌별 금액 포함)이 이 테이블에
+# 7행 저장돼 있었다. 조회는 정확한 키를 요구해 당장 새지는 않았지만,
+# 같은 파일에 이미 `stock_v2:{TICKER}:%` 로 **접두 검색**하는 함수가 있다.
+# 누군가 접두 검색을 하나만 더 추가하면 그 순간 남의 재무 리포트가 나간다.
+# → 개인 스코프 키는 이 테이블에 저장도 조회도 되지 않도록 원천 차단한다.
+_PRIVATE_CACHE_PREFIXES = ('strategy:', 'portfolio_analyze:', 'metrics:')
+
+
+def _is_private_cache_key(key: str) -> bool:
+    k = str(key or '')
+    return any(k.startswith(p) for p in _PRIVATE_CACHE_PREFIXES)
+
+
 def _get_ai_cache(key: str):
+    if _is_private_cache_key(key):
+        # 개인 결과는 사용자별 테이블(strategy_cache 등)에서만 읽는다.
+        return None
     now = time()
     # 1) in-memory hit
     with _lock:
@@ -779,6 +798,9 @@ def _get_stock_cache_by_ticker(ticker: str):
     (자동 만료하지 않음 — 사용자가 분석 날짜를 보고 직접 갱신 여부를 판단.)
     반환: (value, computed_at) | (None, 0.0)"""
     prefix = f"stock_v2:{ticker.upper()}:"
+    # 접두 검색은 stock_v2(공유 가능한 종목 분석)에만 허용한다.
+    # 이 함수가 다른 접두까지 뒤지도록 확장되면 개인 데이터가 새어나간다.
+    assert prefix.startswith('stock_v2:'), '접두 검색은 stock_v2 전용'
     best_val, best_ts = None, -1.0
     # 1) 메모리 (최신 ts) — TTL 무시
     with _lock:
@@ -803,6 +825,9 @@ def _get_stock_cache_by_ticker(ticker: str):
     return best_val, best_ts
 
 def _set_ai_cache(key: str, value, source: str = 'api'):
+    if _is_private_cache_key(key):
+        # 공유 캐시에 개인 재무 데이터를 남기지 않는다(2026-08-26 사고 재발 방지).
+        return
     now = time()
     with _lock:
         _ai_cache[key]    = value
