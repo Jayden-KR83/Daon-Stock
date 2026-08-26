@@ -24,7 +24,16 @@
 1. **기능 추가 / 큰 변경** — `docs/architecture.md`로 영향 범위 파악 → 필요시 **Plan Mode 선행** (구조 먼저 합의)
 2. **UI 추가/수정** — `design.md` 준수 (특히 **"🟥 AGENT 필수 규칙" R1~R6은 강제** — 둥근 AI-인사이트 카드 금지 / 차트 무채색 금지·CHART_COLORS / 도형 hover 금액 / 버튼 `.btn-primary` 단일 위계 / **R6 다문장 산문은 문장마다 줄바꿈(breakSentences·pre-line)·점수 나열 세로정렬** / 머지 전 self-check) + `docs/troubleshooting.md`의 UI 9 체크리스트. **머지 전 R1~R6 정적 grep 자가검증 필수.**
 3. **백엔드 endpoint** — `docs/api.md`의 캐시 TTL · 인증 의존성 · 에러 처리 원칙 따름
-4. **배포** — `docs/deployment.md`의 검증 체크리스트 모두 통과 후에만 "완료" 보고
+4. **🟥 개인 데이터 격리 (강제)** — 2026-08-26 자산 노출 사고 재발 방지
+   - **공유 캐시(`ai_cache`)에는 종목 분석(`stock_v2:`)만 넣는다.** 전략 리포트·포트폴리오
+     분석 등 개인 스코프 결과는 `_PRIVATE_CACHE_PREFIXES` 로 차단되어 있으니 우회하지 말 것.
+   - **캐시 키에 접두 검색(`LIKE 'x:%'`)을 새로 추가할 때는 그 접두가 공유 가능한지 먼저 따진다.**
+     개인 키가 섞인 테이블에서 접두 검색을 하면 그 순간 남의 재무 데이터가 나간다.
+   - **개인 값을 `localStorage` 에 저장하면 `store.js` 의 `PERSONAL_LOCAL_KEYS` 에 반드시 등록한다.**
+     등록하지 않으면 로그아웃·계정 전환 후에도 남아 다음 사용자(데모 포함)에게 승계된다.
+   - 회귀 보호: `backend/tests/test_shared_cache_privacy.py` (공유 캐시에 개인 키가
+     들어가거나 남아 있으면 실패).
+5. **배포** — `docs/deployment.md`의 검증 체크리스트 모두 통과 후에만 "완료" 보고
 
 ## Plan Mode 권장 시나리오 (바이브 코딩 무기고)
 
