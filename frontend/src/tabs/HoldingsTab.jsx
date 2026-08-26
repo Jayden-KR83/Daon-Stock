@@ -150,6 +150,7 @@ export default function HoldingsTab() {
           onClick={(e) => { e.stopPropagation(); togglePrivacy() }}
           title={privacyMode ? '금액 보이기' : '금액 가리기'}
           aria-label={privacyMode ? '금액 보이기' : '금액 가리기'}
+          className="tap-target-y"
           style={{
             position: 'absolute', top: 12, right: 12, zIndex: 2,
             display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -523,14 +524,7 @@ export default function HoldingsTab() {
                     setEditTicker(`${h.account}-${h.ticker}`)
                   }}
                   title="수정 · 매수/매도 거래 기록"
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--m-outline-variant)',
-                    color: 'var(--m-text-tertiary)',
-                    width: 26, height: 26, borderRadius: 6, cursor: 'pointer',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: 'inherit',
-                  }}>
+                  className="h-act-btn tap-target">
                   {/* sliders/settings 아이콘 — 메모(연필)와 명확히 구분 */}
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -548,15 +542,7 @@ export default function HoldingsTab() {
                     setNoteTicker({ ticker: h.ticker, name: h.name, isUs })
                   }}
                   title={notesByTicker[h.ticker] ? '메모 보기/편집' : '투자 노트 추가'}
-                  style={{
-                    background: notesByTicker[h.ticker] ? 'var(--m-primary-container)' : 'transparent',
-                    border: '1px solid',
-                    borderColor: notesByTicker[h.ticker] ? 'var(--m-primary)' : 'var(--m-outline-variant)',
-                    color: notesByTicker[h.ticker] ? 'var(--m-primary)' : 'var(--m-text-tertiary)',
-                    width: 26, height: 26, borderRadius: 6, cursor: 'pointer',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: 'inherit',
-                  }}>
+                  className={`h-act-btn tap-target${notesByTicker[h.ticker] ? ' is-on' : ''}`}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                     width="12" height="12">

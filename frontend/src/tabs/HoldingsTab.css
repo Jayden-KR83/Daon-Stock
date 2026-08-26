@@ -54,7 +54,31 @@
 .holding-row > .h-spark    { grid-area: spark; display: flex; align-items: center; justify-content: center; min-width: 0; }
 .holding-row > .h-value    { grid-area: value; text-align: right; min-width: 0; }
 .holding-row > .h-pnl      { grid-area: pnl; text-align: right; min-width: 0; }
-.holding-row > .h-actions  { grid-area: actions; display: flex; flex-direction: column; gap: 4px; align-self: stretch; justify-content: center; }
+.holding-row > .h-actions  { grid-area: actions; display: flex; flex-direction: column; gap: var(--tap-act-gap); align-self: stretch; justify-content: center; }
+
+/* 행 액션 버튼 (수정 / 노트) — 2026-08-26 터치 타깃 확대
+   26x26 두 개가 4px 간격으로 세로로 붙어 있어 오탭이 잦았다.
+   30x30 + 간격 10 → 두 버튼 중심 간격이 정확히 40px 이 되고, 히트 영역을
+   40x40 으로 잡으면 서로 겹치지 않고 딱 맞닿는다. 겹치면 아래 버튼이 위 버튼의
+   영역을 가로채므로 '중심 간격 = 히트 크기' 를 지키는 것이 핵심이다. */
+.h-act-btn {
+  /* 히트 영역 40 = 두 버튼 중심 간격(30+10)과 같다 — 겹치지 않고 맞닿는다.
+     데스크톱(마우스)에서는 --tap-act 가 26px, --tap-hit 이 0 이라 예전 밀도 그대로다. */
+  --tap-hit: calc(var(--tap-act) + var(--tap-act-gap));
+  width: var(--tap-act); height: var(--tap-act);
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid var(--m-outline-variant);
+  color: var(--m-text-tertiary);
+  cursor: pointer; font-family: inherit;
+}
+/* 노트가 이미 있는 종목 — 채워진 상태 */
+.h-act-btn.is-on {
+  background: var(--m-primary-container);
+  border-color: var(--m-primary);
+  color: var(--m-primary);
+}
 
 /* 이름 + 티커 inline */
 .h-identity-name {

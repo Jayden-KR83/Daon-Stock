@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, pollPortfolioStrategy, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
@@ -466,6 +466,9 @@ export default function AllocationTab() {
 
   return (
     <div style={{ paddingTop: 8 }}>
+      {/* 목차 — 분석 탭은 3~5화면이라 원하는 챕터까지 스크롤로만 가기 힘들다 */}
+      <ChapterNav />
+
       {/* 투자 나침반 — 판단이 바뀐 보유 종목이 있을 때만 나타난다(없으면 렌더 0) */}
       <CompassBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
 
@@ -476,7 +479,7 @@ export default function AllocationTab() {
 
       {/* ━━ Ⅰ. 지금 내 상태 ━━
           현황만 담는다. 문제 제기(Ⅱ)·실행(Ⅲ)과 섞지 않는다. */}
-      <ChapterHeader n="Ⅰ" title="지금 내 상태" sub="자산 추이 · 비중 구성" />
+      <ChapterHeader id="ch-1" n="Ⅰ" title="지금 내 상태" sub="자산 추이 · 비중 구성" />
 
       {/* Net Worth 추이 */}
       <NetWorthChart />
@@ -725,7 +728,7 @@ export default function AllocationTab() {
           구조적으로 과대평가되고(생존 편향), '내 실제 성과'는 Ⅰ장 자산 추이가 이미 보여준다. */}
       {allHoldings.length > 0 && (
         <>
-          <ChapterHeader n="Ⅱ" title="무엇이 문제인가"
+          <ChapterHeader id="ch-2" n="Ⅱ" title="무엇이 문제인가"
             sub="리밸런싱 경고 · 건강도 · AI 리스크 진단" />
 
           {/* 진단 범위 — 계좌 단위로 좁혀 볼 수 있다 */}
@@ -777,7 +780,7 @@ export default function AllocationTab() {
       )}
 
       {/* ━━ Ⅲ. 그래서 무엇을 할까 ━━ */}
-      <ChapterHeader n="Ⅲ" title="그래서 무엇을 할까"
+      <ChapterHeader id="ch-3" n="Ⅲ" title="그래서 무엇을 할까"
         sub="목표 · 자산배분 · 배당 · 추천 액션" />
       <GoalsCard />
 
@@ -943,9 +946,12 @@ export default function AllocationTab() {
 
       {/* ━━ 부록 ━━ 자주 쓰지 않는 도구는 맨 아래로 */}
       {allHoldings.length > 0 && (
+        <ChapterHeader id="ch-x" n="부록" title="내보내기" sub="다른 LLM에 교차검증을 맡길 때" />
+      )}
+      {allHoldings.length > 0 && (
         <div style={{ display: 'flex', justifyContent: 'flex-end',
           marginTop: 8, marginBottom: 12 }}>
-          <button onClick={exportReport} disabled={exporting} style={{
+          <button onClick={exportReport} disabled={exporting} className="tap-target-y" style={{
             padding: '7px 14px', borderRadius: 2, background: 'transparent',
             border: '1px solid var(--m-outline-variant)', color: 'var(--m-text-secondary)',
             fontSize: 12, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
@@ -1158,9 +1164,112 @@ function breakSentences(text) {
 }
 
 /* 분석탭 3대 장 구분 헤더 (스냅샷 → 리스크 진단 → 액션). design.md 직사각·무채색 준수. */
-function ChapterHeader({ n, title, sub }) {
+/* 분석 탭 목차 — 챕터로 바로 점프 + 지금 보고 있는 챕터 표시.
+   챕터 목록을 코드에 적지 않고 DOM([data-chapter])에서 읽는 이유:
+   Ⅱ장·부록은 보유 종목이 없으면 렌더되지 않는다. 하드코딩하면 없는 챕터로
+   점프하는 죽은 버튼이 생긴다. */
+/* 스크롤포트의 실제 윗변 — 컨테이너 top 에 padding-top 을 더해야 한다.
+   웹 모드의 .web-main-col 은 padding-top 이 24px 이라, 이걸 빼먹으면 점프 후
+   챕터 제목이 딱 그만큼 sticky 목차 바 뒤로 들어간다. */
+function viewTop(sc) {
+  if (!sc) return 0
+  return sc.getBoundingClientRect().top + (parseFloat(getComputedStyle(sc).paddingTop) || 0)
+}
+
+function ChapterNav() {
+  const wrapRef     = useRef(null)
+  const scrollerRef = useRef(null)
+  const [items, setItems]   = useState([])
+  const [active, setActive] = useState('')
+
+  useEffect(() => {
+    /* 스크롤 컨테이너는 모드마다 다르다(앱=.app-main, 웹=.web-main-col).
+       클래스명을 박아두는 대신 실제로 스크롤되는 조상을 찾아 올라간다. */
+    let scroller = wrapRef.current?.parentElement
+    while (scroller && scroller !== document.body) {
+      const ov = getComputedStyle(scroller).overflowY
+      if (ov === 'auto' || ov === 'scroll') break
+      scroller = scroller.parentElement
+    }
+    if (scroller === document.body) scroller = null
+    scrollerRef.current = scroller
+
+    let raf = 0
+    const read = () => {
+      raf = 0
+      const nodes = Array.from(document.querySelectorAll('[data-chapter]'))
+      const next = nodes.map(n => ({ id: n.id, label: n.dataset.chapter, num: n.dataset.chapterNum || '' }))
+      setItems(prev => (prev.map(p => p.id).join() === next.map(p => p.id).join() ? prev : next))
+      // 목차 바 바로 아래를 지난 마지막 챕터가 '지금 보는 챕터'
+      const line = viewTop(scroller) + (wrapRef.current?.getBoundingClientRect().height || 44) + 14
+      let cur = next[0]?.id || ''
+      nodes.forEach(n => { if (n.getBoundingClientRect().top <= line) cur = n.id })
+      setActive(cur)
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(read) }
+
+    read()
+    // 지연 로딩(차트·AI 카드)이 붙은 뒤 한 번 더 읽는다
+    const t1 = setTimeout(read, 1200)
+    const t2 = setTimeout(read, 4000)
+    scroller?.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => {
+      clearTimeout(t1); clearTimeout(t2)
+      if (raf) cancelAnimationFrame(raf)
+      scroller?.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
+    /* ⚠ items.length 를 의존성에 두는 이유: 첫 렌더에서는 챕터가 0개라
+       아래에서 null 을 반환하고, 그러면 wrapRef 가 DOM에 붙지 않아
+       스크롤 컨테이너를 못 찾는다. 목차가 실제로 그려진 뒤 한 번 더 붙여야
+       '지금 보는 챕터' 추적이 동작한다. */
+  }, [items.length])
+
+  /* scrollIntoView 대신 직접 계산해 스크롤한다.
+     scrollIntoView({block:'start'}) 는 웹 모드에서 제목이 sticky 목차 바 뒤로
+     들어가는 경우가 있었다(스크롤포트가 중첩돼 scroll-margin 이 기대대로 안 먹었다).
+     '목차 바 높이 + 10px' 만큼 아래에 오도록 직접 옮기면 두 모드에서 같게 동작한다. */
+  const jump = (id) => {
+    const sc = scrollerRef.current
+    let tries = 0
+    /* 한 번에 안 끝내고 최대 2번 보정한다. 스크롤이 부드럽게 움직이는 동안
+       위쪽에서 지연 로딩 카드가 붙으면 목표 지점이 밀린다(웹 모드에서 24px 어긋났다). */
+    const step = () => {
+      const el = document.getElementById(id)
+      if (!el || !wrapRef.current) return
+      const pad  = (wrapRef.current.getBoundingClientRect().height || 44) + 10
+      const d    = el.getBoundingClientRect().top - viewTop(sc) - pad
+      if (Math.abs(d) < 4 || tries > 2) return
+      tries += 1
+      ;(sc || window).scrollBy({ top: d, behavior: tries === 1 ? 'smooth' : 'auto' })
+      setTimeout(step, 550)
+    }
+    step()
+  }
+
+  if (items.length < 2) return null
   return (
-    <div style={{ margin: '20px 0 10px', borderTop: '2px solid var(--m-text)', paddingTop: 8 }}>
+    <nav className="chapter-nav" ref={wrapRef} aria-label="분석 목차">
+      {items.map(it => (
+        <button key={it.id} type="button"
+          className={`chapter-nav-btn${active === it.id ? ' is-active' : ''}`}
+          aria-current={active === it.id ? 'true' : undefined}
+          onClick={() => jump(it.id)}>
+          {it.num && <span className="chapter-nav-num">{it.num}</span>}{it.label}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+function ChapterHeader({ n, title, sub, id }) {
+  return (
+    /* id/data-chapter 는 목차(ChapterNav)가 DOM에서 챕터를 찾는 단서다.
+       scrollMarginTop 은 점프했을 때 sticky 목차 바 뒤로 제목이 숨지 않게 한다. */
+    <div id={id} data-chapter={title} data-chapter-num={n}
+      style={{ margin: '20px 0 10px', borderTop: '2px solid var(--m-text)', paddingTop: 8,
+        scrollMarginTop: 56 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, fontWeight: 900, color: 'var(--m-primary)' }}>{n}</span>
         <span style={{ fontSize: 15, fontWeight: 900, color: 'var(--m-text)',

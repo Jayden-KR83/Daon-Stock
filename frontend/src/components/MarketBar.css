@@ -45,6 +45,9 @@
 .mbar-nav {
   flex: 0 0 auto;
   width: 26px;
+  /* 터치: 26px 폭은 손가락으로 놓치기 쉬웠다. 좌우 끝이라 이웃 버튼이 없어
+     가로로 넓혀도 다른 것을 덮지 않는다 (App.css '터치 타깃' 참조) */
+  min-width: var(--tap-h, 26px);
   border: none;
   background: var(--clr-surface);
   color: var(--clr-text-muted);

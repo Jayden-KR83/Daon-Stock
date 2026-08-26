@@ -789,3 +789,100 @@ table td, table th {
   filter: grayscale(1) brightness(1.45) contrast(0.95);
   -webkit-filter: grayscale(1) brightness(1.45) contrast(0.95);
 }
+
+/* ══════════════════════════════════════════════
+   터치 타깃 (2026-08-26)
+   ══════════════════════════════════════════════
+   원칙: 시각 크기는 되도록 유지하고 '손가락이 닿는 면적'만 넓힌다.
+   밀집한 핀테크 레이아웃에서 모든 버튼을 44px 로 키우면 한 화면에 담기는 정보가
+   크게 줄어든다. 그래서 보이지 않는 ::after 로 히트 영역만 키우고, 실제 크기는
+   눈에 띄게 작은 것(23px 알약 등)만 올린다.
+
+   --tap-* 는 앱 모드와 손가락 입력 장치에서만 켜진다. 데스크톱(마우스)에서는
+   전부 0 이라 아래 규칙이 무효가 되고 기존 밀도가 그대로 유지된다.
+   ⚠ 히트 영역을 넓힐 때는 '이웃도 누를 수 있는 요소인지' 먼저 본다.
+     이웃 버튼을 덮으면 그 버튼이 안 눌린다 — 가로로 붙어 있으면 세로만(.tap-target-y),
+     사방이 비어 있을 때만 양방향(.tap-target)을 쓴다. */
+/* --tap-h/-seg/-hit 은 0 이 곧 '규칙 없음'이다.
+   --tap-act(행 액션 버튼 크기)만은 실제 치수라서 데스크톱 기본값을 그대로 둔다. */
+:root {
+  --tap-h: 0px; --tap-seg: 0px; --tap-hit: 0px;
+  --tap-act: 26px; --tap-act-gap: 4px;
+}
+.app-mode-app {
+  --tap-h: 40px; --tap-seg: 36px; --tap-hit: 44px;
+  --tap-act: 30px; --tap-act-gap: 10px;
+}
+@media (pointer: coarse) {
+  :root {
+    --tap-h: 40px; --tap-seg: 36px; --tap-hit: 44px;
+    --tap-act: 30px; --tap-act-gap: 10px;
+  }
+}
+
+.tap-target,
+.tap-target-y,
+button.mono-pill { position: relative; }
+
+.tap-target::after,
+.tap-target-y::after,
+button.mono-pill::after {
+  content: '';
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%; height: 100%;
+  min-height: var(--tap-hit);
+}
+/* 양방향 확장은 좌우가 비어 있는 단독 버튼에만 */
+.tap-target::after { min-width: var(--tap-hit); }
+
+/* 세그먼트 — 폭은 컨테이너를 나눠 가지므로 높이만 올린다.
+   (가로로 넓히면 바로 옆 세그먼트를 덮어 그 세그먼트가 안 눌린다) */
+.seg-btn { min-height: var(--tap-seg); }
+
+/* 앱 상단 컨트롤 — 23px 알약은 실제로 너무 낮았다. 간격도 6→8 로 벌린다 */
+.app-top-controls { gap: 8px; }
+.app-web-hint,
+.app-theme-hint { min-height: var(--tap-h); }
+
+/* 셀렉트 — 네이티브 드롭다운도 손가락 기준으로 */
+.acc-filter-select,
+.select { min-height: var(--tap-h); }
+
+/* ══════════════════════════════════════════════
+   분석 탭 목차 (ChapterNav) — 2026-08-26
+   ══════════════════════════════════════════════
+   분석 탭은 3~5화면이라 원하는 챕터까지 스크롤로만 찾아가기 어렵다.
+   스크롤 컨테이너(.app-main / .web-main-col) 안에서 sticky 로 붙어 있는다. */
+.chapter-nav {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; gap: 6px;
+  overflow-x: auto; scrollbar-width: none;
+  padding: 6px 0 7px; margin-bottom: 2px;
+  background: var(--clr-bg);
+  border-bottom: 1px solid var(--clr-border);
+}
+.chapter-nav::-webkit-scrollbar { display: none; }
+.chapter-nav-btn {
+  flex: 0 0 auto;
+  min-height: var(--tap-seg);
+  display: inline-flex; align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--clr-border-md);
+  border-radius: 4px;
+  background: var(--clr-surface);
+  color: var(--clr-text-sub);
+  font-size: 12px; font-weight: 700; font-family: inherit;
+  white-space: nowrap; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.chapter-nav-btn:hover { background: var(--clr-pos-bg-soft); }
+.chapter-nav-btn.is-active {
+  background: var(--clr-pos-bg-soft);
+  border-color: var(--clr-pos-border);
+  color: var(--clr-pos-dark);
+}
+.chapter-nav-btn:focus-visible {
+  outline: 2px solid var(--clr-info-dark); outline-offset: 1px;
+}
+.chapter-nav-num { font-weight: 900; margin-right: 5px; opacity: .8; }

@@ -112,6 +112,8 @@ export default function NotificationsBell() {
         onClick={() => setOpen(true)}
         title={`알림 ${unread > 0 ? `(미확인 ${unread})` : ''}`}
         aria-label="알림"
+        /* 32x32 는 그대로 두고 히트 영역만 44 로 넓힌다 (App.css '터치 타깃') */
+        className="tap-target"
         style={{
           position: 'relative',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

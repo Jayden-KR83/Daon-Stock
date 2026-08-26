@@ -663,6 +663,8 @@ export default function ChartTab() {
                 title={`${h.ticker}${h.name ? ` · ${h.name}` : ''}`}
                 style={{
                   flexShrink: 0, padding: '4px 10px', borderRadius: 4, border: '1px solid',
+                  /* 터치에서만 36px (App.css '터치 타깃'), 데스크톱은 0 이라 기존 높이 유지 */
+                  minHeight: 'var(--tap-seg, 0px)', display: 'inline-flex', alignItems: 'center',
                   borderColor: activeTicker === h.ticker ? 'var(--clr-info)' : 'var(--clr-border-md)',
                   background: activeTicker === h.ticker ? 'var(--clr-info-bg)' : 'var(--clr-surface)',
                   color: activeTicker === h.ticker ? 'var(--clr-info-dark)' : 'var(--clr-text-sub)',

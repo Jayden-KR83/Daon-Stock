@@ -157,13 +157,13 @@ export default function GoalsCard() {
         {field('변동성(%)', 'vol_pct')}
       </div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        <button onClick={onPreview} disabled={busy} style={{
+        <button onClick={onPreview} disabled={busy} className="tap-target-y" style={{
           flex: 1, padding: '7px 12px', borderRadius: 2,
           background: 'var(--m-text)', border: '1px solid var(--m-text)',
           color: 'var(--m-surface)', fontSize: 12, fontWeight: 800,
           cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1, fontFamily: 'inherit',
         }}>{busy ? '계산 중…' : '계산'}</button>
-        <button onClick={onSave} disabled={busy} style={{
+        <button onClick={onSave} disabled={busy} className="tap-target-y" style={{
           flex: 1, padding: '7px 12px', borderRadius: 2, background: 'transparent',
           border: '1px solid var(--m-outline-variant)', color: 'var(--m-text-secondary)',
           fontSize: 12, fontWeight: 800, cursor: busy ? 'default' : 'pointer',

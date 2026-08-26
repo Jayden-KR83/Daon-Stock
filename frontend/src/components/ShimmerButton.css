@@ -6,6 +6,8 @@
   justify-content: center;
   gap: 6px;
   padding: 10px 18px;
+  /* 터치: 38px 이라 손가락 기준(App.css '터치 타깃')에 조금 못 미쳤다 */
+  min-height: var(--tap-h, 0px);
   border-radius: 10px;
   border: none;
   color: #fff;
