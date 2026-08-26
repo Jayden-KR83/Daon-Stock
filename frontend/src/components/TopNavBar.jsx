@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { searchStocks } from '../api'
-import { useStore } from '../store'
+import { useStore, THEME_META } from '../store'
 import NotificationsBell from './NotificationsBell'
 import './TopNavBar.css'
 
@@ -151,13 +151,18 @@ function RecentSearches({ onPick, dropRef }) {
 function ThemeQuickBtn() {
   const theme      = useStore(s => s.theme)
   const cycleTheme = useStore(s => s.cycleTheme)
-  const icon = theme === 'light' ? '☀️' : theme === 'dark' ? '🌙' : '📈'
-  const label = theme === 'light' ? '화이트' : theme === 'dark' ? '다크' : '프로'
+  /* 앱 모드 알약과 같은 표(THEME_META)를 본다. 예전에는 여기서도
+     'light/dark 가 아니면 프로' 로 판정해 auto 가 '프로'로 찍혔다. */
+  const meta  = THEME_META[theme] || THEME_META.light
+  const icon  = meta.icon
+  const label = meta.label
   return (
     // 스타일은 앱 전환 버튼과 공유하되 클래스는 분리 — 같은 클래스만 쓰면
     // .top-nav-app-btn 선택이 모호해진다(테마 버튼이 먼저 잡힘)
     <button className="top-nav-app-btn top-nav-theme-btn" onClick={cycleTheme}
-      title={`테마: ${label} (탭하여 변경)`}
+      title={theme === 'auto'
+        ? '테마: 자동 — OS 설정을 따릅니다 (클릭하여 변경)'
+        : `테마: ${label} (클릭하여 변경)`}
       style={{ fontSize: 14, lineHeight: 1 }}>
       <span style={{ fontSize: 14 }}>{icon}</span>
     </button>

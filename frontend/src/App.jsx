@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, Suspense, lazy } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
-import { useStore } from './store'
+import { useStore, THEME_META } from './store'
 import { useSwipeNav } from './useSwipeNav'
 import { getUsdKrw, getApiKeyStatus, authMe, getAdminStatus, getAccounts, getPortfolio, getPricesBatch, captureNetWorthSnapshot } from './api'
 import MarketBar from './components/MarketBar'
@@ -361,16 +361,9 @@ export default function App() {
   )
 }
 
-/* 앱 모드 상단의 테마 빠른 전환 — store 의 cycleTheme 순서(light → dark → pro → auto)
-   와 반드시 같은 목록을 쓴다. 예전에는 'light/dark 가 아니면 프로' 로 판정해서
-   auto 일 때도 알약에 '📈 프로' 가 찍혔다. OS가 라이트면 화면은 하얗게 바뀌는데
-   라벨만 프로라서, 무엇을 누른 건지 알 수 없었다. */
-const THEME_META = {
-  light: { icon: '☀️', label: '화이트' },
-  dark:  { icon: '🌙', label: '다크'   },
-  pro:   { icon: '📈', label: '프로'   },
-  auto:  { icon: '🖥️', label: '자동'   },
-}
+/* 앱 모드 상단의 테마 빠른 전환.
+   라벨은 store 의 THEME_META 하나만 본다 — 예전에는 여기서 'light/dark 가 아니면
+   프로' 로 판정해 auto 일 때도 '📈 프로' 가 찍혔다. */
 function ThemeQuickToggle() {
   const theme      = useStore(s => s.theme)
   const cycleTheme = useStore(s => s.cycleTheme)

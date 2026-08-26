@@ -4,7 +4,7 @@ import { getPortfolio, saveApiKey, authLogout,
          updateProfile, listUsers, getBackup, restoreBackup, authMe,
          getAdminStatus, adminUnlock, adminLock, adminSetPassword,
          getAccounts, addAccount, updateAccount, deleteAccount } from '../api'
-import { useStore } from '../store'
+import { useStore, THEME_ORDER, THEME_META } from '../store'
 import { useAccounts } from '../utils/accounts'
 import TwoFactorCard from '../components/TwoFactorCard'
 import AnalysisAdminCard from '../components/AnalysisAdminCard'
@@ -484,14 +484,9 @@ function ThemeToggleCard() {
   const theme    = useStore(s => s.theme)
   const setTheme = useStore(s => s.setTheme)
 
-  const themes = [
-    { key: 'light', label: '화이트', icon: '☀️', desc: '밝고 깔끔한 기본 테마',
-      preview: { bg: '#F8FAFC', surface: '#FFFFFF', text: '#0F172A', accent: '#16A34A' } },
-    { key: 'dark',  label: '다크',   icon: '🌙', desc: '어두운 배경, 눈의 피로 감소',
-      preview: { bg: '#0B1120', surface: '#111C2D', text: '#F1F5F9', accent: '#34D399' } },
-    { key: 'pro',   label: '프로',   icon: '📈', desc: '주식 전문 터미널 — 미드나잇 차콜',
-      preview: { bg: '#0D1117', surface: '#161B22', text: '#F0F6FC', accent: '#58A6FF' } },
-  ]
+  /* 목록을 여기서 따로 적지 않는다 — 상단 알약 순환(THEME_ORDER)과 어긋나면
+     '순환에는 있는데 설정에는 없는' 테마가 다시 생긴다. */
+  const themes = THEME_ORDER.map(key => ({ key, ...THEME_META[key] }))
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -501,7 +496,9 @@ function ThemeToggleCard() {
       <div style={{ fontSize: 11, color: 'var(--clr-text-muted)', marginBottom: 12, lineHeight: 1.6 }}>
         앱 전체 색상을 즉시 전환합니다. 기기별로 저장됩니다.
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+      {/* 4개가 되면서 390px 에서 한 줄에 넣으면 카드가 너무 좁다 → 좁으면 2×2 로 접힌다 */}
+      <div style={{ display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 }}>
         {themes.map(t => {
           const active = theme === t.key
           return (
