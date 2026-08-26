@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { usePrivacy } from '../utils/privacy'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getPortfolio, saveApiKey, authLogout,
          updateProfile, listUsers, getBackup, restoreBackup, authMe,
@@ -78,6 +79,7 @@ export default function ManageTab() {
    프로필 카드 (닉네임 수정)
    ────────────────────────────────────────────────────── */
 function ProfileCard({ user, totalVal = 0, onSaved, onLogout }) {
+  const priv = usePrivacy()   // 총 투자금도 개인 금액이다 — 발표 중 설정 탭에서 노출됐다
   const [nick, setNick] = useState(user.nickname || user.name || '')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -123,7 +125,7 @@ function ProfileCard({ user, totalVal = 0, onSaved, onLogout }) {
           <div style={{ fontSize: 11, color: 'var(--clr-text-muted)', marginBottom: 2 }}>총 투자금</div>
           <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--clr-text-strong)',
             letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums' }}>
-            ₩{Math.round(totalVal).toLocaleString()}
+            {priv.won(totalVal)}
           </div>
         </div>
       </div>

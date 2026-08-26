@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { usePrivacy } from '../utils/privacy'
 import { motion, AnimatePresence } from 'motion/react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useStore } from '../store'
@@ -11,6 +12,7 @@ import { listTransactions, addTransaction, deleteTransaction } from '../api'
  * - props.ticker 가 있으면 단일 종목 모드, 없으면 전체 거래내역 (리스트 + 종목별 필터)
  */
 export default function TransactionsSection({ ticker = '', name = '', isUs = true }) {
+  const priv = usePrivacy()
   const { accountKeys, accLabels } = useAccounts()
   const qc = useQueryClient()
   const [txs, setTxs] = useState([])
@@ -82,7 +84,8 @@ export default function TransactionsSection({ ticker = '', name = '', isUs = tru
 
   const curSym = isUs ? '$' : '₩'
   const fmtCur = (v) => v == null ? '—' :
-    (isUs ? `$${Number(v).toFixed(2)}` : `₩${Math.round(Number(v)).toLocaleString()}`)
+    (priv.on ? (isUs ? '$•••' : '₩•••••••')
+             : isUs ? `$${Number(v).toFixed(2)}` : `₩${Math.round(Number(v)).toLocaleString()}`)
 
   return (
     <div className="chart-card" style={{ marginBottom: 12 }}>

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react'
+import { usePrivacy } from '../utils/privacy'
 import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'motion/react'
 import {
@@ -13,6 +14,7 @@ import NumberTicker from './NumberTicker'
  * Allocation 탭 최상단에 임베드.
  */
 export default function NetWorthChart() {
+  const priv = usePrivacy()          // 가림 모드 — 축 라벨·툴팁까지 전부 가린다
   const [range, setRange] = useState('1Y')  // '1M' | '3M' | '6M' | '1Y' | 'ALL'
 
   const daysMap = { '1M': 30, '3M': 90, '6M': 180, '1Y': 365, 'ALL': 0 }
@@ -74,12 +76,12 @@ export default function NetWorthChart() {
             letterSpacing: '-.02em', lineHeight: 1.1, marginTop: 6,
             fontVariantNumeric: 'tabular-nums' }}>
             <NumberTicker value={summary.end_value || 0}
-              format={v => `₩${Math.round(v).toLocaleString()}`} duration={0.7} />
+              format={v => priv.won(v)} duration={0.7} />
           </div>
           <div style={{ fontSize: 12, fontWeight: 700, marginTop: 2,
             fontVariantNumeric: 'tabular-nums' }}>
             <span className={isPositive ? 'num-pos' : 'num-neg'}>
-              {isPositive ? '+' : ''}₩{Math.abs(summary.change || 0).toLocaleString()}
+              {priv.on ? '' : (isPositive ? '+' : '')}{priv.won(Math.abs(summary.change || 0))}
               <span style={{ marginLeft: 4 }}>({isPositive ? '+' : ''}{summary.change_pct}%)</span>
             </span>
             <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--m-text-tertiary)',
@@ -114,12 +116,12 @@ export default function NetWorthChart() {
               <XAxis dataKey="shortDate" tick={{ fontSize: 9, fill: '#94A3B8' }}
                 interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 9, fill: '#94A3B8' }} width={56}
-                tickFormatter={v => v >= 1e8 ? `${(v/1e8).toFixed(1)}억`
+                tickFormatter={v => priv.on ? '••' : v >= 1e8 ? `${(v/1e8).toFixed(1)}억`
                                   : v >= 1e4 ? `${(v/1e4).toFixed(0)}만`
                                   : v.toLocaleString()}
                 domain={['auto', 'auto']} />
               <Tooltip
-                formatter={(v) => `₩${Math.round(v).toLocaleString()}`}
+                formatter={(v) => priv.won(v)}
                 labelFormatter={l => `${l}`}
                 contentStyle={{ borderRadius: 8, fontSize: 11,
                   border: '1px solid var(--clr-border-md)',
@@ -143,7 +145,7 @@ export default function NetWorthChart() {
         fontSize: 10, color: 'var(--clr-text-muted)', marginTop: 6,
         fontVariantNumeric: 'tabular-nums' }}>
         <span>{summary.first_date} ~ {summary.last_date}</span>
-        <span>최고 ₩{(summary.max_value || 0).toLocaleString()} · 최저 ₩{(summary.min_value || 0).toLocaleString()}</span>
+        <span>최고 {priv.won(summary.max_value || 0)} · 최저 {priv.won(summary.min_value || 0)}</span>
       </div>
     </div>
   )

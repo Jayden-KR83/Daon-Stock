@@ -1,4 +1,10 @@
 import React, { useState } from 'react'
+import { usePrivacy } from '../utils/privacy'
+import { useStore as _btStore } from '../store'
+
+/* 차트 축 포맷터는 훅 밖에서 호출돼 상태만 즉석에서 읽는다. 재렌더는 컴포넌트가
+   usePrivacy() 로 구독해 일으킨다. */
+const _bt_privacyOn = () => _btStore.getState().privacyMode
 import { motion, AnimatePresence } from 'motion/react'
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts'
 import { runBacktest } from '../api'
@@ -8,6 +14,7 @@ import { runBacktest } from '../api'
  * AllocationTab에 임베드.
  */
 export default function BacktestSection({ allHoldings = [] }) {
+  usePrivacy()   // 가림 토글 시 축 라벨 갱신용 구독
   const [open, setOpen] = useState(false)   // 기본 접힘 — 사용 빈도 낮음·지표 중복 (2026-06-06)
   const [months, setMonths] = useState(12)
   const [data, setData] = useState(null)
@@ -122,7 +129,8 @@ export default function BacktestSection({ allHoldings = [] }) {
                   <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#94A3B8' }}
                     interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 9, fill: '#94A3B8' }} width={56}
-                    tickFormatter={v => v >= 1e8 ? `${(v/1e8).toFixed(1)}억`
+                    tickFormatter={v => _bt_privacyOn() ? '••'
+                                      : v >= 1e8 ? `${(v/1e8).toFixed(1)}억`
                                        : v >= 1e4 ? `${(v/1e4).toFixed(0)}만`
                                        : v.toLocaleString()}
                     domain={['auto', 'auto']} />

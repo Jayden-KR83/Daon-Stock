@@ -31,8 +31,13 @@
      개인 키가 섞인 테이블에서 접두 검색을 하면 그 순간 남의 재무 데이터가 나간다.
    - **개인 값을 `localStorage` 에 저장하면 `store.js` 의 `PERSONAL_LOCAL_KEYS` 에 반드시 등록한다.**
      등록하지 않으면 로그아웃·계정 전환 후에도 남아 다음 사용자(데모 포함)에게 승계된다.
+   - **개인 금액을 화면에 찍을 때는 반드시 `src/utils/privacy.js` 의
+     `usePrivacy()` / `maskText()` 를 거친다.** 직접 `toLocaleString()` 해서 붙이면
+     가림(privacy) 모드가 그 화면에서만 뚫린다 — 2026-08-27 확정된 노출 경로다.
+     화면에는 '가림'이라고 표시되므로 안전하다고 믿게 되어 더 위험하다.
    - 회귀 보호: `backend/tests/test_shared_cache_privacy.py` (공유 캐시에 개인 키가
-     들어가거나 남아 있으면 실패).
+     들어가거나 남아 있으면 실패) · `node scripts/privacy-scan.mjs`
+     (가림 모드에서 전 탭 금액 노출 0건 확인).
 5. **배포** — `docs/deployment.md`의 검증 체크리스트 모두 통과 후에만 "완료" 보고
 
 ## Plan Mode 권장 시나리오 (바이브 코딩 무기고)

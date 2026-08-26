@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, pollPortfolioStrategy, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
 import { useStore } from '../store'
+import { usePrivacy, maskText } from '../utils/privacy'
 import LogoCircle from '../components/LogoCircle'
 import InfoTip from '../components/InfoTip'
 import BorderBeam from '../components/BorderBeam'
@@ -148,6 +149,9 @@ function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKr
 }
 
 export default function AllocationTab() {
+  /* 🟥 금액은 반드시 priv.won()/priv.eok() 으로 찍는다 — src/utils/privacy.js 참조.
+     직접 toLocaleString() 하면 가림 모드가 뚫린다(2026-08-26 사고). */
+  const priv            = usePrivacy()
   const usdKrw          = useStore(s => s.usdKrw)
   const hasAnthropicKey = useStore(s => s.hasAnthropicKey)
   const setChartTicker  = useStore(s => s.setChartTicker)
@@ -575,7 +579,7 @@ export default function AllocationTab() {
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(v, name) => [`₩${v.toLocaleString()}`, name]}
+                  formatter={(v, name) => [priv.won(v), name]}
                   contentStyle={{
                     borderRadius: 4,
                     border: '1px solid var(--clr-border-md)',
@@ -596,11 +600,7 @@ export default function AllocationTab() {
                 letterSpacing: '.1em', textTransform: 'uppercase' }}>{cashForView ? '총 자산' : '총 평가액'}</div>
               <div style={{ fontSize: 14, fontWeight: 900, color: 'var(--clr-text-strong)',
                 letterSpacing: '-.02em', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                ₩{(total / 1e8 >= 1
-                  ? `${(total / 1e8).toFixed(2)}억`
-                  : total / 1e4 >= 1
-                    ? `${(total / 1e4).toFixed(0)}만`
-                    : total.toLocaleString())}
+                {priv.won(total, { compact: true })}
               </div>
             </div>
           </div>
@@ -671,7 +671,7 @@ export default function AllocationTab() {
                     </span>
                     {d.quantity != null && view === '종목별' && (
                       <span style={{ fontSize: 11, color: 'var(--clr-text-muted)', minWidth: 36 }}>
-                        {Number(d.quantity).toLocaleString(undefined, { maximumFractionDigits: 8 })}{qtyUnit(d)}
+                        {priv.on ? '•••' : Number(d.quantity).toLocaleString(undefined, { maximumFractionDigits: 8 })}{qtyUnit(d)}
                       </span>
                     )}
                     <span style={{ fontSize: 12, color: 'var(--clr-text-muted)', minWidth: 36, textAlign: 'right' }}>
@@ -679,7 +679,7 @@ export default function AllocationTab() {
                     </span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--clr-text-strong)',
                       minWidth: 86, textAlign: 'right' }}>
-                      ₩{d.value.toLocaleString()}
+                      {priv.won(d.value)}
                     </span>
                     {!isStock && (
                       <span style={{ fontSize: 10, color: 'var(--clr-text-muted)',
@@ -709,7 +709,7 @@ export default function AllocationTab() {
                           </span>
                           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--clr-text-strong)',
                             minWidth: 80, textAlign: 'right' }}>
-                            ₩{Math.round(c.v).toLocaleString()}
+                            {priv.won(c.v)}
                           </span>
                         </div>
                       ))}
@@ -1157,10 +1157,15 @@ function splitToSentences(text) {
     .filter(s => s.length > 4)
 }
 
-/* 문장이 끝나면(.?!。) 줄바꿈 삽입 — whiteSpace:'pre-line' 컨테이너와 함께 사용. */
+/* 문장이 끝나면(.?!。) 줄바꿈 삽입 — whiteSpace:'pre-line' 컨테이너와 함께 사용.
+   ⚠ 여기서도 가림을 적용한다. AI 본문이 화면에 들어가는 경로가 NumHighlight 외에
+   이 함수로도 있어서, 빼먹으면 '월가의 경고' 카드만 금액이 그대로 보인다
+   (2026-08-27 운영에서 확인). 모듈 레벨이라 상태를 즉석에서 읽고, 재렌더는
+   AllocationTab 이 usePrivacy() 로 구독해 일으킨다. */
 function breakSentences(text) {
   if (typeof text !== 'string') return text
-  return text.replace(/([^\d\s])([.?!。])\s+/g, '$1$2\n').trim()
+  const masked = maskText(text, useStore.getState().privacyMode)
+  return masked.replace(/([^\d\s])([.?!。])\s+/g, '$1$2\n').trim()
 }
 
 /* 분석탭 3대 장 구분 헤더 (스냅샷 → 리스크 진단 → 액션). design.md 직사각·무채색 준수. */
@@ -1283,6 +1288,10 @@ function ChapterHeader({ n, title, sub, id }) {
 
 /* 숫자·퍼센트·금액을 글자색+굵게 강조 (음영 X, 직사각형 X). 음수=빨강 / 양수=초록 / 중립=진한글씨 */
 function NumHighlight({ text }) {
+  /* AI 리포트 본문은 우리가 포맷하지 않은 문장이다. 가림 모드에서 여기가 뚫려
+     '총자산 ₩618,010,693' 같은 문구가 그대로 보였다(2026-08-26 사고). */
+  const privacyMode = useStore(s => s.privacyMode)
+  text = maskText(text, privacyMode)
   if (!text) return null
   const re = /(\+?-?\d+(?:,\d{3})*(?:\.\d+)?%?|₩\s*[\d,]+|\$\s*[\d,]+(?:\.\d+)?)/g
   const numRe = /^(\+?-?\d+(?:,\d{3})*(?:\.\d+)?%?|₩\s*[\d,]+|\$\s*[\d,]+(?:\.\d+)?)$/
@@ -1305,8 +1314,12 @@ function NumHighlight({ text }) {
    - **어구** → 굵은 글씨 + 강조색(--m-primary) (AI가 문장당 핵심 1개 표시)
    - 숫자/퍼센트/금액 → 색상 + 굵게 (NumHighlight) */
 function HighlightedText({ text, tone = 'neutral' }) {
+  /* ⚠ **강조** 구간은 NumHighlight 를 거치지 않고 그대로 렌더된다.
+     AI 는 문장에서 핵심 수치를 굵게 표시하는 경향이 있어, 여기를 빼먹으면
+     정작 가장 중요한 금액만 가림을 통과한다(2026-08-27 운영에서 발견). */
+  const privacyMode = useStore(s => s.privacyMode)
   if (!text) return null
-  const segs = String(text).split(/(\*\*[^*]+\*\*)/g)
+  const segs = String(maskText(text, privacyMode)).split(/(\*\*[^*]+\*\*)/g)
   return (
     <>
       {segs.map((seg, si) => {
@@ -1438,7 +1451,8 @@ function DividendSimulator({ sim, totalKrw }) {
   React.useEffect(() => { setRows(seed) }, [seed])
   React.useEffect(() => { if (totalKrw) setBase(Math.round(totalKrw)) }, [totalKrw])
 
-  const won = n => '₩' + Math.round(n || 0).toLocaleString()
+  const dpriv = usePrivacy()
+  const won = n => dpriv.won(n)
   const monthlyOf = r => base * (r.weight / 100) * (r.yieldPct / 100) / 12
   const totalMonthly = rows.reduce((s, r) => s + monthlyOf(r), 0)
   const weightSum = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0)

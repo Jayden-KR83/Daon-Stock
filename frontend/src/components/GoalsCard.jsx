@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { usePrivacy } from '../utils/privacy'
+import { useStore as _useStoreForPrivacy } from '../store'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis, Tooltip, ReferenceLine,
@@ -15,9 +17,14 @@ const STATUS = {
   off_track: { label: '미달 위험', color: 'var(--m-negative)' },
 }
 
+/* fmtKRW 는 모듈 레벨이라 훅을 못 쓴다. 상태만 즉석에서 읽고, 재렌더는
+   컴포넌트가 usePrivacy() 로 구독해서 일으킨다(구독이 없으면 토글해도 안 바뀐다). */
+const privacyOn = () => _useStoreForPrivacy.getState().privacyMode
+
 function fmtKRW(v) {
   if (v == null) return '—'
   const a = Math.abs(v), s = v < 0 ? '-' : ''
+  if (privacyOn()) return `${s}₩••••`
   if (a >= 1e8) return `${s}₩${(a / 1e8).toFixed(2)}억`
   if (a >= 1e4) return `${s}₩${Math.round(a / 1e4).toLocaleString()}만`
   return `${s}₩${Math.round(a).toLocaleString()}`
@@ -30,6 +37,7 @@ function defaultTargetDate() {
 }
 
 export default function GoalsCard() {
+  usePrivacy()   // 가림 토글 시 재렌더시키기 위한 구독 (fmtKRW 가 값을 읽는다)
   const qc = useQueryClient()
   const [form, setForm] = useState({
     id: null, name: '내 목표',
@@ -258,7 +266,8 @@ export default function GoalsCard() {
               <XAxis dataKey="yr" tick={{ fontSize: 9, fill: '#94A3B8' }}
                 tickFormatter={v => `${Math.round(v)}년`} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 9, fill: '#94A3B8' }} width={52}
-                tickFormatter={v => v >= 1e8 ? `${(v / 1e8).toFixed(1)}억`
+                tickFormatter={v => privacyOn() ? '••'
+                                  : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억`
                                   : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v}
                 domain={['auto', 'auto']} />
               <Tooltip

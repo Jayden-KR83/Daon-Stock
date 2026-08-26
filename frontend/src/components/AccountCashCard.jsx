@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { usePrivacy } from '../utils/privacy'
 import { useQueryClient } from '@tanstack/react-query'
 import { getAccounts, updateAccountCash } from '../api'
 import { useStore } from '../store'
@@ -28,6 +29,7 @@ export function totalCashKrw(accounts, usdKrw) {
 }
 
 export default function AccountCashCard() {
+  const priv = usePrivacy()   // 예수금은 개인 금액 — 가림 모드에서 편집칸까지 가린다
   const qc          = useQueryClient()
   const accounts    = useStore(s => s.accounts)
   const setAccounts = useStore(s => s.setAccounts)
@@ -109,13 +111,24 @@ export default function AccountCashCard() {
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--clr-text-muted)' }}>
                   {currencySymbol(a.currency)}
                 </span>
-                <input className="input" type="number" step="any" inputMode="decimal"
-                  aria-label={`${a.label} 예수금`}
-                  value={valueOf(a)}
-                  onChange={e => setDraft(p => ({ ...p, [a.key]: e.target.value }))}
-                  placeholder="0"
-                  style={{ width: 120, fontSize: 13, textAlign: 'right',
-                    fontVariantNumeric: 'tabular-nums' }} />
+                {priv.on ? (
+                  /* 가림 중에는 예수금을 편집할 수 없다. number 입력칸에는 마스크
+                     문자를 넣을 수 없어서, 값이 보이지 않는 읽기 전용 칸으로 바꾼다. */
+                  <div title="가림을 해제하면 편집할 수 있습니다"
+                    style={{ width: 120, fontSize: 13, textAlign: 'right', padding: '9px 12px',
+                      border: '1px solid var(--clr-border-md)', borderRadius: 4,
+                      background: 'var(--clr-bg)', color: 'var(--clr-text-muted)' }}>
+                    ••••••
+                  </div>
+                ) : (
+                  <input className="input" type="number" step="any" inputMode="decimal"
+                    aria-label={`${a.label} 예수금`}
+                    value={valueOf(a)}
+                    onChange={e => setDraft(p => ({ ...p, [a.key]: e.target.value }))}
+                    placeholder="0"
+                    style={{ width: 120, fontSize: 13, textAlign: 'right',
+                      fontVariantNumeric: 'tabular-nums' }} />
+                )}
               </div>
 
               {/* 자릿수 확인용 — number 입력칸은 천 단위 구분자를 못 넣어서
@@ -123,8 +136,10 @@ export default function AccountCashCard() {
               <div style={{ flex: '1 0 100%', fontSize: 11, color: 'var(--clr-text-muted)',
                 fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}
                 title={isKr ? undefined : `적용 환율 ₩${Math.round(usdKrw).toLocaleString()}`}>
-                {currencySymbol(a.currency)}{Math.round(Number.isFinite(raw) ? raw : 0).toLocaleString()}
-                {!isKr && <> · ≈ ₩{Math.round(krw).toLocaleString()}</>}
+                {priv.on
+                  ? `${currencySymbol(a.currency)}••••••`
+                  : `${currencySymbol(a.currency)}${Math.round(Number.isFinite(raw) ? raw : 0).toLocaleString()}`}
+                {!isKr && !priv.on && <> · ≈ ₩{Math.round(krw).toLocaleString()}</>}
               </div>
             </div>
           )
@@ -137,7 +152,7 @@ export default function AccountCashCard() {
           <div style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>예수금 합계 (원화 환산)</div>
           <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--clr-text-strong)',
             letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums' }}>
-            ₩{Math.round(previewTotal).toLocaleString()}
+            {priv.won(previewTotal)}
           </div>
         </div>
         <button className="btn-primary" onClick={save} disabled={busy || !changed.length}
