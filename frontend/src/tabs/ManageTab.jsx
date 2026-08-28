@@ -11,6 +11,7 @@ import TwoFactorCard from '../components/TwoFactorCard'
 import AnalysisAdminCard from '../components/AnalysisAdminCard'
 import AccountCashCard from '../components/AccountCashCard'
 import PushSetupCard from '../components/PushSetupCard'
+import AppVersionCard from '../components/AppVersionCard'
 
 export default function ManageTab() {
   const qc = useQueryClient()
@@ -69,6 +70,9 @@ export default function ManageTab() {
 
       {/* 테마 전환 */}
       <ThemeToggleCard />
+
+      {/* 앱 버전 — "고쳤다는데 내 폰은 그대로" 를 스스로 확인·해결할 수 있게 */}
+      <AppVersionCard />
 
       {/* 관리자 모드 (is_admin인 경우에만 노출) + 잠금 해제된 경우에만 admin 카드들 표시 */}
       <AdminSection qc={qc} />

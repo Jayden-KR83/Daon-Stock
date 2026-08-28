@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import WatchStar from '../components/WatchStar'
 import { useQuery } from '@tanstack/react-query'
 import {
   getMostActiveUs, getMostActiveKr,
@@ -128,6 +129,8 @@ function StockRow({ rank, ticker, name, price, changePct, spark, isUs, subRight,
         </div>
         {subRight && <div className="tt-srow-sub">{subRight}</div>}
       </div>
+      {/* 눈에 띈 종목을 그 자리에서 담는다 (행 클릭=차트 이동과 겹치지 않게 처리됨) */}
+      <WatchStar ticker={ticker} name={name} size={16} />
     </div>
   )
 }

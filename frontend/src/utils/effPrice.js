@@ -38,9 +38,55 @@ export function effPrice(h, prices) {
     const m = Number(h?.manual_price) || 0
     return m > 0 ? m : (Number(h?.avg_price) || 0)
   }
-  const live = prices?.[h?.ticker]?.current_price
+  /* 정규장 밖이면 확장시간(프리/애프터) 체결가를 쓴다.
+     안 그러면 프리장 내내 '어제 종가' 가 박혀 있어 화면이 멈춘 것처럼 보이고,
+     등락률도 어제 것이 오늘 값처럼 읽힌다(2026-08-28 NVDA +8.7% 오해).
+     ⚠ 확장시간은 거래가 얇아 호가가 튄다 — 그래서 화면에는 반드시 '프리/애프터'
+       라벨을 같이 띄운다(components/SessionBadge.jsx). */
+  const p = prices?.[h?.ticker]
+  const ext = p?.ext?.price
+  if (typeof ext === 'number' && !isNaN(ext)) return ext
+  const live = p?.current_price
   if (typeof live === 'number' && !isNaN(live)) return live
   const manual = Number(h?.manual_price) || 0
   if (manual > 0) return manual
   return Number(h?.avg_price) || 0
+}
+
+/** 지금 화면에 보여줄 등락률 + 그 기준 라벨.
+ *
+ *  왜 필요한가: 일봉의 마지막 값은 정규장 밖에서 '어제' 다. 그대로 쓰면
+ *  프리장에 어제 등락률(+8.7%)이 오늘 수치처럼 보인다. 세션에 맞는 값을 고르고,
+ *  무엇 대비인지 라벨을 항상 함께 돌려준다 — 라벨 없는 숫자가 오해의 출발점이다.
+ *
+ *  반환: { pct, label, session }  (label 이 null 이면 평소의 일간 등락률)
+ */
+export function sessionChange(p) {
+  if (!p) return { pct: 0, label: null, session: 'closed' }
+  const session = p.session || 'regular'
+  if (p.ext && typeof p.ext.change_pct === 'number') {
+    return {
+      pct: p.ext.change_pct,
+      label: p.ext.session === 'post' ? '애프터' : '프리',
+      session,
+    }
+  }
+  return { pct: Number(p.change_pct) || 0, label: null, session }
+}
+
+/** 기준선으로 쓸 '직전 정규장 종가'.
+ *
+ *  백엔드를 건드리지 않고 정확히 얻는다:
+ *   · 확장시간이면 ext.change_pct 의 기준이 곧 current_price(직전 정규장 종가)다.
+ *   · 정규장이면 현재가와 등락률에서 역산한다 — cur / (1 + pct/100).
+ *  스파크라인의 회색 점선이 이 값에 놓이면, 선이 그 위에 있으면 상승·아래면 하락으로
+ *  한눈에 읽힌다(숫자를 읽지 않아도 방향을 안다).
+ */
+export function prevClose(p) {
+  if (!p) return null
+  if (p.ext && typeof p.current_price === 'number') return p.current_price
+  const cur = Number(p.current_price)
+  const pct = Number(p.change_pct)
+  if (!isFinite(cur) || !isFinite(pct) || pct <= -100) return null
+  return cur / (1 + pct / 100)
 }

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { normalizeReco } from '../utils/reco'
+import WatchStar from '../components/WatchStar'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { useStore } from '../store'
@@ -653,7 +654,13 @@ export default function DiscoverTab() {
                           <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 5px',
                             borderRadius: 2, color: cv.c, border: `1px solid ${cv.c}` }}>{cv.t}</span>) })()}
                       </td>
-                      <td style={{ ...td, fontSize: 11, color: 'var(--m-text-tertiary)', fontWeight: 600 }}>{row.ticker}</td>
+                      <td style={{ ...td, fontSize: 11, color: 'var(--m-text-tertiary)', fontWeight: 600 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          {row.ticker}
+                          {/* 발굴한 종목을 관심 탭으로 옮겨 적지 않고 그 자리에서 담는다 */}
+                          <WatchStar ticker={row.ticker} name={row.name || ''} size={14} />
+                        </span>
+                      </td>
                       <td style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)' }}>{mktKo(row.market)}</td>
                       <td style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sector}</td>
                       <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>

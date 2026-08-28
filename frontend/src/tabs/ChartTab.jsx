@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import BulletList, { splitToSentences } from '../components/BulletList'
 import { ReportBullets, ReportSectionHead, ReportMeta, ReportFootnote } from '../components/report'
+import { sessionChange } from '../utils/effPrice'
+import WatchStar from '../components/WatchStar'
 import { normalizeReco, recoColor as recoColorOf, RECO_HELP } from '../utils/reco'
 import InfoTip from '../components/InfoTip'
 import { SessionLine, RegularCloseNote } from '../components/SessionBadge'
@@ -610,8 +612,11 @@ export default function ChartTab() {
     ? scaledHist.slice(zoomRange[0], zoomRange[1] + 1)
     : scaledHist
 
-  const cur    = stockData?.current_price
-  const chgPct = stockData?.change_pct ?? 0
+  /* 정규장 밖이면 큰 숫자도 확장시간 체결가로 바꾼다. 어제 값을 오늘처럼
+     띄우지 않기 위해서다 — 대신 아래 SessionLine 에 기준을 명시한다. */
+  const _sc    = sessionChange(stockData)
+  const cur    = stockData?.ext?.price ?? stockData?.current_price
+  const chgPct = _sc.pct
   const up     = chgPct >= 0
 
   // 가격 포맷 (지수/채권/환율/코인 구분)
@@ -2080,6 +2085,11 @@ function AppleStocksHero({
             {isCrypto && <Badge color="var(--clr-info-dark)" bg="var(--clr-info-bg)">CRYPTO</Badge>}
             {isKr && !isIndex && <Badge color="var(--clr-info-dark)" bg="var(--clr-info-bg)">KR</Badge>}
             {isUs && !isIndex && !isKr && <Badge color="var(--clr-text-mid)" bg="var(--clr-bg)">US</Badge>}
+            {/* 방금 본 종목을 여기서 바로 담는다 — 관심 탭으로 가서 다시 검색하지 않게 */}
+            {!isIndex && (
+              <WatchStar ticker={activeTicker}
+                name={stockData?.short_name || stockData?.name || ''} size={17} />
+            )}
             {onOpenAlerts && !isIndex && (
               <button onClick={onOpenAlerts}
                 title="가격 알림 설정"

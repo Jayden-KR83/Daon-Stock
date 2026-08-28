@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { SessionChip } from '../components/SessionBadge'
+import { sessionChange, prevClose } from '../utils/effPrice'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, deleteWatchlist, getNews, searchStocks, addWatchlist, updateWatchlistGroup } from '../api'
@@ -224,7 +224,9 @@ function WatchlistSearch({ existing, onAdded }) {
 
 function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
   const cur    = priceData?.current_price
-  const chgPct = priceData?.change_pct ?? 0
+  /* 정규장 밖이면 확장시간 등락률을 보여준다 — 라벨로 무엇 대비인지 밝힌다 */
+  const sc     = sessionChange(priceData)
+  const chgPct = sc.pct
   const up     = chgPct >= 0
   const isUs   = !/^A?\d[0-9A-Z]{5}$/.test(item.ticker)
 
@@ -268,19 +270,19 @@ function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
 
         {/* Sparkline */}
         {priceData?.spark && (
-          <Sparkline values={priceData.spark} positive={up} width={60} height={24} />
+          <Sparkline values={priceData.spark} positive={up} width={60} height={24}
+            baseline={prevClose(priceData)} />
         )}
 
         {/* Price */}
         <div style={{ textAlign: 'right', minWidth: 80 }}>
           <div className="price-main">
-            {cur != null ? (isUs ? `$${cur.toFixed(2)}` : `₩${Math.round(cur).toLocaleString()}`) : '—'}
+            {(() => { const v = priceData?.ext?.price ?? cur
+              return v != null ? (isUs ? `$${v.toFixed(2)}` : `₩${Math.round(v).toLocaleString()}`) : '—' })()}
           </div>
           <div className={`price-change ${up ? 'pos' : 'neg'}`}>
-            {up ? '+' : ''}{(chgPct ?? 0).toFixed(2)}%
+            {sc.label ? sc.label + ' ' : ''}{up ? '+' : ''}{(chgPct ?? 0).toFixed(2)}%
           </div>
-          {/* 정규장 밖이면 위 변동률은 직전 정규장 것이다 — 지금 값을 아래 붙인다 */}
-          <div style={{ marginTop: 2 }}><SessionChip ext={priceData?.ext} /></div>
         </div>
 
         {/* Actions */}

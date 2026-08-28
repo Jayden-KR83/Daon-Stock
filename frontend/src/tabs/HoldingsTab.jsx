@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { SessionChip } from '../components/SessionBadge'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, deleteHolding, addHolding } from '../api'
@@ -14,7 +13,7 @@ import Sparkles from '../components/Sparkles'
 import { SkeletonRow } from '../components/Skeleton'
 import { usePriceFlash } from '../hooks/usePriceFlash'
 import { isKrTicker } from '../utils/displayName'
-import { effPrice, priceableTickers, isUnlistedFund, qtyUnit } from '../utils/effPrice'
+import { effPrice, priceableTickers, isUnlistedFund, qtyUnit, sessionChange, prevClose } from '../utils/effPrice'
 import { useAccounts } from '../utils/accounts'
 import { listNotes } from '../api'
 import './HoldingsTab.css'
@@ -337,7 +336,10 @@ export default function HoldingsTab() {
           const avg    = Number(h.avg_price) || 0
           const isUs   = !/^A?\d[0-9A-Z]{5}$/.test(ticker)
           const priceData = prices[ticker]
-          const rawCur = priceData?.current_price
+          /* 정규장 밖이면 확장시간 체결가를 현재가로 쓴다 — 그래야 프리장에
+             평가액·등락률이 실제로 움직인다. 라벨(sc.label)로 무슨 시간대인지 밝힌다. */
+          const sc     = sessionChange(priceData)
+          const rawCur = priceData?.ext?.price ?? priceData?.current_price
           const hasLivePrice = priceData != null && rawCur != null
             && typeof rawCur === 'number' && !isNaN(rawCur)
           const isStale = !!priceData?._stale
@@ -350,7 +352,7 @@ export default function HoldingsTab() {
             ? (navVal > 0 ? navVal : (manual > 0 ? manual : avg))
             : (hasLivePrice ? rawCur : (manual > 0 ? manual : avg))
           const hasValue = isFund ? (navVal > 0 || manual > 0) : hasLivePrice
-          const chgPct  = Number(priceData?.change_pct) || 0
+          const chgPct  = sc.pct
           const up      = chgPct >= 0
           const mul     = isUs ? (Number(usdKrw) || 1) : 1
           const costKrw = qty * avg * mul
@@ -430,13 +432,27 @@ export default function HoldingsTab() {
                   : `${h.quantity.toLocaleString(undefined, { maximumFractionDigits: 8 })}${qtyUnit(h)}`}</span>
                 <span className="h-meta-divider" />
                 <span>{ACC_LABELS[h.account]}</span>
+                {/* 오늘(또는 프리·애프터) 등락 — 평가액 모드에는 일간 변동이 아예 없어서
+                    "지금 오르는 중인지" 를 알 수 없었다. 작은 글씨로 항상 붙인다.
+                    평가손익(누적)과 헷갈리지 않도록 라벨을 앞에 둔다. */}
+                {hasValue && (
+                  <>
+                    <span className="h-meta-divider" />
+                    <span className={up ? 'num-pos' : 'num-neg'} style={{ fontWeight: 700 }}>
+                      {sc.label || '오늘'} {privacyMode ? maskPct()
+                        : `${chgPct >= 0 ? '+' : ''}${(chgPct ?? 0).toFixed(2)}%`}
+                    </span>
+                  </>
+                )}
               </div>
 
               {/* 3-2. Spark (중앙 배치) */}
               <div className="h-spark" onClick={() => setChartTicker(h.ticker)}
                 style={{ cursor: 'pointer' }}>
+                {/* 회색 점선 = 직전 정규장 종가. 선이 그 위면 상승·아래면 하락 */}
                 {priceData?.spark && (
                   <Sparkline values={priceData.spark} positive={up}
+                    baseline={prevClose(priceData)}
                     width={72} height={26} />
                 )}
               </div>
@@ -508,13 +524,13 @@ export default function HoldingsTab() {
                           : (isUs ? `$${h.avg_price.toFixed(2)}` : `₩${Math.round(h.avg_price).toLocaleString()}`))
                         : '—'}
                     </span>
+                    {/* 프리/애프터면 라벨을 앞에 붙인다 — 무엇 대비인지 못 박는다 */}
                     <FlashPrice
                       value={chgPct}
-                      fmt={v => privacyMode ? maskPct() : `${v >= 0 ? '+' : ''}${(v ?? 0).toFixed(2)}%`}
+                      fmt={v => privacyMode ? maskPct()
+                        : `${sc.label ? sc.label + ' ' : ''}${v >= 0 ? '+' : ''}${(v ?? 0).toFixed(2)}%`}
                       className={up ? 'm3-metric-value is-positive' : 'm3-metric-value is-negative'}
                     />
-                    {/* 정규장 밖이면 위 변동률은 '어제' 것이다 — 지금 값을 옆에 붙인다 */}
-                    <SessionChip ext={priceData?.ext} />
                   </div>
                 )}
               </div>

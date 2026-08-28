@@ -2800,6 +2800,29 @@ def _ext_quote(ticker: str) -> dict | None:
         return None
 
 
+def kr_market_session(now_utc: float | None = None) -> str:
+    """한국장 세션 — 'pre' | 'regular' | 'post' | 'closed'.
+
+    ⚠ 한국은 확장시간 '가격' 을 붙이지 않는다. 시간외 단일가는 야후에 없고
+      네이버 스크래핑을 하나 더 늘리는 만큼 깨질 곳이 늘어난다. 대신 세션만
+      알려줘서 화면이 "이 숫자는 종가다" 라고 말할 수 있게 한다.
+      없는 데이터를 지어내는 것보다, 무슨 시각의 값인지 밝히는 편이 정확하다.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        kst = datetime.fromtimestamp(now_utc if now_utc else time(),
+                                     ZoneInfo('Asia/Seoul'))
+    except Exception:
+        return 'closed'
+    if kst.weekday() >= 5:
+        return 'closed'
+    hm = kst.hour * 60 + kst.minute
+    if 8 * 60 <= hm < 9 * 60:        return 'pre'      # 장전 시간외
+    if 9 * 60 <= hm < 15 * 60 + 30:  return 'regular'  # 정규장
+    if 15 * 60 + 30 <= hm < 18 * 60: return 'post'     # 장후 시간외
+    return 'closed'
+
+
 def _attach_ext(ticker: str, d: dict | None) -> dict | None:
     """정규장 시세 dict 에 확장시간 정보를 덧붙인다(정규장 값은 건드리지 않는다)."""
     if not d:
@@ -3374,6 +3397,9 @@ def _fetch_kr_price(t: str):
         p = _kr_price(t)
         if not p:
             return (t, None)
+        # 한국장은 확장시간 가격을 붙이지 않는다(위 kr_market_session 주석 참조).
+        # 세션만 실어 보내 화면이 '종가 기준' 임을 밝힐 수 있게 한다.
+        p = {**p, 'session': kr_market_session()}
         # 스파크라인: 먼저 캐시, 없으면 v8 chart API로 짧은 타임아웃 내 실시간 페치
         try:
             hist = _get_cached_kr_history(t)
