@@ -5,6 +5,7 @@ import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsC
 import { useStore } from '../store'
 import { usePrivacy, maskText } from '../utils/privacy'
 import SharedBulletList from '../components/BulletList'
+import { HighlightedText, ReportLabel } from '../components/report'
 import LogoCircle from '../components/LogoCircle'
 import InfoTip from '../components/InfoTip'
 import BorderBeam from '../components/BorderBeam'
@@ -1287,52 +1288,8 @@ function ChapterHeader({ n, title, sub, id }) {
   )
 }
 
-/* 숫자·퍼센트·금액을 글자색+굵게 강조 (음영 X, 직사각형 X). 음수=빨강 / 양수=초록 / 중립=진한글씨 */
-function NumHighlight({ text }) {
-  /* AI 리포트 본문은 우리가 포맷하지 않은 문장이다. 가림 모드에서 여기가 뚫려
-     '총자산 ₩618,010,693' 같은 문구가 그대로 보였다(2026-08-26 사고). */
-  const privacyMode = useStore(s => s.privacyMode)
-  text = maskText(text, privacyMode)
-  if (!text) return null
-  const re = /(\+?-?\d+(?:,\d{3})*(?:\.\d+)?%?|₩\s*[\d,]+|\$\s*[\d,]+(?:\.\d+)?)/g
-  const numRe = /^(\+?-?\d+(?:,\d{3})*(?:\.\d+)?%?|₩\s*[\d,]+|\$\s*[\d,]+(?:\.\d+)?)$/
-  return (
-    <>
-      {text.split(re).map((p, i) => {
-        if (!p) return null
-        if (numRe.test(p)) {
-          const klass = /^-/.test(p) ? 'num-neg' : /^\+/.test(p) ? 'num-pos' : 'num-neutral'
-          return <span key={i} className={klass}
-            style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{p}</span>
-        }
-        return <React.Fragment key={i}>{p}</React.Fragment>
-      })}
-    </>
-  )
-}
-
-/* AI 본문 강조 렌더러:
-   - **어구** → 굵은 글씨 + 강조색(--m-primary) (AI가 문장당 핵심 1개 표시)
-   - 숫자/퍼센트/금액 → 색상 + 굵게 (NumHighlight) */
-function HighlightedText({ text, tone = 'neutral' }) {
-  /* ⚠ **강조** 구간은 NumHighlight 를 거치지 않고 그대로 렌더된다.
-     AI 는 문장에서 핵심 수치를 굵게 표시하는 경향이 있어, 여기를 빼먹으면
-     정작 가장 중요한 금액만 가림을 통과한다(2026-08-27 운영에서 발견). */
-  const privacyMode = useStore(s => s.privacyMode)
-  if (!text) return null
-  const segs = String(maskText(text, privacyMode)).split(/(\*\*[^*]+\*\*)/g)
-  return (
-    <>
-      {segs.map((seg, si) => {
-        const m = /^\*\*([^*]+)\*\*$/.exec(seg)
-        if (m) {
-          return <strong key={si} style={{ color: 'var(--m-primary)', fontWeight: 800 }}>{m[1]}</strong>
-        }
-        return <NumHighlight key={si} text={seg} />
-      })}
-    </>
-  )
-}
+/* 강조 렌더러(NumHighlight·HighlightedText)는 components/report.jsx 로 옮겼다.
+   종목 분석과 같은 표현 체계를 쓰기 위해서다 — 한 곳에서만 정의한다. */
 
 /* 위험 강도 시각화 — title의 키워드 기반으로 자동 추정 */
 function riskSeverity(title = '', detail = '') {
@@ -1714,15 +1671,9 @@ function DaonAIReport({ data, computedAt = 0, part = 'diagnosis' }) {
    조금씩 달라져 결국 머릿글이 뒤죽박죽이 된다(2026-08-18 오너 지적).
    1단계 = .mono-section-title, 2단계 = 이것. 그 밖의 제목 스타일을 새로 만들지 말 것.
    의미(위험/긍정)는 tone(글자색)으로만 — design.md R1(좌측 색띠 금지). */
-function SubLabel({ children, tone = 'neutral' }) {
-  const color = tone === 'negative' ? 'var(--m-negative)'
-              : tone === 'positive' ? 'var(--m-positive)'
-              : 'var(--m-text-secondary)'
-  return (
-    <div style={{ fontSize: 10.5, fontWeight: 800, color,
-      letterSpacing: '.03em', marginBottom: 4 }}>{children}</div>
-  )
-}
+/* 라벨 정의도 components/report.jsx 로 옮겼다 — 두 탭이 같은 얼굴을 유지하려면
+   크기·색을 한 곳에서만 정해야 한다. */
+const SubLabel = ReportLabel
 
 /* ─── Life Timeline 5년 단위 자산배분 Phase 카드 (design.md R1/R2 준수) ─── */
 const ALLOC_COLORS = ['#1F4FD3', '#059669', '#D97706', '#7C3AED', '#0891B2', '#DB2777', '#64748B']

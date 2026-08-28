@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { SessionChip } from '../components/SessionBadge'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, deleteWatchlist, getNews, searchStocks, addWatchlist, updateWatchlistGroup } from '../api'
@@ -278,6 +279,8 @@ function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
           <div className={`price-change ${up ? 'pos' : 'neg'}`}>
             {up ? '+' : ''}{(chgPct ?? 0).toFixed(2)}%
           </div>
+          {/* 정규장 밖이면 위 변동률은 직전 정규장 것이다 — 지금 값을 아래 붙인다 */}
+          <div style={{ marginTop: 2 }}><SessionChip ext={priceData?.ext} /></div>
         </div>
 
         {/* Actions */}

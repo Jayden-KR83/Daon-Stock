@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import BulletList, { splitToSentences } from '../components/BulletList'
+import { ReportBullets, ReportSectionHead, ReportMeta, ReportFootnote } from '../components/report'
 import { normalizeReco, recoColor as recoColorOf, RECO_HELP } from '../utils/reco'
 import InfoTip from '../components/InfoTip'
+import { SessionLine, RegularCloseNote } from '../components/SessionBadge'
 import { useQuery } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { getStock, getNews, searchStocks, getPortfolio, getFundamentals, getPeers, analyzeStock, getCachedAnalysis, getFinancialsTrend, authMe } from '../api'
@@ -711,6 +713,8 @@ export default function ChartTab() {
             stockData={stockData}
             cur={cur}
             chgPct={chgPct}
+            ext={stockData?.ext}
+            session={stockData?.session}
             up={up}
             fmtCur={fmtCur}
             isKr={isKr}
@@ -960,7 +964,7 @@ export default function ChartTab() {
               <div style={{ marginTop: 8, padding: 8, background: 'var(--clr-neg-bg-soft)', borderRadius: 8,
                 color: 'var(--clr-neg-dark)', fontSize: 12 }}>{aiError}</div>
             )}
-            {aiResult && <AiStockResult data={aiResult} isUs={isUs} cur={cur} />}
+            {aiResult && <AiStockResult data={aiResult} isUs={isUs} cur={cur} computedAt={aiComputedAt} />}
           </div>
 
           {/* 매출 · 영업이익 · EPS 트렌드 — 개별 주식 + KR 종목 */}
@@ -1037,7 +1041,18 @@ function breakSentences(text) {
 }
 
 /* ── AI 분석 결과 (확장 스키마: 회사 동향·실적·호재·애널리스트·출처) ── */
-function AiStockResult({ data, isUs, cur }) {
+/* KST 기준 '2026-08-28 09:04' — 리포트에는 항상 '언제 것' 인지 적는다 */
+function fmtKstDate(epochSec) {
+  try {
+    const p = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(new Date(epochSec * 1000)).reduce((a, x) => (a[x.type] = x.value, a), {})
+    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} KST`
+  } catch { return '' }
+}
+
+function AiStockResult({ data, isUs, cur, computedAt = 0 }) {
   /* 캐시에 남은 옛 표기('보유')를 화면에 그대로 찍지 않는다 — utils/reco.js 참조 */
   const reco     = normalizeReco(data.recommendation)
   const recColor = recoColorOf(reco)
@@ -1055,60 +1070,58 @@ function AiStockResult({ data, isUs, cur }) {
       initial="hidden"
       animate="show"
     >
-      {/* 추천 + 목표가 */}
+      {/* ── 표지 ──────────────────────────────────────────────────────
+          리서치 보고서는 본문 전에 '의견·목표가·기준일·근거' 를 먼저 박는다.
+          예전에는 이 정보가 배지·꼬리표로 흩어져 있어 리포트라기보다 위젯처럼
+          보였다. components/report.jsx 의 ReportMeta 로 포트폴리오 분석과
+          같은 형식을 쓴다. */}
       <motion.div
         variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
         transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}
       >
-        <span title={RECO_HELP}
-          style={{ fontSize: 16, fontWeight: 900, color: recColor, border: `2px solid ${recColor}`,
-            borderRadius: 4, padding: '3px 12px', cursor: 'help' }}>{reco}</span>
-        {/* 등급이 무슨 뜻인지 옆에 바로 적는다. '중립' 은 보유 여부에 따라 읽는 법이
-            달라서(유지 / 관망), 툴팁만으로는 오해가 남는다. */}
-        <InfoTip text={RECO_HELP} />
-        {reco === '중립' && (
-          <span style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>
-            보유 중이면 유지 · 미보유면 관망
-          </span>
-        )}
-        {data.priceTarget > 0 && (
-          <span style={{ fontSize: 12, color: 'var(--clr-text-sub)' }}>
-            목표가: <NumberTicker value={data.priceTarget} format={fmtTarget} duration={1.0} />
-            {cur > 0 && data.priceTarget > 0 && (
-              <span style={{ color: data.priceTarget > cur ? '#16A34A' : '#DC2626', marginLeft: 4 }}>
-                (<NumberTicker
-                    value={(data.priceTarget - cur) / cur * 100}
-                    format={v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`}
-                    duration={1.0}
-                  />)
-              </span>
-            )}
-          </span>
-        )}
-        <span style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginLeft: 'auto',
-          background: 'var(--clr-bg)', padding: '2px 8px', borderRadius: 6,
-          letterSpacing: '.02em' }}>
-          웹 검색 기반 · Claude Sonnet 4.6
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          marginBottom: 6 }}>
+          <span title={RECO_HELP}
+            style={{ fontSize: 16, fontWeight: 900, color: recColor, border: `2px solid ${recColor}`,
+              borderRadius: 4, padding: '3px 12px', cursor: 'help' }}>{reco}</span>
+          {/* '중립' 은 보유 여부에 따라 읽는 법이 달라서(유지 / 관망) 툴팁만으로는
+              오해가 남는다 — 화면에 같이 적는다. */}
+          <InfoTip text={RECO_HELP} />
+          {reco === '중립' && (
+            <span style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>
+              보유 중이면 유지 · 미보유면 관망
+            </span>
+          )}
+        </div>
+        <ReportMeta items={[
+          { k: '목표주가', v: data.priceTarget > 0 ? fmtTarget(data.priceTarget) : null },
+          { k: '현재가',   v: cur > 0 ? fmtTarget(cur) : null },
+          { k: '상승여력',
+            v: (cur > 0 && data.priceTarget > 0)
+              ? `${data.priceTarget > cur ? '+' : ''}${((data.priceTarget - cur) / cur * 100).toFixed(1)}%`
+              : null,
+            color: (cur > 0 && data.priceTarget > cur) ? 'var(--clr-pos-dark)'
+                 : (cur > 0 && data.priceTarget > 0) ? 'var(--clr-neg-dark)' : undefined },
+          { k: '작성 기준', v: computedAt > 0 ? fmtKstDate(computedAt) : null },
+          { k: '근거',     v: '웹 검색 · Claude Sonnet 4.6' },
+        ]} />
       </motion.div>
 
-      {/* 핵심 요약 — 리포트의 첫 블록. 항상 펼침(접히면 결론부터 사라진다) */}
-      {data.summary && (
-        <Section title="핵심 요약" collapsible={false}>
-          <BulletList items={splitToSentences(data.summary)} />
-        </Section>
-      )}
-
-      {/* ── 본문: 번호 매긴 보고서 섹션 (존재하는 것만 01·02… 순번 통일) ── */}
+      {/* ── 본문 — 번호 매긴 보고서 섹션 ──────────────────────────────
+          요약·의견까지 한 배열에 넣어야 번호가 01부터 끊기지 않는다.
+          예전에는 요약과 의견을 배열 밖에서 따로 그려서, 번호를 붙이려 해도
+          가운데 토막만 01·02… 가 되는 구조였다. */}
       {(() => {
         const secs = []
+        if (data.summary)
+          secs.push({ title: '핵심 요약', fixed: true,
+            body: <ReportBullets text={data.summary} /> })
         if (data.company_overview)
           secs.push({ title: '기업 개요 · 전략',
-            body: <BulletList items={splitToSentences(data.company_overview)} small /> })
+            body: <ReportBullets text={data.company_overview} small /> })
         if (data.earnings_ir)
           secs.push({ title: '실적 · 가이던스',
-            body: <BulletList items={splitToSentences(data.earnings_ir)} small /> })
+            body: <ReportBullets text={data.earnings_ir} small /> })
         if (((data.catalysts_short?.length || 0) + (data.catalysts_medium?.length || 0)) > 0)
           secs.push({ title: '투자 촉매', body: (
             <>
@@ -1128,27 +1141,25 @@ function AiStockResult({ data, isUs, cur }) {
           ) })
         if (data.backlog && data.backlog !== '확인 필요' && data.backlog.trim().length > 0)
           secs.push({ title: '수주 잔고 · 백로그',
-            body: <BulletList items={splitToSentences(data.backlog)} small /> })
+            body: <ReportBullets text={data.backlog} small /> })
         if (data.analyst_views)
           secs.push({ title: '애널리스트 컨센서스',
-            body: <BulletList items={splitToSentences(data.analyst_views)} small /> })
+            body: <ReportBullets text={data.analyst_views} small /> })
         if (data.bull?.length > 0)
           secs.push({ title: '강세 요인',
             body: data.bull.map((b, i) => <Bullet key={i}>{b}</Bullet>) })
         if (data.bear?.length > 0)
           secs.push({ title: '리스크 요인',
             body: data.bear.map((b, i) => <Bullet key={i}>{b}</Bullet>) })
-        return secs.map(s => (
-          <Section key={s.title} title={s.title}>{s.body}</Section>
+        // 최종 의견 — 리포트의 마지막 블록. 매수/중립/매도는 제목 글자색으로만(R1)
+        if (data.verdict)
+          secs.push({ title: '투자 의견', accent: recColor, fixed: true,
+            body: <ReportBullets text={data.verdict} /> })
+        return secs.map((sec, i) => (
+          <Section key={sec.title} no={i + 1} title={sec.title} accent={sec.accent}
+            collapsible={!sec.fixed}>{sec.body}</Section>
         ))
       })()}
-
-      {/* 최종 의견 — 리포트의 마지막 블록. 매수/보유/매도는 제목 글자색으로만 표현(R1) */}
-      {data.verdict && (
-        <Section title="투자 의견" accent={recColor} collapsible={false}>
-          <BulletList items={splitToSentences(data.verdict)} />
-        </Section>
-      )}
 
       {/* 분석 근거·한계 (Reference) — 문장 단위 출처는 불가하나 분석 전체의 근거·범위를 명시 (R6: 문장별 줄바꿈) */}
       <div className="ko-keep" style={{ marginTop: 10, padding: '8px 12px', borderRadius: 4,
@@ -1208,19 +1219,18 @@ function SqMark({ color = 'var(--clr-text-secondary)', size = 8 }) {
    - 머릿글 = ■ 마커 + 11.5px/800 대문자. 크기·색·마커를 여기 밖에서 다시 정의하지 말 것
    - 의미(추천 강도 등)는 accent(제목 글자색)로만 표현 — design.md R1(좌측 색띠 금지)
    - collapsible=false 는 리포트의 처음(요약)·끝(의견)처럼 항상 보여야 하는 블록용 */
-function Section({ title, accent, children, defaultOpen = true, collapsible = true }) {
+function Section({ no, title, accent, children, defaultOpen = true, collapsible = true }) {
   const [open, setOpen] = useState(defaultOpen)
   const shown = collapsible ? open : true
+  /* 머리 스타일은 components/report.jsx 하나만 쓴다 — 포트폴리오 분석과 같은 얼굴.
+     예전에는 여기서 11.5px 대문자로 따로 그렸다(한글에는 uppercase 가 아무 효과도
+     없고 라틴 문자만 들쭉날쭉해진다). */
   const head = (
-    <>
-      <SqMark color={accent || 'var(--clr-text-secondary)'} />
-      <span style={{ fontSize: 11.5, fontWeight: 800, color: accent || 'var(--clr-text)',
-        letterSpacing: '.02em', textTransform: 'uppercase' }}>{title}</span>
-      {collapsible && (
-        <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--clr-text-muted)',
+    <ReportSectionHead no={no} title={title} accent={accent}
+      right={collapsible ? (
+        <span style={{ fontSize: 9, color: 'var(--clr-text-muted)', display: 'inline-block',
           transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▼</span>
-      )}
-    </>
+      ) : null} />
   )
   return (
     <motion.div
@@ -1233,15 +1243,13 @@ function Section({ title, accent, children, defaultOpen = true, collapsible = tr
       {collapsible ? (
         <button onClick={() => setOpen(o => !o)}
           style={{
-            width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+            width: '100%', display: 'block',
             background: 'none', border: 'none', cursor: 'pointer', padding: 0,
             fontFamily: 'inherit', textAlign: 'left',
           }}>
           {head}
         </button>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{head}</div>
-      )}
+      ) : head}
       {shown && <div style={{ marginTop: 9 }}>{children}</div>}
     </motion.div>
   )
@@ -1260,7 +1268,8 @@ function Bullet({ children }) {
   if (!items) {
     return <BulletList items={[' ']} small renderItem={() => children} />
   }
-  return <BulletList items={items} small gap={5} />
+  // ReportBullets = 회색 네모 + **강조**·숫자 색상. 포트폴리오 분석과 완전히 같은 렌더러다.
+  return <ReportBullets items={items} small />
 }
 
 /* 그룹 소제목 (단기/중기) — caps label, 모든 그룹 동일 */
@@ -2038,6 +2047,7 @@ function RevenueEarningsPanel({ data, L, isKr }) {
    큰 가격 + 변동(금액/%) + 미니 sparkline + 종목 메타. NumberTicker로 부드러운 변화. */
 function AppleStocksHero({
   stockData, cur, chgPct, up, fmtCur, isKr, isIndex, isCrypto, isUs, activeTicker, sparkValues,
+  ext, session,
   onOpenAlerts,
 }) {
   // 변동 금액 추정 — prev close 기반
@@ -2130,7 +2140,12 @@ function AppleStocksHero({
           )}
           <span style={{ opacity: 0.9 }}>· {up ? '+' : ''}{(chgPct ?? 0).toFixed(2)}%</span>
         </div>
+        {/* 정규장 밖이면 큰 숫자가 '언제 것' 인지 못 박는다 */}
+        <RegularCloseNote session={session} />
       </div>
+
+      {/* 프리마켓·애프터마켓 실제 체결가 */}
+      <SessionLine ext={ext} fmt={fmtCur} />
     </div>
   )
 }

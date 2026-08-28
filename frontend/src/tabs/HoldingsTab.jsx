@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { SessionChip } from '../components/SessionBadge'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { getPortfolio, getPricesBatch, deleteHolding, addHolding } from '../api'
@@ -512,6 +513,8 @@ export default function HoldingsTab() {
                       fmt={v => privacyMode ? maskPct() : `${v >= 0 ? '+' : ''}${(v ?? 0).toFixed(2)}%`}
                       className={up ? 'm3-metric-value is-positive' : 'm3-metric-value is-negative'}
                     />
+                    {/* 정규장 밖이면 위 변동률은 '어제' 것이다 — 지금 값을 옆에 붙인다 */}
+                    <SessionChip ext={priceData?.ext} />
                   </div>
                 )}
               </div>

@@ -1049,10 +1049,15 @@ def get_eff_sector(s: dict) -> str:
     return US_ETF_SECTOR.get(tkr) or KR_ETF_SECTOR.get(tkr) or ''
 
 # ─── Yahoo Finance v8 API ─────────────────────────────────────────────
-def _yf_chart(ticker: str, range_: str = '1y', interval: str = '1d') -> dict | None:
-    """Yahoo Finance v8 chart — 직접 호출, 429 없음."""
+def _yf_chart(ticker: str, range_: str = '1y', interval: str = '1d',
+              prepost: bool = False) -> dict | None:
+    """Yahoo Finance v8 chart — 직접 호출, 429 없음.
+
+    prepost=True 면 프리마켓·애프터마켓 체결까지 포함한다(분봉에서만 의미 있음).
+    """
     url = (f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}'
-           f'?interval={interval}&range={range_}')
+           f'?interval={interval}&range={range_}'
+           + ('&includePrePost=true' if prepost else ''))
     try:
         r = _session.get(url, timeout=12)
         if r.status_code != 200:
@@ -2719,10 +2724,100 @@ def _usd_krw() -> float:
             return p['current_price']
     return 1300.0
 
+# ─── 프리마켓 / 애프터마켓 (2026-08-28) ──────────────────────────────
+# 왜 필요한가: 정규장 밖에서는 일봉의 마지막 값이 '어제 종가' 다. 그래서 프리장에
+# 앱을 열면 어제의 변동률(예: NVDA +8.7%)이 오늘의 실시간 수치처럼 보였다.
+# 숫자 자체는 어제 것이 맞지만, 지금 화면을 보는 사람에게는 틀린 정보다.
+#
+# 설계 원칙 두 가지:
+#  ① 평가액·손익 계산의 기준은 계속 '정규장 종가' 다.
+#     프리장은 거래가 얇아 호가가 크게 튄다. 총자산이 새벽에 출렁이면 그 숫자는
+#     의사결정에 쓸 수 없다. 확장시간 가격은 '참고 표시' 로만 덧붙인다.
+#  ② 정규장 변동률에는 '언제 기준인지' 를 항상 같이 준다(regular_at).
+#     라벨 없이 숫자만 주면 이번과 똑같은 오해가 반복된다.
+
+_US_SESSIONS = (   # (이름, 시작, 끝) — 미 동부 기준. DST 는 zoneinfo 가 처리한다.
+    ('pre',     (4, 0),  (9, 30)),
+    ('regular', (9, 30), (16, 0)),
+    ('post',    (16, 0), (20, 0)),
+)
+
+
+def us_market_session(now_utc: float | None = None) -> str:
+    """미국장 세션 — 'pre' | 'regular' | 'post' | 'closed'.
+
+    시계만으로 판단한다(추가 API 호출 0). 휴장일은 구분하지 않지만, 휴장일에는
+    확장시간 체결 자체가 없어서 아래 _ext_quote 가 빈 결과를 돌려주므로
+    화면에는 아무 배지도 붙지 않는다 — 잘못된 정보가 뜨지는 않는다.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        et = datetime.fromtimestamp(now_utc if now_utc else time(),
+                                    ZoneInfo('America/New_York'))
+    except Exception:
+        return 'closed'
+    if et.weekday() >= 5:          # 토·일
+        return 'closed'
+    hm = et.hour * 60 + et.minute
+    for name, (sh, sm), (eh, em) in _US_SESSIONS:
+        if sh * 60 + sm <= hm < eh * 60 + em:
+            return name
+    return 'closed'
+
+
+@ttl_cache(60)
+def _ext_quote(ticker: str) -> dict | None:
+    """확장시간(프리/애프터) 체결가 — 정규장 종가 대비 변동률까지.
+
+    1분봉 + includePrePost 로 받아 마지막 체결을 쓴다. 기준가는 meta 의
+    regularMarketPrice(= 직전 정규장 종가)다. 일봉 closes[-2] 를 쓰면 안 된다 —
+    애프터마켓에서는 그게 '전전일' 종가가 되어 변동률이 두 배로 부풀려진다.
+    """
+    res = _yf_chart(ticker, '1d', '1m', prepost=True)
+    if not res:
+        return None
+    try:
+        meta  = res.get('meta', {})
+        base  = meta.get('regularMarketPrice')
+        ts    = res.get('timestamp', []) or []
+        close = res.get('indicators', {}).get('quote', [{}])[0].get('close', []) or []
+        pairs = [(t, c) for t, c in zip(ts, close) if c is not None]
+        if not base or not pairs:
+            return None
+        at, last = pairs[-1]
+        # 확장시간 체결이 정규장 종가 시각보다 앞서면(=아직 프리장 체결 없음) 표시하지 않는다
+        reg_time = meta.get('regularMarketTime') or 0
+        if reg_time and at <= reg_time:
+            return None
+        base = float(base)
+        return {
+            'price':      round(float(last), 4),
+            'change':     round(float(last) - base, 4),
+            'change_pct': round((float(last) - base) / base * 100, 4) if base else 0.0,
+            'at':         int(at),
+        }
+    except Exception:
+        return None
+
+
+def _attach_ext(ticker: str, d: dict | None) -> dict | None:
+    """정규장 시세 dict 에 확장시간 정보를 덧붙인다(정규장 값은 건드리지 않는다)."""
+    if not d:
+        return d
+    session = us_market_session()
+    d['session'] = session
+    if session not in ('pre', 'post'):
+        return d
+    ext = _ext_quote(ticker)
+    if ext:
+        d['ext'] = {**ext, 'session': session}
+    return d
+
+
 @ttl_cache(90)
 def _price_fast(ticker: str) -> dict | None:
     res = _yf_chart(ticker, '1mo', '1d')
-    return _chart_to_price(res) if res else None
+    return _attach_ext(ticker, _chart_to_price(res) if res else None)
 
 def _yf_info_safe(ticker: str, timeout: int = 8) -> dict:
     """yf.Ticker.info를 별도 스레드에서 실행 — 무한 hang 방지."""
@@ -4462,6 +4557,9 @@ def get_stock(ticker: str):
             'message': '잘못된 티커이거나 상장폐지 종목일 수 있습니다.',
             'hint': '티커 철자를 확인하시거나, 검색에서 종목을 다시 선택해주세요.',
         })
+    # 정규장 밖이면 확장시간 체결을 함께 준다 — 화면에서 '어제 종가'를 지금 값으로
+    # 오해하지 않도록(2026-08-28 NVDA +8.7% 오해 사례)
+    d = _attach_ext(ticker.upper(), dict(d)) or d
     return {**d, '_data_status': 'ok', '_data_message': None}
 
 @app.get("/api/stock/{ticker}/price")

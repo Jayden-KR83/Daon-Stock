@@ -657,9 +657,13 @@ table td, table th {
 }
 
 /* Mono Section Header — 좌측 통일 머리글 (2px primary 색띠) */
+/* 종목 분석의 ReportSectionHead 와 같은 형태로 맞춘다(2026-08-28).
+   두 탭의 섹션 제목이 같은 크기·같은 밑줄이어야 한 리포트로 읽힌다. */
 .mono-section-header {
   display: flex; align-items: baseline; justify-content: space-between;
-  gap: 12px; margin-bottom: 12px;
+  gap: 12px; margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--m-outline-variant);
 }
 .mono-section-title {
   font-size: 13px; font-weight: 800;

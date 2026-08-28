@@ -18,11 +18,77 @@ import { sendTestPush, getMovePrefs, saveMovePrefs } from '../api'
    ══════════════════════════════════════════════════════════════ */
 
 const isIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent || '')
+const isAndroid = () => /Android/.test(navigator.userAgent || '')
 /* iOS 는 홈 화면에 설치된 상태(standalone)에서만 푸시를 허용한다.
    사파리 탭에서는 권한 요청 자체가 실패하거나 조용히 아무 일도 안 일어난다. */
 const isStandalone = () =>
   window.matchMedia?.('(display-mode: standalone)')?.matches
   || window.navigator.standalone === true
+
+/* ── 휴대폰 '앱 목록' 에 다온이 안 보이는 이유 ──────────────────────────
+   휴대폰 설정 → 알림 목록은 **설치된 앱** 만 보여준다. 브라우저 탭에서 열어
+   쓰는 동안 다온은 앱이 아니라 '웹사이트' 라서, 안드로이드에서는 크롬 안쪽
+   (설정 → 앱 → Chrome → 알림 → 사이트) 에 파묻히고 아이폰에서는 아예 없다.
+
+   홈 화면에 설치해야 비로소 독립된 앱으로 등록된다.
+     · 안드로이드: 크롬이 beforeinstallprompt 를 주면 버튼 한 번으로 설치(WebAPK).
+       이때부터 설정 → 앱 목록에 '다온' 이 뜬다.
+     · 아이폰: 공유 → 홈 화면에 추가 (프로그램적으로 띄울 방법이 없다).
+   ────────────────────────────────────────────────────────────────── */
+function InstallSection({ installed }) {
+  const [deferred, setDeferred] = useState(null)
+
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); setDeferred(e) }
+    const onInstalled = () => setDeferred(null)
+    window.addEventListener('beforeinstallprompt', onPrompt)
+    window.addEventListener('appinstalled', onInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt)
+      window.removeEventListener('appinstalled', onInstalled)
+    }
+  }, [])
+
+  if (installed) {
+    return (
+      <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--clr-pos-dark)',
+        marginBottom: 12, lineHeight: 1.7 }}>
+        ✓ 홈 화면 앱으로 실행 중입니다 — 휴대폰 설정의 앱 목록에 &lsquo;다온&rsquo;이 나타납니다.
+      </div>
+    )
+  }
+
+  return (
+    <div className="ko-keep" style={{ background: 'var(--clr-info-bg)',
+      border: '1px solid var(--clr-info-border)', borderRadius: 4,
+      padding: '9px 11px', marginBottom: 12, fontSize: 11.5,
+      color: 'var(--clr-text)', lineHeight: 1.75 }}>
+      <div style={{ fontWeight: 800, marginBottom: 4 }}>
+        먼저 홈 화면에 설치해야 합니다
+      </div>
+      <div style={{ whiteSpace: 'pre-line' }}>
+        {'지금은 브라우저에서 열려 있어서, 휴대폰 설정의 앱 목록에 다온이 없습니다.\n'
+         + '홈 화면에 설치하면 독립된 앱으로 등록되고 그때부터 알림도 옵니다.'}
+      </div>
+      {deferred ? (
+        <button className="btn-primary" style={{ marginTop: 9, padding: '9px 18px',
+          fontSize: 13, width: 'auto' }}
+          onClick={async () => { deferred.prompt(); await deferred.userChoice; setDeferred(null) }}>
+          앱으로 설치
+        </button>
+      ) : (
+        <div style={{ marginTop: 6, whiteSpace: 'pre-line',
+          color: 'var(--clr-text-sub)' }}>
+          {isIos()
+            ? '사파리 하단 공유 버튼 → "홈 화면에 추가" → 홈 화면의 다온 아이콘으로 다시 열기.'
+            : isAndroid()
+              ? '크롬 우상단 ⋮ → "앱 설치"(또는 "홈 화면에 추가") → 홈 화면의 다온 아이콘으로 다시 열기.'
+              : '브라우저 주소창 오른쪽의 설치 아이콘(⊕)을 누르면 앱으로 설치됩니다.'}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function PushSetupCard() {
   const [state, setState] = useState('off')   // unsupported | denied | on | off
@@ -36,7 +102,8 @@ export default function PushSetupCard() {
 
   useEffect(() => { getPushState().then(setState).catch(() => setState('off')) }, [])
 
-  const iosBlocked = isIos() && !isStandalone()
+  const installed  = isStandalone()
+  const iosBlocked = isIos() && !installed
 
   const toggle = async () => {
     if (busy) return
@@ -131,15 +198,15 @@ export default function PushSetupCard() {
         </div>
       </div>
 
-      {/* iOS 는 홈 화면 설치가 전제 — 여기서 안 알려주면 영영 안 온다 */}
-      {iosBlocked && (
-        <div className="ko-keep" style={{ background: 'var(--clr-warn-bg)',
-          border: '1px solid var(--clr-warn-border)', borderRadius: 4,
-          padding: '9px 11px', marginBottom: 12, fontSize: 11.5,
-          color: 'var(--clr-text)', lineHeight: 1.75, whiteSpace: 'pre-line' }}>
-          {'아이폰은 홈 화면에 추가해야 알림을 받을 수 있습니다.\n'
-           + '사파리 하단 공유 버튼 → "홈 화면에 추가" → 홈 화면의 다온 아이콘으로 다시 열기.\n'
-           + '그다음 이 화면에서 알림을 켜주세요.'}
+      {/* 설치 여부 — 휴대폰 앱 목록에 다온이 없는 이유가 대부분 여기다 */}
+      <InstallSection installed={installed} />
+
+      {/* 설치돼 있어도 알림을 켜야 앱 목록의 알림 항목이 생긴다 */}
+      {installed && state === 'off' && (
+        <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--clr-text-sub)',
+          marginBottom: 12, lineHeight: 1.75, whiteSpace: 'pre-line' }}>
+          {'아래에서 알림을 켜면 휴대폰 설정 → 알림 목록에 다온이 나타납니다.\n'
+           + '거기서 소리·잠금화면 표시 같은 세부 설정을 바꿀 수 있습니다.'}
         </div>
       )}
 
