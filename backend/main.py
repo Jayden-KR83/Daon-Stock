@@ -1516,6 +1516,23 @@ def _demo_ai_budget_ok() -> bool:
 # Tier 2 (ai_enabled=1 / 관리자 / 데모): 무제한
 STOCK_ANALYZE_FREE_QUOTA = 30
 
+# ─── 사용 모델 (2026-08-28) ───────────────────────────────────────────────
+# 모델 ID 를 호출부에 흩어 두지 않는다. 예전에는 sonnet-4-6 이 두 군데,
+# haiku 가 네 군데 하드코딩돼 있어 "지금 뭘 쓰고 있는지" 를 grep 해야 알았다.
+#
+# MODEL_ANALYSIS: 종목 분석·전략 리포트 — 품질이 결과물 그 자체인 자리.
+#   Sonnet 4.6 → Sonnet 5. 단가 $3/$15 → $2/$10 (33% 인하)인데 지식 컷오프는 더 최신.
+#   토크나이저: 4.7 세대부터 바뀌어 문서상 "같은 텍스트가 약 30% 더 많은 토큰" 이지만,
+#   우리 프롬프트로 실측하니 차이가 거의 없었다 (종목분석 프롬프트 3,093자 기준
+#   2,727 → 2,822 토큰, +3.5%). 한국어 비중이 높아서로 보인다.
+#   → 실질 절감 약 31%. 다만 출력 길이가 조금 밀릴 수 있어 max_tokens 에 여유를 줬다
+#     (max_tokens 는 상한일 뿐 생성한 만큼만 과금되므로 올려둬도 비용이 늘지 않는다).
+#   ⚠ Sonnet 5 는 temperature/top_p/top_k/budget_tokens 를 받으면 400 이다.
+#     현재 _call_claude 는 이들을 보내지 않는다 — 추가하지 말 것.
+MODEL_ANALYSIS = "claude-sonnet-5"
+# MODEL_LIGHT: 요약·분류·짧은 판정 — 정확도보다 응답속도·단가가 중요한 자리.
+MODEL_LIGHT    = "claude-haiku-4-5"
+
 def _month_start_epoch() -> float:
     """이번 달 1일 0시(로컬)의 epoch — 월 단위 쿼터 리셋 기준."""
     n = datetime.now()
@@ -5002,7 +5019,7 @@ def analyze(req: AnalyzeReq, cu: dict = Depends(require_ai_enabled)):
         'JSON만 응답: {"diagnosis":"...","risks":"...","rebalance":"...","positioning":"...","outlook":"..."}'
     )
     try:
-        text = _call_claude(api_key, "claude-haiku-4-5-20251001", prompt, 1800, 80)
+        text = _call_claude(api_key, MODEL_LIGHT, prompt, 1800, 80)
         try:
             res = _parse_claude_json(text)
         except Exception:
@@ -5222,9 +5239,9 @@ def _generate_stock_analysis(ticker: str, name_hint: str, api_key: str) -> dict:
     # ── 3) Claude Sonnet 4.6 + web_search 호출 ────────────────────
     text, citations = _call_claude_with_search(
         api_key=api_key,
-        model="claude-sonnet-4-6",
+        model=MODEL_ANALYSIS,
         prompt=prompt,
-        max_tokens=8000,
+        max_tokens=10000,   # 상한 여유 (8000 → 10000). 생성한 만큼만 과금된다
         max_searches=4,
         timeout=180,
     )
@@ -5313,7 +5330,7 @@ def youtube_analyze(req: YoutubeReq, cu: dict = Depends(require_ai_enabled)):
               f"1. 핵심 요약 (3줄)\n2. 언급된 투자 종목/섹터\n3. 투자 시사점\n4. 관련 추천 종목 (티커 포함, 최대 5개)\n\n"
               f'JSON: {{"summary":"...","tickers":[{{"ticker":"AAPL","name":"Apple","reason":"..."}}],"insight":"..."}}')
     try:
-        content = _call_claude(api_key, "claude-haiku-4-5-20251001", prompt, 1024, 60)
+        content = _call_claude(api_key, MODEL_LIGHT, prompt, 1024, 60)
         try:
             return _parse_claude_json(content)
         except Exception:
@@ -5605,7 +5622,9 @@ _strategy_jobs_lock = Lock()
 def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_meta, verified_facts,
                       discovery_horizon=None):
     try:
-        text = _call_claude(api_key, "claude-sonnet-4-6", prompt, 7000, 150)
+        # 모델 상수는 MODEL_ANALYSIS 한 곳에서만 정한다(파일 상단 주석 참조).
+        # max_tokens 7000 → 9000: 상한일 뿐 생성한 만큼만 과금되므로 여유를 둔다.
+        text = _call_claude(api_key, MODEL_ANALYSIS, prompt, 9000, 150)
         result = _parse_claude_json(text)
         result['_metrics_summary'] = summary_meta
         result['verified_facts'] = verified_facts
@@ -6192,7 +6211,7 @@ def etf_compare_ai(req: EtfCompareAiReq, cu: dict = Depends(require_ai_enabled))
         "}"
     )
     try:
-        text = _call_claude(api_key, "claude-haiku-4-5-20251001", prompt, 1500, 60)
+        text = _call_claude(api_key, MODEL_LIGHT, prompt, 1500, 60)
         return _parse_claude_json(text)
     except HTTPException:
         raise
@@ -8525,7 +8544,7 @@ def _weekly_rebalance_for_user(uid: str, api_key: str) -> int:
         "\n=== 섹터 비중 ===\n" + "\n".join(sec_lines)
     )
     try:
-        text = _call_claude(api_key, "claude-haiku-4-5-20251001", prompt, 700, 60)
+        text = _call_claude(api_key, MODEL_LIGHT, prompt, 700, 60)
     except Exception:
         return 0
     if not text or not text.strip():
