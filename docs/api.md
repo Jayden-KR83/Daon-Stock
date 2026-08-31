@@ -23,7 +23,7 @@
 | `POST /api/stock/{ticker}/analyze` | 180s | 200s | **Sonnet 4.6 + web_search (max_uses=4, max_tokens=8192)** |
 | `GET /api/stock/{ticker}/analyze/cached` | 즉시 | 30s | 캐시 read only |
 
-## 3. 종목 심층 분석 (Sonnet 4.6 + web_search)
+## 3. 종목 심층 분석 (Sonnet 5 + web_search)
 
 - **헬퍼**: `_call_claude_with_search(api_key, model, prompt, ...)` → `(text, citations)` 반환
 - **마지막 text 블록만 JSON으로 파싱** — web_search 사고과정은 무시 (마지막 `{...}` 매치 fallback)
@@ -99,6 +99,35 @@ def endpoint(cu: dict = Depends(require_approved)):
 ### 6.8 비교/검색
 - `POST /api/compare/series` (2~6 종목)
 - `GET /api/search/{query}` (US + KR)
+
+## 6-2. 채팅 (`/api/chat`) — 2026-08-28
+
+| 엔드포인트 | 설명 |
+|---|---|
+| `POST /api/chat` | 한 턴. **SSE 스트리밍**(`text/event-stream`). 본문 `{message, scope, use_search}` |
+| `GET /api/chat/history?scope=` | 그 맥락의 대화 |
+| `DELETE /api/chat/history?scope=` | 그 맥락의 대화 삭제 |
+
+`scope` = `general` | `strategy` | `stock:<TICKER>` — 대화를 화면 맥락에 묶는 열쇠다.
+
+**🟥 지켜야 할 것**
+- **컨텍스트는 서버가 조립한다.** 프론트는 질문만 보낸다. 프론트가 보유 데이터를
+  실어 보내면 그 자체가 위조·유출 경로가 된다.
+- **데모 계정은 대화를 저장하지 않는다.** 공용 계정이라 저장하면 앞사람의 질문이
+  다음 방문자에게 보인다(2026-08-26 자산 노출과 같은 종류).
+- **응답에는 금액이 그대로 들어온다.** 프론트에서 `maskText` 를 반드시 통과시킨다.
+- 대화는 `chat_messages`(user_id 스코프)에만. 공유 캐시 금지.
+
+**비용**
+- 시스템+보유 스냅샷을 `cache_control` 로 캐싱한다. 실측: 접두 1,348토큰이
+  2번째 턴부터 `cache_read` 로 잡힌다(기본 입력가의 10%).
+  ⚠ 보유 목록 정렬을 고정할 것 — 순서가 흔들리면 접두가 달라져 캐시가 통째로 무효화된다.
+- 웹 검색은 기본 끔(`use_search: false`). 검색은 **1,000회당 $10**(회당 약 14원)으로
+  토큰비와 맞먹는다. "구조"를 묻는 질문에는 필요 없다.
+- 월 쿼터 `CHAT_MONTHLY_QUOTA = 200`. 종목분석과 달리 채팅은 자유 입력이라
+  캐시가 자연 상한이 되어주지 않는다.
+- 사용량(`input/cache_read/cache_creation/output`)은 `audit_log`의 `ai_chat`에 남는다.
+  `cache_read` 가 계속 0 이면 캐시가 깨진 것 — 조용히 비용만 두 배가 된다.
 
 ## 7. API Key 보안
 - Anthropic API Key는 SQLite `settings` 테이블에만 저장

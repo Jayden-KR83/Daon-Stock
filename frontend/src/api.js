@@ -223,3 +223,70 @@ export const analysisPrompt = (ticker, name='') =>
   api.get('/admin/analysis/prompt', { params: { ticker, name } }).then(r => r.data)
 
 export default api
+
+/* ── 다온 채팅 (2026-08-28) ────────────────────────────────────────────
+   axios 를 쓰지 않고 fetch 를 직접 쓰는 이유: 응답이 SSE 스트림이라
+   axios 의 "다 받고 나서 파싱" 모델과 맞지 않는다. 답이 다 나올 때까지
+   몇십 초 빈 화면을 보여주면 그건 대화가 아니다. */
+export const chatHistory = (scope = 'general') =>
+  api.get('/chat/history', { params: { scope } }).then(r => r.data)
+export const chatClear = (scope = 'general') =>
+  api.delete('/chat/history', { params: { scope } }).then(r => r.data)
+
+/** 채팅 한 턴을 스트리밍으로 받는다.
+ *  onDelta(text)  — 조각이 올 때마다
+ *  onDone(quota)  — 끝났을 때(월 사용량 포함)
+ *  반환: abort 함수 (사용자가 중단하거나 화면을 떠날 때 호출) */
+export function chatSend({ message, scope = 'general', useSearch = false,
+                           onDelta, onDone, onError }) {
+  const ctrl = new AbortController()
+  ;(async () => {
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
+        },
+        body: JSON.stringify({ message, scope, use_search: useSearch }),
+        signal: ctrl.signal,
+      })
+      if (!res.ok) {
+        let msg = '요청에 실패했습니다.'
+        try { msg = (await res.json())?.detail || msg } catch { /* 본문 없음 */ }
+        onError?.(msg)
+        return
+      }
+      const reader = res.body.getReader()
+      const dec = new TextDecoder()
+      let buf = ''
+      let evt = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        // SSE 는 빈 줄로 이벤트를 끊는다. 마지막 조각은 미완성일 수 있어 버퍼에 남긴다.
+        const blocks = buf.split('\n\n')
+        buf = blocks.pop() || ''
+        for (const block of blocks) {
+          evt = ''
+          let dataLine = ''
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) evt = line.slice(6).trim()
+            else if (line.startsWith('data:')) dataLine += line.slice(5).trim()
+          }
+          if (!dataLine) continue
+          let payload
+          try { payload = JSON.parse(dataLine) } catch { continue }
+          if (evt === 'error') { onError?.(payload.message || '오류'); return }
+          if (evt === 'done')  { onDone?.(payload); return }
+          if (payload.t) onDelta?.(payload.t)
+        }
+      }
+      onDone?.(null)
+    } catch (e) {
+      if (e?.name !== 'AbortError') onError?.('연결이 끊겼습니다.')
+    }
+  })()
+  return () => ctrl.abort()
+}

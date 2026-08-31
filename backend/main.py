@@ -29,7 +29,7 @@ import requests
 from bs4 import BeautifulSoup
 from fastapi import Depends, FastAPI, Header, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -122,6 +122,23 @@ def _init_db():
             PRIMARY KEY(user_id, scope),
             FOREIGN KEY(user_id) REFERENCES users(user_id)
         );
+        /* 채팅 대화 (2026-08-28)
+           ⚠ 반드시 user_id 스코프다. 공유 캐시(ai_cache)에 절대 넣지 않는다 —
+             대화에는 보유·평가액이 그대로 들어간다(CLAUDE.md 필수확인 4번).
+           scope: 'general' | 'stock:<TICKER>' | 'strategy'
+                  대화를 화면 맥락에 묶어 두는 열쇠. 종목 분석을 보다 물은 질문은
+                  그 종목에 남아야 나중에 다시 찾을 수 있다. */
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     TEXT NOT NULL,
+            scope       TEXT NOT NULL DEFAULT 'general',
+            role        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  REAL NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_user_scope
+            ON chat_messages(user_id, scope, id);
         CREATE TABLE IF NOT EXISTS accounts (
             user_id     TEXT NOT NULL,
             key         TEXT NOT NULL,
@@ -8917,3 +8934,361 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 다온 채팅 (2026-08-28)
+# ═══════════════════════════════════════════════════════════════════════════
+# 왜 앱 안에 넣는가: 궁금증이 생기면 결국 외부 챗봇으로 나가는데, 거기서는
+#   ① 포트폴리오를 매번 말로 설명해야 하고 ② 대화가 사라져 지식이 안 쌓인다.
+#   앱 안에서는 보유·비중·최근 리포트가 이미 프롬프트에 들어 있고, 대화가 종목에
+#   붙어 남는다. 모델 성능 차이가 아니라 구조 차이라 외부 챗봇이 따라올 수 없다.
+#
+# 🟥 설계 원칙 — 이 셋을 어기면 만들 이유가 없어진다
+#  1. 숫자는 앱이 계산하고, 모델은 설명·연결만 한다.
+#     LLM 은 확률 추정기가 아니다. "확률적으로 하방이 제한적" 같은 문장은 계산이
+#     아니라 서술이고, 숫자가 붙어 있어 검증된 것처럼 읽혀서 더 위험하다.
+#     진짜 통계(백분위·상관계수·변동성·달성확률)는 이미 앱 안에 있다.
+#  2. 컨텍스트는 서버가 조립한다. 프론트는 질문만 보낸다.
+#     프론트가 보유 데이터를 실어 보내면 그 자체가 위조·유출 경로가 된다.
+#  3. 대화는 user_id 스코프로만 저장한다. 공유 캐시 금지(CLAUDE.md 필수확인 4번).
+#
+# 비용 설계
+#  · 프롬프트 캐싱: 시스템+포트폴리오 스냅샷은 턴마다 한 글자도 안 바뀐다.
+#    캐시 읽기는 기본 입력가의 10%($0.20/MTok) — 턴당 비용이 절반으로 떨어진다.
+#  · 웹 검색은 기본 끔. 회당 $10/1000 = 13.7원으로 토큰비와 맞먹는다.
+#    "구조"를 묻는 질문에는 필요 없고, "사건"을 묻는 질문에만 켠다.
+#  · 월 쿼터로 상한을 건다 — 종목분석과 달리 채팅은 자유 입력이라 캐시가
+#    자연 상한이 되어주지 않는다.
+
+CHAT_MONTHLY_QUOTA = 200      # 사용자당 월 대화 턴 상한
+CHAT_HISTORY_TURNS = 12       # 프롬프트에 싣는 최근 대화 수(과거는 잘라낸다)
+CHAT_MAX_QUESTION  = 2000     # 질문 길이 상한(문자)
+
+CHAT_SYSTEM = (
+    "당신은 '다온' 포트폴리오 앱 안에서 사용자의 투자 판단을 돕는 애널리스트입니다.\n"
+    "\n"
+    "[가장 중요한 규칙]\n"
+    "숫자는 앱이 이미 계산했습니다. 당신의 역할은 그 숫자를 해석하고 연결하는 것입니다.\n"
+    "- 아래 제공된 데이터에 없는 수치를 지어내지 마세요.\n"
+    "- 모르면 '데이터에 없습니다'라고 말하세요. 추정이 필요하면 추정임을 밝히세요.\n"
+    "- '확률적으로', '통계적으로' 같은 표현은 실제 계산된 값을 인용할 때만 쓰세요.\n"
+    "  근거 없이 통계의 외양만 두른 문장은 검증된 것처럼 읽혀서 가장 위험합니다.\n"
+    "\n"
+    "[어조]\n"
+    "- 한국어 합니다체. 결론을 먼저, 근거를 뒤에.\n"
+    "- 짧게. 사용자가 묻지 않은 것을 덧붙이지 마세요.\n"
+    "- 확신할 수 없는 것은 확신하는 척하지 마세요.\n"
+    "\n"
+    "[관점]\n"
+    "- 단기 시세보다 구조(사업 모델·해자·자본배분·산업 사이클)를 우선해 설명하세요.\n"
+    "  최신 뉴스가 필요한 질문이면 '최신 정보 확인이 필요하다'고 알려주세요.\n"
+    "- 투자 권유가 아니라 판단 재료를 제공합니다. 최종 판단은 사용자 몫입니다.\n"
+)
+
+
+def _chat_monthly_count(user_id: str) -> int:
+    """이번 달 채팅 턴 수."""
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM audit_log "
+                "WHERE user_id=? AND event_type='ai_chat' AND ts>=?",
+                (user_id, _month_start_epoch())
+            ).fetchone()
+        return int(row['c']) if row else 0
+    except Exception:
+        return 0
+
+
+def _chat_portfolio_context(user_id: str) -> str:
+    """보유 현황을 프롬프트용 텍스트로. 턴마다 동일해야 캐시가 산다.
+
+    ⚠ 정렬을 고정한다. 순서가 흔들리면 프롬프트 접두가 매번 달라져 캐시가 통째로
+      무효화된다(캐시는 접두 일치 방식이라 한 글자만 달라도 뒤가 전부 날아간다).
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT account, ticker, name, quantity, avg_price, sector "
+            "FROM portfolios WHERE user_id=? AND quantity > 0 "
+            "ORDER BY account, ticker", (user_id,)
+        ).fetchall()
+        accs = conn.execute(
+            "SELECT key, label, cash, currency FROM accounts WHERE user_id=? ORDER BY key",
+            (user_id,)
+        ).fetchall()
+    if not rows:
+        return "보유 종목이 없습니다."
+
+    tickers = sorted({r['ticker'] for r in rows})
+    prices = _batch_prices(tickers) if tickers else {}
+    usdkrw = _usd_krw()
+
+    lines, total = [], 0.0
+    for r in rows:
+        t = r['ticker']
+        p = prices.get(t) or {}
+        cur = p.get('current_price')
+        is_kr_t = is_kr(t)
+        mul = 1.0 if is_kr_t else float(usdkrw or 1)
+        val = (float(r['quantity']) * float(cur) * mul) if cur else 0.0
+        total += val
+        lines.append(
+            "- %s(%s) · %s · %s주 · 평단 %s · 현재 %s · 평가 ₩%s · %s" % (
+                r['name'] or t, t, r['account'],
+                _fmt_num(r['quantity']),
+                _fmt_num(r['avg_price']), _fmt_num(cur) if cur else '—',
+                _fmt_num(round(val)), r['sector'] or '기타',
+            )
+        )
+    cash_krw = 0.0
+    for a in accs:
+        c = float(a['cash'] or 0)
+        if not c:
+            continue
+        cash_krw += c if (a['currency'] or 'KRW') == 'KRW' else c * float(usdkrw or 1)
+
+    tail = ("\n주식 평가액 합계: ₩%s\n예수금(원화 환산): ₩%s\n총자산: ₩%s"
+            % (_fmt_num(round(total)), _fmt_num(round(cash_krw)),
+               _fmt_num(round(total + cash_krw))))
+    return "[보유 현황]\n" + "\n".join(lines) + tail
+
+
+def _fmt_num(v) -> str:
+    try:
+        f = float(v)
+    except Exception:
+        return str(v)
+    if f == int(f):
+        return "{:,}".format(int(f))
+    return "{:,.4f}".format(f).rstrip('0').rstrip('.')
+
+
+def _chat_focus_context(user_id: str, scope: str) -> str:
+    """지금 보고 있는 화면의 맥락. 'stock:TSLA' 면 그 종목 분석, 'strategy' 면 전략 리포트."""
+    scope = str(scope or 'general')
+    if scope == 'strategy':
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT result_json, computed_at FROM strategy_cache "
+                "WHERE user_id=? AND scope='ALL'", (user_id,)
+            ).fetchone()
+        if not row:
+            return ""
+        try:
+            d = json.loads(row['result_json'])
+        except Exception:
+            return ""
+        parts = []
+        for k in ('summary', 'diagnosis', 'risk_summary'):
+            if isinstance(d.get(k), str) and d[k].strip():
+                parts.append(d[k].strip())
+        acts = d.get('actions')
+        if isinstance(acts, list) and acts:
+            parts.append("추천 액션: " + " / ".join(
+                str(a.get('title') or a) for a in acts[:5] if a))
+        if not parts:
+            return ""
+        return ("[사용자가 보고 있는 전략 리포트 요약]\n"
+                + _truncate_head("\n".join(parts), 2500))
+
+    if scope.startswith('stock:'):
+        tkr = scope.split(':', 1)[1].strip().upper()
+        if not tkr:
+            return ""
+        data, _ts = _get_stock_cache_by_ticker(tkr)
+        if not data:
+            return ""
+        parts = ["[사용자가 보고 있는 종목 분석: %s]" % tkr]
+        reco = _normalize_reco(data.get('recommendation'))
+        if reco:
+            parts.append("투자의견: %s / 목표가: %s" % (reco, data.get('priceTarget') or '—'))
+        for k, label in (('summary', '핵심 요약'), ('analyst_views', '컨센서스'),
+                         ('verdict', '최종 의견')):
+            v = data.get(k)
+            if isinstance(v, str) and v.strip():
+                parts.append("%s: %s" % (label, v.strip()))
+        for k, label in (('bull', '강세 요인'), ('bear', '리스크')):
+            v = data.get(k)
+            if isinstance(v, list) and v:
+                parts.append("%s: %s" % (label, " / ".join(str(x) for x in v[:3])))
+        return _truncate_head("\n".join(parts), 3000)
+    return ""
+
+
+class ChatReq(BaseModel):
+    message: str
+    scope: str = 'general'
+    use_search: bool = False     # 기본 끔 — 회당 $10/1000 이라 토큰비와 맞먹는다
+
+
+@app.get("/api/chat/history")
+def chat_history(scope: str = 'general', limit: int = 50,
+                 cu: dict = Depends(require_approved)):
+    """이 사용자의 이 맥락 대화만. 다른 사용자·다른 맥락은 절대 섞이지 않는다.
+
+    🟥 데모는 예외로 '아무것도 저장하지 않는다'.
+      데모는 여러 방문자가 같이 쓰는 공용 계정이라, 저장하면 앞사람의 질문이
+      다음 사람에게 그대로 보인다 — 2026-08-26 자산 노출과 같은 종류의 사고다.
+      대신 브라우저 안에서만 대화가 이어진다(새로고침하면 사라진다).
+    """
+    if _is_demo(cu):
+        return {'messages': [], 'demo': True,
+                'quota': {'used': 0, 'limit': CHAT_MONTHLY_QUOTA}}
+    lim = max(1, min(200, int(limit)))
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT role, content, created_at FROM chat_messages "
+            "WHERE user_id=? AND scope=? ORDER BY id DESC LIMIT ?",
+            (cu['user_id'], str(scope or 'general'), lim)
+        ).fetchall()
+    msgs = [{'role': r['role'], 'content': r['content'], 'at': r['created_at']}
+            for r in reversed(rows)]
+    return {'messages': msgs, 'quota': {
+        'used': _chat_monthly_count(cu['user_id']), 'limit': CHAT_MONTHLY_QUOTA}}
+
+
+@app.delete("/api/chat/history")
+def chat_history_clear(scope: str = 'general', cu: dict = Depends(require_approved)):
+    with _db() as conn:
+        conn.execute("DELETE FROM chat_messages WHERE user_id=? AND scope=?",
+                     (cu['user_id'], str(scope or 'general')))
+    return {'ok': True}
+
+
+@app.post("/api/chat")
+def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
+    """채팅 한 턴 — SSE 스트리밍.
+
+    스트리밍인 이유: 답이 다 나올 때까지 몇십 초 빈 화면을 보여주면 대화가 아니다.
+    """
+    question = _sanitize_unicode(str(req.message or '')).strip()
+    if not question:
+        raise HTTPException(400, "질문이 비어 있습니다.")
+    if len(question) > CHAT_MAX_QUESTION:
+        raise HTTPException(400, "질문이 너무 깁니다(%d자 이내)." % CHAT_MAX_QUESTION)
+
+    used = _chat_monthly_count(cu['user_id'])
+    if used >= CHAT_MONTHLY_QUOTA and not cu.get('is_admin'):
+        raise HTTPException(429,
+            "이번 달 대화 한도(%d회)를 모두 사용했습니다. 다음 달에 초기화됩니다."
+            % CHAT_MONTHLY_QUOTA)
+
+    api_key = _stored_api_key()
+    if not api_key:
+        raise HTTPException(400, "Anthropic API Key가 설정되지 않았습니다.")
+
+    uid   = cu['user_id']
+    scope = str(req.scope or 'general')
+
+    # ── 컨텍스트 조립 (서버에서만) ──────────────────────────────────
+    #  캐시가 살도록 '안 바뀌는 것 → 바뀌는 것' 순서로 쌓는다.
+    stable = CHAT_SYSTEM + "\n" + _chat_portfolio_context(uid)
+    focus  = _chat_focus_context(uid, scope)
+    if focus:
+        stable += "\n\n" + focus
+
+    with _db() as conn:
+        prior = conn.execute(
+            "SELECT role, content FROM chat_messages WHERE user_id=? AND scope=? "
+            "ORDER BY id DESC LIMIT ?",
+            (uid, scope, CHAT_HISTORY_TURNS * 2)
+        ).fetchall()
+    messages = [{'role': r['role'], 'content': r['content']} for r in reversed(prior)]
+    messages.append({'role': 'user', 'content': question})
+
+    payload = {
+        "model": MODEL_ANALYSIS,
+        "max_tokens": 2000,
+        # cache_control 로 시스템 블록을 캐싱한다. 이 부분이 턴마다 동일해야
+        # 캐시 읽기($0.20/MTok)로 떨어진다 — 안 그러면 매번 전액($2/MTok)이다.
+        "system": [{"type": "text", "text": stable,
+                    "cache_control": {"type": "ephemeral"}}],
+        "messages": messages,
+        "stream": True,
+    }
+    if req.use_search:
+        payload["tools"] = [{"type": "web_search_20250305", "name": "web_search",
+                             "max_uses": 3}]
+
+    def gen():
+        answer_parts = []
+        # 토큰 사용량을 감사 로그에 남긴다. 특히 cache_read_input_tokens 가 0 이면
+        # 캐시가 안 걸린다는 뜻이라 비용이 두 배가 된다 — 조용히 새는 종류의 문제라
+        # 숫자를 남겨두지 않으면 알아채지 못한다.
+        usage = {}
+        try:
+            with requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json=_sanitize_payload(payload), stream=True, timeout=180,
+            ) as resp:
+                if resp.status_code != 200:
+                    body = resp.text[:200]
+                    yield "event: error\ndata: %s\n\n" % json.dumps(
+                        {"message": _ai_error_message(resp.status_code, body)},
+                        ensure_ascii=False)
+                    return
+                for raw in resp.iter_lines(decode_unicode=True):
+                    if not raw or not raw.startswith("data:"):
+                        continue
+                    chunk = raw[5:].strip()
+                    if not chunk or chunk == "[DONE]":
+                        continue
+                    try:
+                        ev = json.loads(chunk)
+                    except Exception:
+                        continue
+                    et = ev.get("type")
+                    if et == "message_start":
+                        u = (ev.get("message") or {}).get("usage") or {}
+                        usage.update({k: u.get(k) for k in (
+                            'input_tokens', 'cache_creation_input_tokens',
+                            'cache_read_input_tokens') if u.get(k) is not None})
+                    elif et == "message_delta":
+                        u = ev.get("usage") or {}
+                        if u.get('output_tokens') is not None:
+                            usage['output_tokens'] = u['output_tokens']
+                    if et == "content_block_delta":
+                        d = ev.get("delta") or {}
+                        # text_delta 만 흘린다. thinking/tool 델타는 화면에 낼 것이 아니다.
+                        if d.get("type") == "text_delta" and d.get("text"):
+                            answer_parts.append(d["text"])
+                            yield "data: %s\n\n" % json.dumps(
+                                {"t": d["text"]}, ensure_ascii=False)
+        except Exception as e:
+            yield "event: error\ndata: %s\n\n" % json.dumps(
+                {"message": "응답 중 오류: %s" % str(e)[:120]}, ensure_ascii=False)
+            return
+
+        answer = "".join(answer_parts).strip()
+        # 데모 계정은 공용이므로 대화를 남기지 않는다(위 chat_history 주석 참조).
+        if answer and _is_demo(cu):
+            yield "event: done\ndata: %s\n\n" % json.dumps(
+                {"used": 0, "limit": CHAT_MONTHLY_QUOTA, "demo": True},
+                ensure_ascii=False)
+            return
+        if answer:
+            now = time()
+            try:
+                with _db() as conn:
+                    conn.executemany(
+                        "INSERT INTO chat_messages(user_id, scope, role, content, created_at) "
+                        "VALUES (?,?,?,?,?)",
+                        [(uid, scope, 'user', question, now),
+                         (uid, scope, 'assistant', answer, now + 0.001)])
+                _log_event(uid, 'ai_chat', {'scope': scope,
+                                            'search': bool(req.use_search),
+                                            'usage': usage})
+            except Exception:
+                pass
+        yield "event: done\ndata: %s\n\n" % json.dumps(
+            {"used": _chat_monthly_count(uid), "limit": CHAT_MONTHLY_QUOTA},
+            ensure_ascii=False)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-store",
+        # nginx/Cloudflare 가 SSE 를 버퍼링하면 스트리밍이 의미를 잃는다
+        "X-Accel-Buffering": "no",
+    })

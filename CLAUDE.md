@@ -35,6 +35,9 @@
      `usePrivacy()` / `maskText()` 를 거친다.** 직접 `toLocaleString()` 해서 붙이면
      가림(privacy) 모드가 그 화면에서만 뚫린다 — 2026-08-27 확정된 노출 경로다.
      화면에는 '가림'이라고 표시되므로 안전하다고 믿게 되어 더 위험하다.
+   - **채팅(`/api/chat`)**: 컨텍스트는 서버가 조립한다(프론트는 질문만 보냄) ·
+     **데모 계정은 대화를 저장하지 않는다**(공용 계정이라 다음 방문자에게 보인다) ·
+     응답은 프론트에서 `maskText` 통과 · 대화는 `chat_messages`(user_id) 에만.
    - 회귀 보호: `backend/tests/test_shared_cache_privacy.py` (공유 캐시에 개인 키가
      들어가거나 남아 있으면 실패) · `node scripts/privacy-scan.mjs`
      (가림 모드에서 전 탭 금액 노출 0건 확인).

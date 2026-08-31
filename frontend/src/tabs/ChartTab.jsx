@@ -969,7 +969,7 @@ export default function ChartTab() {
               <div style={{ marginTop: 8, padding: 8, background: 'var(--clr-neg-bg-soft)', borderRadius: 8,
                 color: 'var(--clr-neg-dark)', fontSize: 12 }}>{aiError}</div>
             )}
-            {aiResult && <AiStockResult data={aiResult} isUs={isUs} cur={cur} computedAt={aiComputedAt} />}
+            {aiResult && <AiStockResult data={aiResult} isUs={isUs} cur={cur} computedAt={aiComputedAt} ticker={activeTicker} />}
           </div>
 
           {/* 매출 · 영업이익 · EPS 트렌드 — 개별 주식 + KR 종목 */}
@@ -1057,7 +1057,7 @@ function fmtKstDate(epochSec) {
   } catch { return '' }
 }
 
-function AiStockResult({ data, isUs, cur, computedAt = 0 }) {
+function AiStockResult({ data, isUs, cur, computedAt = 0, ticker = '' }) {
   /* 캐시에 남은 옛 표기('보유')를 화면에 그대로 찍지 않는다 — utils/reco.js 참조 */
   const reco     = normalizeReco(data.recommendation)
   const recColor = recoColorOf(reco)
@@ -1165,6 +1165,17 @@ function AiStockResult({ data, isUs, cur, computedAt = 0 }) {
             collapsible={!sec.fixed}>{sec.body}</Section>
         ))
       })()}
+
+      {/* 분석을 읽다 생긴 질문 — scope='stock:TICKER' 로 열면 서버가 이 종목 분석
+          요약을 프롬프트에 싣는다. 종목명을 다시 설명할 필요가 없다. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+        <button onClick={() => useStore.getState().openChat(`stock:${ticker}`)}
+          style={{ padding: '9px 14px', borderRadius: 4, fontSize: 12.5, fontWeight: 700,
+            background: 'transparent', border: '1px solid var(--m-outline-variant)',
+            color: 'var(--m-text-secondary)', cursor: 'pointer', fontFamily: 'inherit' }}>
+          이 분석에 대해 묻기 →
+        </button>
+      </div>
 
       {/* 분석 근거·한계 (Reference) — 문장 단위 출처는 불가하나 분석 전체의 근거·범위를 명시 (R6: 문장별 줄바꿈) */}
       <div className="ko-keep" style={{ marginTop: 10, padding: '8px 12px', borderRadius: 4,

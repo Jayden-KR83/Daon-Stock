@@ -154,6 +154,7 @@ export default function AllocationTab() {
   /* 🟥 금액은 반드시 priv.won()/priv.eok() 으로 찍는다 — src/utils/privacy.js 참조.
      직접 toLocaleString() 하면 가림 모드가 뚫린다(2026-08-26 사고). */
   const priv            = usePrivacy()
+  const openChat        = useStore(s => s.openChat)
   const usdKrw          = useStore(s => s.usdKrw)
   const hasAnthropicKey = useStore(s => s.hasAnthropicKey)
   const setChartTicker  = useStore(s => s.setChartTicker)
@@ -944,6 +945,19 @@ export default function AllocationTab() {
       {/* ③ 결론 — 추천 액션 */}
       {strategyReport && (
         <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} part="actions" />
+      )}
+
+      {/* 리포트를 읽다 생긴 질문을 여기서 바로 — 관심 탭처럼 다른 곳으로 옮겨 적지 않게.
+          scope='strategy' 로 열면 서버가 이 리포트 요약을 프롬프트에 함께 싣는다. */}
+      {strategyReport && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+          <button onClick={() => openChat('strategy')}
+            style={{ padding: '9px 14px', borderRadius: 4, fontSize: 12.5, fontWeight: 700,
+              background: 'transparent', border: '1px solid var(--m-outline-variant)',
+              color: 'var(--m-text-secondary)', cursor: 'pointer', fontFamily: 'inherit' }}>
+            이 리포트에 대해 묻기 →
+          </button>
+        </div>
       )}
 
       {/* ━━ 부록 ━━ 자주 쓰지 않는 도구는 맨 아래로 */}

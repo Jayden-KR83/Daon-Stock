@@ -62,6 +62,15 @@ export const useStore = create((set, get) => ({
     set({ authToken: token, currentUser: user })
   },
 
+  /* ── 채팅 ──────────────────────────────────────────────
+     scope 로 '어느 화면에서 물었는지' 를 함께 들고 다닌다. 대화가 그 맥락에
+     저장돼야 나중에 그 종목/리포트에서 다시 찾을 수 있다.
+     'general' | 'strategy' | 'stock:<TICKER>' */
+  chatOpen: false,
+  chatScope: 'general',
+  openChat: (scope = 'general') => set({ chatOpen: true, chatScope: scope }),
+  closeChat: () => set({ chatOpen: false }),
+
   // Navigation
   activeTab: 0,
   setActiveTab: (tab) => set({ activeTab: tab }),

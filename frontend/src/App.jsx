@@ -2,6 +2,7 @@ import React, { useEffect, useRef, Suspense, lazy } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { useStore, THEME_META } from './store'
+import ChatPanel from './components/ChatPanel'
 import { useSwipeNav } from './useSwipeNav'
 import { getUsdKrw, getApiKeyStatus, authMe, getAdminStatus, getAccounts, getPortfolio, getPricesBatch, captureNetWorthSnapshot } from './api'
 import MarketBar from './components/MarketBar'
@@ -326,6 +327,8 @@ export default function App() {
         <KeyboardShortcuts />
         {chromeReady && !tourOpen && <ChangelogModal />}
         <Tour />
+        <ChatPanel />
+        <ChatFab />
       </div>
     )
   }
@@ -357,7 +360,28 @@ export default function App() {
       <KeyboardShortcuts />
       {chromeReady && !tourOpen && <ChangelogModal />}
       <Tour />
+      <ChatPanel />
+      <ChatFab />
     </div>
+  )
+}
+
+/* 채팅 열기 버튼 — 어느 화면에서든 같은 자리.
+   맥락 없이 열면 'general'(내 포트폴리오 전체)로 시작한다. 분석 리포트에서
+   열면 그 리포트 맥락으로 열리도록 각 카드가 openChat(scope) 를 직접 부른다. */
+function ChatFab() {
+  const chatOpen = useStore(s => s.chatOpen)
+  const openChat = useStore(s => s.openChat)
+  if (chatOpen) return null
+  return (
+    <button className="chat-fab" onClick={() => openChat('general')}
+      aria-label="다온에게 묻기">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      </svg>
+      묻기
+    </button>
   )
 }
 
