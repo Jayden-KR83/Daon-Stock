@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { maskText } from '../utils/privacy'
 import { chatHistory, chatClear, chatSend } from '../api'
 import { ReportBullets } from './report'
+import { splitAnswer } from '../utils/answerText'
 
 /* ══════════════════════════════════════════════════════════════════════
    다온 채팅 — 보던 화면의 맥락 그대로 묻는다
@@ -57,6 +58,7 @@ export default function ChatPanel() {
   const [err, setErr]         = useState('')
   const [useSearch, setUseSearch] = useState(false)
   const [quota, setQuota]     = useState(null)
+  const [truncated, setTruncated] = useState(false)
   const abortRef = useRef(null)
   const endRef   = useRef(null)
 
@@ -86,6 +88,7 @@ export default function ChatPanel() {
     setErr('')
     setInput('')
     setMsgs(m => [...m, { role: 'user', content: q }])
+    setTruncated(false)
     setBusy(true)
     setStream('')
     let acc = ''
@@ -97,6 +100,9 @@ export default function ChatPanel() {
         setStream('')
         if (acc) setMsgs(m => [...m, { role: 'assistant', content: acc }])
         if (info) setQuota({ used: info.used, limit: info.limit })
+        // 길이 상한에 걸려 끊긴 답을 '완성된 답'처럼 보여주지 않는다.
+        // 사용자가 잘린 줄 모르고 그대로 믿는 것이 가장 나쁜 결과다.
+        setTruncated(!!info?.truncated)
       },
       onError: (m) => {
         setBusy(false)
@@ -156,6 +162,14 @@ export default function ChatPanel() {
           <div className="ko-keep" style={{ whiteSpace: 'pre-wrap' }}>{show(stream)}</div>
           </div>
         )}
+        {truncated && !busy && (
+          <div className="chat-trunc ko-keep">
+            길이 제한으로 답변이 여기서 끊겼습니다.
+            <button className="chat-more" onClick={() => send('이어서 계속 설명해 주세요.')}>
+              이어서 받기
+            </button>
+          </div>
+        )}
         {busy && !stream && <div className="chat-typing">생각하는 중…</div>}
         {err && <div className="chat-err ko-keep">{err}</div>}
         <div ref={endRef} />
@@ -201,15 +215,3 @@ export default function ChatPanel() {
   )
 }
 
-/* 답변을 문장 단위 항목으로. 리포트와 같은 회색 네모 머릿글을 써서
-   "같은 앱이 쓴 글"로 읽히게 한다. 목록이 아닌 짧은 답은 통째로 한 항목이다. */
-function splitAnswer(text) {
-  const t = String(text || '').trim()
-  if (!t) return []
-  const parts = t.split(/\n+/).flatMap(line => {
-    const l = line.trim().replace(/^[-•*]\s*/, '')
-    if (!l) return []
-    return l.length > 160 ? l.split(/(?<=[.。!?])\s+/).filter(Boolean) : [l]
-  })
-  return parts.length ? parts : [t]
-}

@@ -38,6 +38,11 @@
    - **채팅(`/api/chat`)**: 컨텍스트는 서버가 조립한다(프론트는 질문만 보냄) ·
      **데모 계정은 대화를 저장하지 않는다**(공용 계정이라 다음 방문자에게 보인다) ·
      응답은 프론트에서 `maskText` 통과 · 대화는 `chat_messages`(user_id) 에만.
+   - **AI 답변을 화면용으로 쪼갤 때 마크업을 깨지 말 것** — `**강조**` 짝이 갈리면
+     별표가 그대로 노출된다(2026-09-03 사고). 분해는 `utils/answerText.js` 하나만 쓰고,
+     `node scripts/answer-split-check.mjs`(CI 포함)로 지킨다.
+   - **길이 상한에 걸려 끊긴 답을 완성된 답처럼 보여주지 말 것** — `stop_reason` 을
+     받아 화면에 '끊겼음'을 밝히고 이어받기를 준다.
    - 회귀 보호: `backend/tests/test_shared_cache_privacy.py` (공유 캐시에 개인 키가
      들어가거나 남아 있으면 실패) · `node scripts/privacy-scan.mjs`
      (가림 모드에서 전 탭 금액 노출 0건 확인).

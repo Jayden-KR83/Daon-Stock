@@ -103,6 +103,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # 2026-09-03 품질 사고 재발 방지 — 답변 분해가 강조 마크업을 깨뜨리면 실패한다.
+      # 화면에 `*결론: …**` 처럼 별표가 새어 나간 적이 있다. 사람이 매번 눈으로
+      # 확인할 수 있는 종류가 아니라 기계가 잡아야 한다.
+      - name: AI 답변 분해 회귀 검사
+        working-directory: .
+        run: node scripts/answer-split-check.mjs
+
       - name: Verify bundle structure
         run: |
           set -e

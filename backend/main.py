@@ -2872,6 +2872,42 @@ def _attach_ext(ticker: str, d: dict | None) -> dict | None:
 
 
 @ttl_cache(90)
+@ttl_cache(86400)
+def _etf_top_holdings(ticker: str, top_n: int = 10) -> dict | None:
+    """ETF 구성종목 Top N — 없으면 None.
+
+    ETF 를 분석할 때 "이 안에 뭐가 들어 있나"가 첫 질문인데, 그동안 앱은 이걸
+    보여주지 않았다. 개별 종목처럼 PER·실적만 나열하면 ETF 분석으로는 공허하다.
+
+    · 구성종목은 거의 안 바뀌므로 24시간 캐시로 충분하다.
+    · 한국 ETF(379800 등)는 야후가 펀드 데이터를 주지 않는다. 지어내지 않고
+      None 을 돌려 화면에서 '미제공'이라고 밝힌다.
+    """
+    try:
+        import yfinance as yf
+        sym = ticker if not is_kr(ticker) else f"{ticker}.KS"
+        with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+            fd = ex.submit(lambda: yf.Ticker(sym).funds_data).result(timeout=10)
+        df = fd.top_holdings
+        if df is None or getattr(df, 'empty', True):
+            return None
+        rows = []
+        for sym_i, r in df.head(top_n).iterrows():
+            try:
+                pct = float(r.get('Holding Percent') or 0) * 100.0
+            except Exception:
+                pct = 0.0
+            rows.append({'ticker': str(sym_i),
+                         'name': str(r.get('Name') or sym_i),
+                         'weight_pct': round(pct, 2)})
+        if not rows:
+            return None
+        return {'holdings': rows,
+                'top_n_weight_pct': round(sum(x['weight_pct'] for x in rows), 2)}
+    except Exception:
+        return None
+
+
 def _price_fast(ticker: str) -> dict | None:
     res = _yf_chart(ticker, '1mo', '1d')
     return _attach_ext(ticker, _chart_to_price(res) if res else None)
@@ -4620,6 +4656,10 @@ def get_stock(ticker: str):
     # 정규장 밖이면 확장시간 체결을 함께 준다 — 화면에서 '어제 종가'를 지금 값으로
     # 오해하지 않도록(2026-08-28 NVDA +8.7% 오해 사례)
     d = _attach_ext(ticker.upper(), dict(d)) or d
+    # ETF 면 구성종목 Top10 을 함께 준다. 개별 종목이면 None 이라 필드가 안 붙는다.
+    etf = _etf_top_holdings(ticker.upper())
+    if etf:
+        d = {**d, 'etf_holdings': etf}
     return {**d, '_data_status': 'ok', '_data_message': None}
 
 @app.get("/api/stock/{ticker}/price")
@@ -9018,6 +9058,8 @@ CHAT_SYSTEM = (
     "[어조]\n"
     "- 한국어 합니다체. 결론을 먼저, 근거를 뒤에.\n"
     "- 짧게. 사용자가 묻지 않은 것을 덧붙이지 마세요.\n"
+    "- 700자 이내로 맺으세요. 길어질 것 같으면 가장 중요한 것부터 쓰고,\n"
+    "  마지막 문장은 반드시 완결해 끝내세요(문장 중간에서 멈추지 마세요).\n"
     "- 확신할 수 없는 것은 확신하는 척하지 마세요.\n"
     "\n"
     "[강조]\n"
@@ -9227,6 +9269,13 @@ def _chat_focus_context(user_id: str, scope: str) -> str:
             v = data.get(k)
             if isinstance(v, list) and v:
                 parts.append("%s: %s" % (label, " / ".join(str(x) for x in v[:3])))
+        # ETF 라면 '안에 뭐가 들어 있는지'가 답의 핵심이다
+        etf = _etf_top_holdings(tkr)
+        if etf:
+            parts.append("구성종목 Top%d (합계 %.1f%%): %s" % (
+                len(etf['holdings']), etf['top_n_weight_pct'],
+                ", ".join("%s %.1f%%" % (h['ticker'], h['weight_pct'])
+                          for h in etf['holdings'])))
         return _truncate_head("\n".join(parts), 3000)
     return ""
 
@@ -9321,7 +9370,10 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
 
     payload = {
         "model": MODEL_ANALYSIS,
-        "max_tokens": 2000,
+        # 2026-09-03: 2000 이었다가 답이 문장 중간에서 끊겨 나갔다(품질 사고).
+        # 한국어는 이 토크나이저에서 글자당 토큰이 커 2000 이면 1,000자 안팎이다.
+        # 상한일 뿐 생성한 만큼만 과금되므로 넉넉히 두고, 길이는 프롬프트로 조인다.
+        "max_tokens": 4000,
         # cache_control 로 시스템 블록을 캐싱한다. 이 부분이 턴마다 동일해야
         # 캐시 읽기($0.20/MTok)로 떨어진다 — 안 그러면 매번 전액($2/MTok)이다.
         "system": [{"type": "text", "text": stable,
@@ -9339,6 +9391,9 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
         # 캐시가 안 걸린다는 뜻이라 비용이 두 배가 된다 — 조용히 새는 종류의 문제라
         # 숫자를 남겨두지 않으면 알아채지 못한다.
         usage = {}
+        # 답이 잘렸는지 반드시 알아야 한다. 2026-09-03 에 max_tokens 로 끊긴 답을
+        # '완성된 답'처럼 저장하고 화면에도 그대로 뿌리는 사고가 있었다.
+        stop_reason = {'v': ''}
         try:
             with requests.post(
                 "https://api.anthropic.com/v1/messages",
@@ -9372,6 +9427,9 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
                         u = ev.get("usage") or {}
                         if u.get('output_tokens') is not None:
                             usage['output_tokens'] = u['output_tokens']
+                        sr = (ev.get("delta") or {}).get("stop_reason")
+                        if sr:
+                            stop_reason['v'] = sr
                     if et == "content_block_delta":
                         d = ev.get("delta") or {}
                         # text_delta 만 흘린다. thinking/tool 델타는 화면에 낼 것이 아니다.
@@ -9388,7 +9446,9 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
         # 데모 계정은 공용이므로 대화를 남기지 않는다(위 chat_history 주석 참조).
         if answer and _is_demo(cu):
             yield "event: done\ndata: %s\n\n" % json.dumps(
-                {"used": 0, "limit": CHAT_MONTHLY_QUOTA, "demo": True},
+                {"used": 0, "limit": CHAT_MONTHLY_QUOTA, "demo": True,
+                 "truncated": stop_reason['v'] == 'max_tokens',
+                 "stop_reason": stop_reason['v']},
                 ensure_ascii=False)
             return
         if answer:
@@ -9406,7 +9466,9 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
             except Exception:
                 pass
         yield "event: done\ndata: %s\n\n" % json.dumps(
-            {"used": _chat_monthly_count(uid), "limit": CHAT_MONTHLY_QUOTA},
+            {"used": _chat_monthly_count(uid), "limit": CHAT_MONTHLY_QUOTA,
+             "truncated": stop_reason['v'] == 'max_tokens',
+             "stop_reason": stop_reason['v']},
             ensure_ascii=False)
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={

@@ -1035,3 +1035,20 @@ button.chat-send:not(.btn-primary) {
 .app-chat-btn:hover { opacity: .85; }
 /* 앱 모드에서는 떠 있는 버튼을 쓰지 않는다(콘텐츠를 가린다) */
 @media (max-width: 767px) { .chat-fab { display: none; } }
+
+/* 답변이 길이 상한에 걸려 끊겼을 때 — 조용히 넘기지 않는다.
+   잘린 줄 모르고 그대로 믿는 것이 가장 나쁜 결과다(2026-09-03 품질 사고). */
+.chat-trunc {
+  font-size: 11.5px; line-height: 1.7;
+  color: var(--clr-text-sub);
+  background: var(--clr-warn-bg);
+  border: 1px solid var(--clr-warn-border);
+  border-radius: 4px; padding: 8px 10px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.chat-more {
+  padding: 5px 10px; border-radius: 4px; font-size: 11.5px; font-weight: 700;
+  background: transparent; border: 1px solid var(--clr-border-md);
+  color: var(--clr-text-strong); cursor: pointer; font-family: inherit;
+  min-height: var(--tap-seg);
+}

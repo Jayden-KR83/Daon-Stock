@@ -2167,6 +2167,53 @@ function AppleStocksHero({
 
       {/* 프리마켓·애프터마켓 실제 체결가 */}
       <SessionLine ext={ext} fmt={fmtCur} />
+
+      {/* ETF 라면 '안에 뭐가 들어 있는지'가 첫 질문이다 */}
+      <EtfHoldings data={stockData?.etf_holdings} />
+    </div>
+  )
+}
+
+/* ETF 구성종목 Top10.
+   개별 종목처럼 PER·실적만 나열하면 ETF 분석은 공허하다. 무엇을 담고 있고
+   상위 10개가 전체의 몇 %인지가 곧 그 ETF 의 성격이다(집중형인지 분산형인지).
+   ⚠ 한국 ETF 는 야후가 펀드 데이터를 주지 않는다. 그럴 때는 이 카드가 아예
+     안 나온다 — 없는 데이터를 지어내지 않는다. */
+function EtfHoldings({ data }) {
+  if (!data?.holdings?.length) return null
+  const top = data.holdings
+  return (
+    <div className="mono-card" style={{ marginTop: 12 }}>
+      <div className="mono-section-header">
+        <span className="mono-section-title">구성종목 Top {top.length}</span>
+        <span style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
+          fontVariantNumeric: 'tabular-nums' }}>
+          상위 {top.length}개 합계 {data.top_n_weight_pct}%
+        </span>
+      </div>
+      {top.map((h, i) => (
+        <div key={h.ticker + i} style={{ display: 'flex', alignItems: 'center', gap: 8,
+          padding: '5px 0',
+          borderTop: i ? '1px solid var(--m-outline-variant)' : 'none' }}>
+          <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)', minWidth: 16,
+            fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--m-text)',
+            minWidth: 58 }}>{h.ticker}</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 11.5,
+            color: 'var(--m-text-secondary)', overflow: 'hidden',
+            textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.name}</span>
+          {/* 비중은 숫자와 막대를 같이 — 숫자만이면 상대 크기가 안 읽힌다 */}
+          <span style={{ width: 46, height: 5, background: 'var(--m-outline-variant)',
+            borderRadius: 0, flexShrink: 0, overflow: 'hidden' }}>
+            <span style={{ display: 'block', height: '100%',
+              width: `${Math.min(100, (h.weight_pct / (top[0].weight_pct || 1)) * 100)}%`,
+              background: 'var(--m-primary)' }} />
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--m-text)',
+            minWidth: 44, textAlign: 'right',
+            fontVariantNumeric: 'tabular-nums' }}>{h.weight_pct.toFixed(2)}%</span>
+        </div>
+      ))}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { pushSupported, getPushState, enablePush, disablePush } from '../pushClient'
+import { pushSupported, getPushState, enablePush, disablePush, pushDiagnostics } from '../pushClient'
 import { sendTestPush, getMovePrefs, saveMovePrefs } from '../api'
 
 /* ══════════════════════════════════════════════════════════════
@@ -94,6 +94,7 @@ export default function PushSetupCard() {
   const [state, setState] = useState('off')   // unsupported | denied | on | off
   const [busy, setBusy]   = useState(false)
   const [msg, setMsg]     = useState('')
+  const [diag, setDiag]   = useState(null)
   const qc = useQueryClient()
 
   const { data: prefs } = useQuery({
@@ -112,11 +113,20 @@ export default function PushSetupCard() {
       setState(state === 'on' ? await disablePush() : await enablePush())
       setMsg(state === 'on' ? '알림을 껐습니다.' : '이제 휴대폰으로 알림이 옵니다.')
     } catch (e) {
-      // 권한 거부는 브라우저가 기억한다 — 앱에서 다시 물어볼 수 없다
-      setMsg(String(e?.message) === 'denied'
-        ? '브라우저가 알림을 차단했습니다. 아래 안내대로 브라우저 설정에서 허용해 주세요.'
-        : '알림을 켜지 못했습니다. 잠시 후 다시 시도해 주세요.')
+      /* 실패 사유를 뭉뚱그리지 않는다. "알림을 켜지 못했습니다" 한 줄이면
+         사용자도 나도 다음에 뭘 해야 할지 모른다(2026-09-03 제보). */
+      const REASON = {
+        unsupported: '이 브라우저는 웹 알림을 지원하지 않습니다. 크롬·사파리 최신 버전에서 열어주세요.',
+        denied: '브라우저가 알림을 차단해 두었습니다. 앱에서는 다시 물어볼 수 없습니다 — 아래 안내대로 사이트 설정에서 허용해 주세요.',
+        dismissed: '알림 허용 창을 닫으셨습니다. 다시 눌러 "허용"을 선택해 주세요.',
+        sw_timeout: '서비스워커가 응답하지 않습니다. 앱을 완전히 닫았다가 다시 열고(또는 설정 → 업데이트 확인) 다시 시도해 주세요.',
+        vapid_failed: '서버에서 알림 키를 받지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.',
+        subscribe_failed: '기기에서 알림 구독에 실패했습니다. 홈 화면 앱으로 열려 있는지 확인해 주세요.',
+        server_save_failed: '구독 정보를 서버에 저장하지 못했습니다. 로그인 상태를 확인해 주세요.',
+      }
+      setMsg(REASON[String(e?.message)] || `알림을 켜지 못했습니다 (${String(e?.message || '원인 미상')}).`)
       setState(await getPushState())
+      setDiag(await pushDiagnostics().catch(() => null))
     } finally { setBusy(false) }
   }
 
@@ -221,14 +231,19 @@ export default function PushSetupCard() {
       )}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* ⚠ 예전에는 iosBlocked 면 버튼을 disabled 로 막았다. 그런데 아이폰에서
+            홈 화면 앱으로 열어도 standalone 판정이 빗나가는 경우가 있어, 설치했는데도
+            버튼이 죽어 '눌러도 아무 일이 없는' 상태가 됐다(2026-09-03 제보).
+            → 막지 말고 눌러보게 하고, 실패하면 진짜 이유를 말해준다.
+            판정으로 기능을 막는 것보다, 시도하고 사실대로 알려주는 편이 낫다. */}
         {(state === 'on' || state === 'off') && (
-          <button className={state === 'on' ? '' : 'btn-primary'} onClick={toggle} disabled={busy || iosBlocked}
+          <button className={state === 'on' ? '' : 'btn-primary'} onClick={toggle} disabled={busy}
             style={state === 'on'
               ? { padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer',
                   background: 'transparent', border: '1px solid var(--clr-border-md)',
                   borderRadius: 4, color: 'var(--clr-text-sub)', opacity: busy ? 0.5 : 1 }
               : { padding: '9px 18px', fontSize: 13, width: 'auto',
-                  opacity: (busy || iosBlocked) ? 0.5 : 1 }}>
+                  opacity: busy ? 0.5 : 1 }}>
             {state === 'on' ? '알림 끄기' : '휴대폰 알림 켜기'}
           </button>
         )}
@@ -247,6 +262,31 @@ export default function PushSetupCard() {
         <div className="ko-keep" style={{ fontSize: 11.5, marginTop: 9, lineHeight: 1.7,
           color: 'var(--clr-text-sub)' }}>{msg}</div>
       )}
+
+      {/* 진단 — 안 될 때 '지금 기기가 어떤 상태인지'를 눈으로 보여준다.
+          원격에서 "안 돼요"만으로는 원인을 좁힐 수 없다. */}
+      <details style={{ marginTop: 10 }} onToggle={async (e) => {
+        if (e.currentTarget.open && !diag) setDiag(await pushDiagnostics().catch(() => null))
+      }}>
+        <summary style={{ fontSize: 11, color: 'var(--clr-text-muted)', cursor: 'pointer' }}>
+          알림이 안 될 때 — 진단 정보
+        </summary>
+        <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.8,
+          color: 'var(--clr-text-sub)', fontVariantNumeric: 'tabular-nums' }}>
+          {diag
+            ? Object.entries(diag).map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ color: 'var(--clr-text-muted)' }}>{k}</span>
+                  <span style={{ fontWeight: 700 }}>{v}</span>
+                </div>
+              ))
+            : <span style={{ color: 'var(--clr-text-muted)' }}>확인 중…</span>}
+          <div className="ko-keep" style={{ marginTop: 6, color: 'var(--clr-text-muted)' }}>
+            휴대폰 설정의 알림 목록에는 <b>홈 화면 앱으로 설치되고 + 알림을 한 번 허용한 뒤</b>부터
+            &lsquo;다온&rsquo;이 나타납니다. 둘 중 하나라도 빠지면 목록에 없습니다.
+          </div>
+        </div>
+      </details>
     </div>
   )
 }
