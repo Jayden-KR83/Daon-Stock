@@ -16,7 +16,7 @@
 
 **세션 종료 시 남길 것(다음 세션이 복구하는 근거)**: ① 이 파일 맨 위에 세션 블록 추가 ② DEVELOPMENT_LOG에 상세 ③ 로컬 커밋(+ 가능하면 `git push`) ④ 미결 항목을 "다음 후보"로 명시.
 ✅ **2026-08-18 GitHub 로그인 복구 — 밀린 18커밋 푸시 완료.** 원격 백업 정상.
-✅ **집현전(`knowledge/`)도 원격 백업 정상** — `Jayden-KR83/jiphyeonjeon` (private), 브랜치 `main`.
+✅ **집현전(`집현전/`)도 원격 백업 정상** — `Jayden-KR83/jiphyeonjeon` (private), 브랜치 `main`.
 2026-08-20 실측: origin 대비 0 ahead / 0 behind, 미커밋 0건. `.gitignore` 가 제외하는
 `vault/00-private/` 는 실제로 비어 있어 누락분도 없다.
 ❌ **2026-08-18 기록 정정**: 이 자리에 "remote 미설정(브랜치 master)"이라 적었던 것은
@@ -341,7 +341,7 @@ AllocationTab 은 2단계 라벨을 `SubLabel` 로 단일화.
 - **설계를 바꾼 발견**: 기존 `/api/youtube/analyze` 는 **자막을 안 읽는다**(제목·채널명만).
   재사용 대상이 아니라 교체 대상 — 그대로 확장하면 구조적 환각 생성기가 된다.
   자막은 공식 경로로 못 받는다(`captions.download` 는 영상 소유자 전용).
-  `knowledge/tech-radar` 도 아직 비어 있다
+  `집현전/tech-radar` 도 아직 비어 있다
 - **오너 선택: A 먼저.** 구현 완료 — `compass_signals` 테이블 + 일1회 배치가 덮어쓰기
   **전에** 이전 추천을 읽어 비교 → **판단이 뒤집힌 종목만** 기록(출처 URL 없으면 미기록).
   `CompassBanner` 가 보유·시세와 교차해 비중을 붙이고 **한 번에 하나만** 노출, '읽음' 누르면
