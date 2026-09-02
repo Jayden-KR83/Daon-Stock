@@ -337,6 +337,7 @@ export default function App() {
   return (
     <div className="app-root app-mode-app">
       <div className="app-top-controls">
+        <ChatTopButton />
         <NotificationsBell />
         <ThemeQuickToggle />
         {/* 모바일에서도 웹 레이아웃으로 전환 가능 (이전에는 버튼을 숨겨 되돌릴 수 없었다) */}
@@ -361,12 +362,32 @@ export default function App() {
       {chromeReady && !tourOpen && <ChangelogModal />}
       <Tour />
       <ChatPanel />
-      <ChatFab />
     </div>
   )
 }
 
-/* 채팅 열기 버튼 — 어느 화면에서든 같은 자리.
+/* 앱 모드 상단의 '묻기' 버튼.
+   원래는 우하단에 떠 있었는데, 화면 아래쪽의 장 시작/종료 배너를 가렸다.
+   스크롤을 따라 내려가게 만들 수도 있지만, 그러면 필요할 때 화면 밖에 있다.
+   → 알림·테마와 같은 '컨트롤 줄'로 옮긴다. 콘텐츠를 가리지 않으면서 항상 같은 자리다.
+   (웹 모드는 우측에 여백이 넉넉해 떠 있는 버튼을 그대로 둔다) */
+function ChatTopButton() {
+  const openChat = useStore(s => s.openChat)
+  const chatOpen = useStore(s => s.chatOpen)
+  return (
+    <button className="app-chat-btn" onClick={() => openChat('general')}
+      title="다온에게 묻기" aria-label="다온에게 묻기"
+      aria-expanded={chatOpen}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      </svg>
+      묻기
+    </button>
+  )
+}
+
+/* 웹 모드 채팅 열기 버튼 — 우하단 고정.
    맥락 없이 열면 'general'(내 포트폴리오 전체)로 시작한다. 분석 리포트에서
    열면 그 리포트 맥락으로 열리도록 각 카드가 openChat(scope) 를 직접 부른다. */
 function ChatFab() {

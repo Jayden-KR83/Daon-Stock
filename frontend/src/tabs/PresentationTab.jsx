@@ -302,6 +302,24 @@ const ROADMAP = [
     verdict: '완료', verdictReason: '스와이프 탭 전환 도입 — PTR은 회귀 위험으로 의도적 제외' },
 ]
 
+/* ── 로드맵 정렬 (2026-08-29) ────────────────────────────────────────────
+   예전에는 완료·보류·진행이 한 목록에 섞여 있었다. 그러면 "다음에 뭘 해야 하나"를
+   읽으려면 매번 눈으로 걸러내야 한다. 로드맵의 용도는 기록이 아니라 **다음 행동**이다.
+   → 진행할 것만 본문에 우선순위 순으로 세우고, 완료된 것은 아래 '완료 이력'로 접는다.
+
+   우선순위 정렬 기준: High → Medium → Low. 같은 등급 안에서는 원래 순서를 지킨다
+   (원래 순서가 곧 오너가 적어둔 순서라 임의로 흔들지 않는다). */
+const PRIORITY_RANK = { High: 0, Medium: 1, Low: 2 }
+const isDoneVerdict = (v) => String(v || '').startsWith('완료')
+
+const ROADMAP_ACTIVE = ROADMAP
+  .map((r, i) => ({ ...r, _i: i }))
+  .filter(r => !isDoneVerdict(r.verdict))
+  .sort((a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9)
+                  || a._i - b._i)
+
+const ROADMAP_DONE = ROADMAP.filter(r => isDoneVerdict(r.verdict))
+
 /* ─── 헬퍼 ─── */
 function verdictClass(v) {
   if (!v) return 'is-med'
@@ -826,7 +844,7 @@ export default function PresentationTab() {
               ))}
             </div>
 
-            {ROADMAP.map((r, i) => (
+            {ROADMAP_ACTIVE.map((r, i) => (
               <div key={i} className="mono-row" style={{ padding: '12px 0' }}>
                 <div className="mono-row-content">
                   {/* 헤더: 직사각 라벨 (음영 X) */}
@@ -878,6 +896,45 @@ export default function PresentationTab() {
               </div>
             ))}
           </div>
+
+          {/* 완료 이력 — 본문에서 걷어냈지만 버리지는 않는다.
+              "무엇을 이미 했는가"는 다음 판단의 근거가 되고, 같은 것을 두 번
+              검토하지 않게 해준다. 기본은 접어 둔다(지금 필요한 건 다음 행동이다). */}
+          {ROADMAP_DONE.length > 0 && (
+            <details className="mono-card" style={{ marginTop: 10 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 12.5, fontWeight: 800,
+                color: 'var(--m-text)' }}>
+                완료 이력 {ROADMAP_DONE.length}건
+                <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600,
+                  color: 'var(--m-text-tertiary)' }}>(눌러서 펼치기)</span>
+              </summary>
+              <div style={{ marginTop: 10 }}>
+                {ROADMAP_DONE.map((r, i) => (
+                  <div key={i} style={{ padding: '8px 0',
+                    borderTop: i ? '1px solid var(--m-outline-variant)' : 'none' }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6,
+                      flexWrap: 'wrap' }}>
+                      <span className="sev-label is-low">완료</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--m-text)' }}>
+                        {r.title}
+                      </span>
+                      {r.devTime && (
+                        <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)' }}>
+                          {r.devTime}
+                        </span>
+                      )}
+                    </div>
+                    {r.verdictReason && (
+                      <div className="ko-keep" style={{ fontSize: 11, marginTop: 3,
+                        color: 'var(--m-text-secondary)', lineHeight: 1.65 }}>
+                        {r.verdictReason}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
           {/* 지속 개선 관점 */}
           <div className="mono-card">

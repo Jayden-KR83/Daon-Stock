@@ -79,6 +79,7 @@ WantedBy=multi-user.target
 # 일별 KST 07:00(UTC 22:00) — 신규 종목 발굴 GARP 스캔 (US 마감 후·저트래픽, 공용 캐시)
 # 주의: 월요일 09:00 UTC 리밸런싱과 시간 분리 — 두 무거운 작업 동시 실행 시 1GB VM OOM 위험
 0 22 * * * /usr/local/bin/daon-discover-scan.sh
+0 21 * * 0 /usr/local/bin/daon-weekly-refresh.sh   # 월 06:00 KST — 전략 리포트 + 종목 분석 주간 갱신
 ```
 
 > **보유 종목 AI 분석 갱신은 서버 cron 이 아니다 (2026-08-20 변경).**

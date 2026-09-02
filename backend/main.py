@@ -8623,6 +8623,37 @@ def cron_weekly_rebalance(req: TriggerReq):
 # cron 등록은 서버에서 오너가 직접 (docs/deployment.md §4). 기존 작업과 시간 분리:
 #   발굴 스캔 22:00 UTC / 리밸런싱 월 09:00 UTC → 본 작업은 19:00 UTC 권장.
 
+# 분석이 실패한 티커를 이 기간 동안 건너뛴다. 사람이 고칠 여지를 주되(2주),
+# 영원히 버리지는 않는다 — 데이터 소스가 고쳐지면 다시 시도해야 한다.
+ANALYSIS_FAIL_COOLDOWN_DAYS = 14
+
+
+def _analysis_cooldown_get() -> dict:
+    """{ticker: 이 시각까지는 건너뜀}. settings 에 JSON 한 줄로 둔다(스키마 변경 없이)."""
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='analysis_fail_cooldown'").fetchone()
+        return json.loads(row['value']) if row and row['value'] else {}
+    except Exception:
+        return {}
+
+
+def _analysis_cooldown_set(ticker: str, days: float):
+    try:
+        d = _analysis_cooldown_get()
+        now_e = time()
+        # 만료된 항목은 같이 청소한다 — 안 그러면 이 값이 계속 자란다
+        d = {k: v for k, v in d.items() if float(v) > now_e}
+        d[str(ticker)] = now_e + days * 86400.0
+        with _db() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings(key, value) VALUES('analysis_fail_cooldown', ?)",
+                (json.dumps(d),))
+    except Exception:
+        pass
+
+
 class RefreshHoldingsReq(BaseModel):
     cron_secret:   str   = ''
     max_tickers:   int   = 12     # 1회 실행 상한 (비용/시간)
@@ -8760,6 +8791,14 @@ def cron_refresh_holdings_analysis(req: RefreshHoldingsReq):
         aged.append((ts, t, name))
     aged.sort(key=lambda x: x[0])          # ts 오름차순 = 가장 오래된 분석 먼저
 
+    # 계속 실패하는 티커는 건너뛴다.
+    # 실측(2026-08-29): 447770·472170 같은 한국 펀드형 코드는 AI 응답이 매번
+    # JSON 형식을 못 맞춰 502 로 떨어진다. 쿨다운이 없으면 주간 갱신이 돌 때마다
+    # 같은 종목에 돈을 쓰고, max_tickers 상한을 실패로 다 채워 정상 종목이 밀린다.
+    cooldown = _analysis_cooldown_get()
+    now_e = time()
+    aged = [a for a in aged if cooldown.get(a[1], 0) < now_e]
+
     targets = aged[:max(0, int(req.max_tickers))]
     refreshed, signals, failed = 0, 0, []
     for _ts, t, name in targets:
@@ -8773,6 +8812,7 @@ def cron_refresh_holdings_analysis(req: RefreshHoldingsReq):
                 signals += 1
         except Exception as e:
             failed.append({'ticker': t, 'error': str(e)[:200]})
+            _analysis_cooldown_set(t, ANALYSIS_FAIL_COOLDOWN_DAYS)
 
     # 감사 로그 — user_id·kind 모두 사용자 경로와 다르게 둔다.
     # _monthly_fresh_analyze_count 가 user_id + 'stock_analyze' 로 집계하므로,
@@ -8980,6 +9020,12 @@ CHAT_SYSTEM = (
     "- 짧게. 사용자가 묻지 않은 것을 덧붙이지 마세요.\n"
     "- 확신할 수 없는 것은 확신하는 척하지 마세요.\n"
     "\n"
+    "[강조]\n"
+    "- 문장에서 핵심이 되는 어구 하나를 **별표 두 개**로 감싸 강조하세요.\n"
+    "  예: 반도체 비중이 **단일 산업 43%**로 집중도가 높습니다.\n"
+    "- 한 문단에 한두 개만. 전부 강조하면 아무것도 강조되지 않습니다.\n"
+    "- 숫자는 따로 표시하지 않아도 앱이 색으로 구분해 보여줍니다.\n"
+    "\n"
     "[관점]\n"
     "- 단기 시세보다 구조(사업 모델·해자·자본배분·산업 사이클)를 우선해 설명하세요.\n"
     "  최신 뉴스가 필요한 질문이면 '최신 정보 확인이 필요하다'고 알려주세요.\n"
@@ -9001,11 +9047,35 @@ def _chat_monthly_count(user_id: str) -> int:
         return 0
 
 
-def _chat_portfolio_context(user_id: str) -> str:
-    """보유 현황을 프롬프트용 텍스트로. 턴마다 동일해야 캐시가 산다.
+def _cached_prices_only(tickers) -> dict:
+    """이미 캐시에 있는 시세만 긁어온다 — 네트워크 호출 0.
 
-    ⚠ 정렬을 고정한다. 순서가 흔들리면 프롬프트 접두가 매번 달라져 캐시가 통째로
-      무효화된다(캐시는 접두 일치 방식이라 한 글자만 달라도 뒤가 전부 날아간다).
+    왜 필요한가: 채팅 컨텍스트를 만들려고 _batch_prices 를 부르니 46종목 계정에서
+    **매 질문마다 15~16초**가 걸렸다(폐지된 티커가 야후 .KS/.KQ 를 매번 재시도한다).
+    사용자 입장에서는 답이 안 나오는 것과 같다.
+    5분 워밍 cron 이 이미 캐시를 채워 두므로, 여기서는 있는 것만 쓰고 없으면 '—' 로 둔다.
+    """
+    out = {}
+    for t in tickers:
+        if is_kr(t):
+            hit = _kr_price_cache.get(t) or _kr_price_stale.get(t)
+            if hit:
+                out[t] = hit[1]
+            continue
+        key = "_price_fast:('%s',):[]" % t
+        with _lock:
+            if key in _cache:
+                out[t] = _cache[key]
+    return out
+
+
+def _chat_portfolio_context(user_id: str) -> str:
+    """보유 현황 — **턴마다 바뀌지 않는 부분만**. 이 블록이 프롬프트 캐시의 접두다.
+
+    ⚠ 시세·평가액을 여기 넣으면 안 된다. 값이 1원만 움직여도 접두가 달라져
+      캐시가 통째로 무효화된다(캐시는 접두 일치 방식). 시세는 _chat_live_context 로
+      분리해 캐시 경계 뒤에 붙인다.
+    ⚠ 정렬도 고정한다. 순서가 흔들리면 같은 이유로 캐시가 깨진다.
     """
     with _db() as conn:
         rows = conn.execute(
@@ -9020,38 +9090,83 @@ def _chat_portfolio_context(user_id: str) -> str:
     if not rows:
         return "보유 종목이 없습니다."
 
-    tickers = sorted({r['ticker'] for r in rows})
-    prices = _batch_prices(tickers) if tickers else {}
-    usdkrw = _usd_krw()
-
-    lines, total = [], 0.0
+    lines = []
     for r in rows:
-        t = r['ticker']
-        p = prices.get(t) or {}
-        cur = p.get('current_price')
-        is_kr_t = is_kr(t)
-        mul = 1.0 if is_kr_t else float(usdkrw or 1)
-        val = (float(r['quantity']) * float(cur) * mul) if cur else 0.0
-        total += val
         lines.append(
-            "- %s(%s) · %s · %s주 · 평단 %s · 현재 %s · 평가 ₩%s · %s" % (
-                r['name'] or t, t, r['account'],
-                _fmt_num(r['quantity']),
-                _fmt_num(r['avg_price']), _fmt_num(cur) if cur else '—',
-                _fmt_num(round(val)), r['sector'] or '기타',
+            "- %s(%s) · %s · %s주 · 평단 %s · %s" % (
+                r['name'] or r['ticker'], r['ticker'], r['account'],
+                _fmt_num(r['quantity']), _fmt_num(r['avg_price']),
+                r['sector'] or '기타',
             )
         )
+    cash_lines = []
+    for a in accs:
+        c = float(a['cash'] or 0)
+        if c:
+            cash_lines.append("- %s: %s %s" % (
+                a['label'] or a['key'], _fmt_num(c), a['currency'] or 'KRW'))
+    out = "[보유 종목 — 수량·평단은 잘 바뀌지 않는 값]\n" + "\n".join(lines)
+    if cash_lines:
+        out += "\n\n[계좌별 예수금]\n" + "\n".join(cash_lines)
+    return out
+
+
+def _chat_live_context(user_id: str) -> str:
+    """시세·평가액 — **턴마다 바뀌는 부분**. 캐시 경계 뒤에 붙인다.
+
+    가격은 캐시에 있는 것만 쓴다(_cached_prices_only). 46종목 계정에서 매 질문마다
+    시세를 새로 긁느라 15~16초가 걸리던 것을 없애기 위해서다.
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT account, ticker, name, quantity, avg_price "
+            "FROM portfolios WHERE user_id=? AND quantity > 0 "
+            "ORDER BY account, ticker", (user_id,)
+        ).fetchall()
+        accs = conn.execute(
+            "SELECT cash, currency FROM accounts WHERE user_id=?", (user_id,)
+        ).fetchall()
+    if not rows:
+        return ""
+    tickers = sorted({r['ticker'] for r in rows})
+    prices  = _cached_prices_only(tickers)
+    # 캐시 적중이 너무 낮으면(재시작 직후 등) 짧은 시간만 더 기다려 본다.
+    # 상한을 두는 이유: 예전에 무제한으로 긁다가 46종목 계정에서 16.6초가 걸렸고,
+    # 사용자에게는 '답이 안 나온다' 로 보였다. 늦게라도 다 채우는 것보다
+    # 빨리 답하고 없는 종목은 '모른다'고 말하는 편이 낫다.
+    if tickers and len(prices) < len(tickers) * 0.6:
+        try:
+            prices.update(_batch_prices(tickers, timeout=6) or {})
+        except Exception:
+            pass
+    usdkrw = _usd_krw()
+
+    lines, total, missing = [], 0.0, 0
+    for r in rows:
+        t = r['ticker']
+        cur = (prices.get(t) or {}).get('current_price')
+        if cur is None:
+            missing += 1
+            continue
+        mul = 1.0 if is_kr(t) else float(usdkrw or 1)
+        val = float(r['quantity']) * float(cur) * mul
+        total += val
+        pnl = ((float(cur) / float(r['avg_price']) - 1) * 100) if r['avg_price'] else 0.0
+        lines.append("- %s: 현재 %s · 평가 ₩%s · 손익 %+.1f%%" % (
+            r['name'] or t, _fmt_num(cur), _fmt_num(round(val)), pnl))
     cash_krw = 0.0
     for a in accs:
         c = float(a['cash'] or 0)
-        if not c:
-            continue
-        cash_krw += c if (a['currency'] or 'KRW') == 'KRW' else c * float(usdkrw or 1)
+        if c:
+            cash_krw += c if (a['currency'] or 'KRW') == 'KRW' else c * float(usdkrw or 1)
 
+    head = "[현재 시세 · 평가액] (환율 ₩%s)" % _fmt_num(round(float(usdkrw or 0)))
+    if missing:
+        head += "\n※ %d개 종목은 시세를 아직 못 받았습니다 — 그 종목의 금액은 언급하지 마세요." % missing
     tail = ("\n주식 평가액 합계: ₩%s\n예수금(원화 환산): ₩%s\n총자산: ₩%s"
             % (_fmt_num(round(total)), _fmt_num(round(cash_krw)),
                _fmt_num(round(total + cash_krw))))
-    return "[보유 현황]\n" + "\n".join(lines) + tail
+    return head + "\n" + "\n".join(lines) + tail
 
 
 def _fmt_num(v) -> str:
@@ -9182,11 +9297,16 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
     scope = str(req.scope or 'general')
 
     # ── 컨텍스트 조립 (서버에서만) ──────────────────────────────────
-    #  캐시가 살도록 '안 바뀌는 것 → 바뀌는 것' 순서로 쌓는다.
+    #  🟥 캐시 경계가 핵심이다. cache_control 은 '접두 일치' 방식이라 앞부분이
+    #     한 글자만 달라져도 뒤가 전부 무효화된다. 그래서 이렇게 가른다:
+    #       [캐시되는 블록] 시스템 규칙 + 보유 종목(수량·평단) + 지금 보는 리포트
+    #       [캐시 안 되는 블록] 시세·평가액 — 1원만 움직여도 매번 달라진다
+    #     시세를 캐시 블록에 넣으면 캐시가 사실상 한 번도 안 걸린다.
     stable = CHAT_SYSTEM + "\n" + _chat_portfolio_context(uid)
     focus  = _chat_focus_context(uid, scope)
     if focus:
         stable += "\n\n" + focus
+    live = _chat_live_context(uid)
 
     with _db() as conn:
         prior = conn.execute(
@@ -9195,7 +9315,9 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
             (uid, scope, CHAT_HISTORY_TURNS * 2)
         ).fetchall()
     messages = [{'role': r['role'], 'content': r['content']} for r in reversed(prior)]
-    messages.append({'role': 'user', 'content': question})
+    # 시세는 질문 바로 앞에 붙인다 — 캐시 경계 뒤라 매번 새로 계산돼도 캐시를 안 깬다
+    messages.append({'role': 'user', 'content':
+                     (live + "\n\n" if live else "") + question})
 
     payload = {
         "model": MODEL_ANALYSIS,
@@ -9292,3 +9414,123 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
         # nginx/Cloudflare 가 SSE 를 버퍼링하면 스트리밍이 의미를 잃는다
         "X-Accel-Buffering": "no",
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 주 1회 전략 리포트 자동 갱신 (2026-08-29)
+# ═══════════════════════════════════════════════════════════════════════════
+# 배경: 2026-07 에 비용 때문에 서버 cron 기반 분석 갱신을 걷어냈었다. 이번에
+#   오너가 "토큰 여유가 있으니 주 1회 최신으로 갱신해 달라"고 명시적으로 요청해
+#   되살린다. 대신 상한을 분명히 둔다 — 예전에 비용이 문제가 됐던 이유가
+#   '얼마나 도는지 몰랐던 것' 이기 때문이다.
+#
+# 비용 상한
+#  · ai_enabled + approved 사용자만. 데모는 제외(공용 계정이라 재과금 무의미).
+#  · 사용자당 1회. 실패해도 재시도하지 않는다(다음 주에 다시 돈다).
+#  · 종목 분석은 기존 refresh_holdings_analysis 가 담당(자체 max_tickers 상한).
+#
+# ⚠ 프론트가 보내던 holdings/prices 를 여기서는 서버가 만든다. 화면 없이 도는
+#   경로라 입력을 스스로 조립해야 한다 — 앱 표와 같은 소스(_batch_prices)를 쓴다.
+
+class RefreshStrategyReq(BaseModel):
+    cron_secret: str = ''
+    scope:       str = 'ALL'
+
+
+def _build_strategy_req_for(user_id: str, scope: str = 'ALL'):
+    """DB 에서 StrategyReq 를 조립한다. 화면이 보내던 것과 같은 모양이어야 한다."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT account, ticker, name, quantity, avg_price, sector, asset_type "
+            "FROM portfolios WHERE user_id=? AND quantity > 0 ORDER BY account, ticker",
+            (user_id,)
+        ).fetchall()
+        goal = conn.execute(
+            "SELECT target_date, monthly_contribution FROM goals "
+            "WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,)
+        ).fetchone()
+    if not rows:
+        return None
+    if scope != 'ALL':
+        rows = [r for r in rows if r['account'] == scope]
+        if not rows:
+            return None
+
+    holdings = [{
+        'account':    r['account'],
+        'ticker':     r['ticker'],
+        'name':       r['name'] or r['ticker'],
+        'quantity':   float(r['quantity']),
+        'avg_price':  float(r['avg_price'] or 0),
+        'sector':     r['sector'] or '기타',
+        'asset_type': r['asset_type'] or '',
+    } for r in rows]
+
+    # ⚠ 프론트가 보내는 모양과 똑같이 {ticker: {current_price: ...}} 여야 한다.
+    #   float 로 넣었더니 소비부(req.prices.get(t, {}).get('current_price'))에서
+    #   'float' object has no attribute 'get' 로 죽었다 — cron 만 다른 모양을 쓰면
+    #   화면 경로와 갈라져서 이런 식으로 조용히 깨진다.
+    prices = {}
+    for t, p in (_batch_prices(sorted({r['ticker'] for r in rows})) or {}).items():
+        if p and p.get('current_price') is not None:
+            prices[t] = {'current_price': float(p['current_price'])}
+
+    # 은퇴까지 햇수·월 납입은 목표 카드가 단일 입력처다(프론트 localStorage 아님).
+    years, inflow = None, None
+    if goal:
+        try:
+            from datetime import date as _d
+            y, m, dd = (int(x) for x in str(goal['target_date']).split('-')[:3])
+            days = (_d(y, m, dd) - _d.today()).days
+            years = max(0, round(days / 365.25))
+        except Exception:
+            years = None
+        try:
+            inflow = float(goal['monthly_contribution'] or 0) or None
+        except Exception:
+            inflow = None
+
+    return StrategyReq(holdings=holdings, prices=prices, scope=scope,
+                       force_refresh=True,
+                       years_to_retirement=years, monthly_inflow=inflow)
+
+
+@app.post("/api/cron/refresh_strategy")
+def cron_refresh_strategy(req: RefreshStrategyReq):
+    """주 1회 — ai_enabled 승인 사용자의 전략 리포트를 최신 데이터로 다시 만든다."""
+    secret = ''
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='cron_secret'").fetchone()
+        if row:
+            secret = row['value']
+    if not secret or req.cron_secret != secret:
+        raise HTTPException(403, "invalid cron secret")
+    if not _stored_api_key():
+        return {'refreshed': 0, 'reason': 'no_api_key'}
+
+    with _db() as conn:
+        users = [r['user_id'] for r in conn.execute(
+            "SELECT user_id FROM users WHERE ai_enabled=1 AND status='approved'"
+        ).fetchall()]
+
+    done, skipped, failed = 0, [], []
+    for uid in users:
+        if _is_demo({'user_id': uid}):
+            skipped.append(uid[:4] + ':demo')
+            continue
+        try:
+            sreq = _build_strategy_req_for(uid, req.scope)
+            if sreq is None:
+                skipped.append(uid[:4] + ':no_holdings')
+                continue
+            # 실제 사용자 요청과 같은 경로를 탄다 — 별도 구현을 두면 둘이 갈라진다
+            portfolio_strategy(sreq, {'user_id': uid, 'is_admin': False,
+                                      'ai_enabled': 1, 'status': 'approved'})
+            done += 1
+        except Exception as e:
+            failed.append({'user': uid[:4], 'error': str(e)[:160]})
+
+    _log_event('__cron__', 'cron_refresh_strategy',
+               {'refreshed': done, 'skipped': len(skipped), 'failed': len(failed)})
+    return {'refreshed': done, 'skipped': skipped, 'failed': failed}

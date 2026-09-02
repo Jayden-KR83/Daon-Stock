@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import { maskText } from '../utils/privacy'
 import { chatHistory, chatClear, chatSend } from '../api'
-import BulletList from './BulletList'
+import { ReportBullets } from './report'
 
 /* ══════════════════════════════════════════════════════════════════════
    다온 채팅 — 보던 화면의 맥락 그대로 묻는다
@@ -144,14 +144,16 @@ export default function ChatPanel() {
         {msgs.map((m, i) => (
           <div key={i} className={`chat-msg ${m.role}`}>
             {m.role === 'assistant'
-              ? <BulletList items={splitAnswer(show(m.content))} small gap={6} />
+              ? <ReportBullets items={splitAnswer(show(m.content))} small />
               : <div className="ko-keep">{show(m.content)}</div>}
           </div>
         ))}
 
         {stream && (
           <div className="chat-msg assistant">
-            <div className="ko-keep" style={{ whiteSpace: 'pre-wrap' }}>{show(stream)}</div>
+            {/* 스트리밍 중에는 아직 **강조**가 닫히지 않을 수 있어 원문 그대로 흘린다.
+              완료되면 위 ReportBullets 가 강조·숫자 색을 입혀 다시 그린다. */}
+          <div className="ko-keep" style={{ whiteSpace: 'pre-wrap' }}>{show(stream)}</div>
           </div>
         )}
         {busy && !stream && <div className="chat-typing">생각하는 중…</div>}
@@ -160,10 +162,10 @@ export default function ChatPanel() {
       </div>
 
       <div className="chat-foot">
-        <label className="chat-search-toggle" title="켜면 웹에서 최신 정보를 찾습니다. 검색 1회당 약 14원이 듭니다.">
+        <label className="chat-search-toggle" title="켜면 답하기 전에 웹을 검색합니다(뉴스·실적 발표 같은 '사건'을 물을 때). 회사 구조나 제 포트폴리오를 묻는 질문에는 필요 없습니다. 검색 1회당 약 14원.">
           <input type="checkbox" checked={useSearch}
             onChange={e => setUseSearch(e.target.checked)} />
-          최신 정보 검색
+          웹에서 최신 정보 찾기
         </label>
         {msgs.length > 0 && (
           <button className="chat-clear" onClick={async () => {

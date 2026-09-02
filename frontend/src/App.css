@@ -1017,3 +1017,21 @@ button.chat-send:not(.btn-primary) {
   box-shadow: 0 6px 20px rgba(15, 23, 42, .22);
 }
 @media (min-width: 768px) { .chat-fab { bottom: 24px; } }
+
+/* 앱 모드 상단 '묻기' 버튼 — 테마/웹 알약과 같은 형태로 한 줄에 선다.
+   원래 우하단 FAB 이었는데 장 시작/종료 배너를 가려서 컨트롤 줄로 옮겼다. */
+.app-chat-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: var(--tap-h);
+  padding: 3px 9px;
+  background: var(--clr-text-strong);
+  border: 1px solid var(--clr-text-strong);
+  border-radius: var(--r-md);
+  color: var(--clr-surface);
+  font-size: 11px; font-weight: 700; font-family: inherit;
+  white-space: nowrap; cursor: pointer;
+  transition: opacity var(--t-base);
+}
+.app-chat-btn:hover { opacity: .85; }
+/* 앱 모드에서는 떠 있는 버튼을 쓰지 않는다(콘텐츠를 가린다) */
+@media (max-width: 767px) { .chat-fab { display: none; } }
