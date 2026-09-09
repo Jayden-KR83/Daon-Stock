@@ -58,6 +58,29 @@
 .top-nav-search-input::placeholder { color: var(--clr-text-muted); }
 
 /* ── 앱 모드 전환 버튼 ── */
+/* 가림 토글 — 켜져 있을 때는 눈에 띄어야 한다.
+   켠 줄 모르고 발표하다 노출되는 것보다, 켠 줄 모르고 숫자가 안 보이는 게 낫다. */
+.top-nav-privacy-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border: 1px solid var(--clr-border-md);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--clr-text-muted);
+  cursor: pointer;
+  transition: all var(--t-base);
+}
+.top-nav-privacy-btn:hover {
+  background: var(--clr-pos-bg-soft);
+  color: var(--clr-pos-dark);
+  border-color: var(--clr-pos-border-md);
+}
+.top-nav-privacy-btn[aria-pressed="true"] {
+  background: var(--clr-warn-bg);
+  border-color: var(--clr-warn-border);
+  color: var(--clr-text-strong);
+}
+
 .top-nav-app-btn {
   display: flex; align-items: center; justify-content: center;
   width: 34px; height: 34px;

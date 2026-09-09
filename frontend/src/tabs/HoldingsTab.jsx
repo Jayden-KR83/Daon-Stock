@@ -10,6 +10,7 @@ import NumberTicker from '../components/NumberTicker'
 import NoteSheet from '../components/NoteSheet'
 import TransactionsSection from '../components/TransactionsSection'
 import Sparkles from '../components/Sparkles'
+import QuickAddModal from '../components/QuickAddModal'
 import { SkeletonRow } from '../components/Skeleton'
 import { usePriceFlash } from '../hooks/usePriceFlash'
 import { isKrTicker } from '../utils/displayName'
@@ -31,6 +32,7 @@ export default function HoldingsTab() {
   const usdKrw        = useStore(s => s.usdKrw)
   const setChartTicker = useStore(s => s.setChartTicker)
   const setActiveTab  = useStore(s => s.setActiveTab)
+  const [quickAdd, setQuickAdd] = useState(false)
   const currentUser   = useStore(s => s.currentUser)
   const privacyMode   = useStore(s => s.privacyMode)
   const togglePrivacy = useStore(s => s.togglePrivacy)
@@ -292,8 +294,8 @@ export default function HoldingsTab() {
         {/* 종목 추가 — 등록 탭으로 바로 (지인 피드백 6).
             "추가하려면 다른 탭으로 가라"는 안내만 있고 길이 없으면 그건 길이 아니다.
             보유가 0개일 때만 있던 버튼을, 목록이 있을 때도 항상 둔다. */}
-        <button onClick={() => setActiveTab(5)}
-          title="등록 탭에서 종목 추가"
+        <button onClick={() => setQuickAdd(true)}
+          title="여기서 바로 종목 추가"
           style={{ flex: 'none', marginLeft: 'auto', minHeight: 'var(--tap-seg)',
             padding: '5px 11px', borderRadius: 4, cursor: 'pointer',
             background: 'transparent', border: '1px dashed var(--clr-border-strong)',
@@ -323,7 +325,7 @@ export default function HoldingsTab() {
             첫 종목을 추가하면 평가액·수익률·섹터 비중·AI 분석이 자동으로 활성화됩니다.<br/>
             티커(예: AAPL, 005930)나 종목명으로 자유롭게 추가하세요.
           </div>
-          <button onClick={() => setActiveTab(5)} className="btn-primary"
+          <button onClick={() => setQuickAdd(true)} className="btn-primary"
             data-tour="empty-add"
             style={{ padding: '10px 22px' }}>
             첫 종목 추가하기 →
@@ -599,6 +601,13 @@ export default function HoldingsTab() {
           onSaved={() => { refetchNotes(); setNoteTicker(null) }}
         />
       )}
+
+      {/* 빠른 등록 — 한 건은 여기서, 여러 건은 등록 탭에서 */}
+      <QuickAddModal
+        open={quickAdd}
+        onClose={() => setQuickAdd(false)}
+        onGoToAddTab={() => setActiveTab(5)}
+      />
     </div>
   )
 }

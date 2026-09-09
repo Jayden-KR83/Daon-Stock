@@ -9719,9 +9719,94 @@ def _resolve_ticker(raw: str) -> dict:
     return out
 
 
+# ── 한글 이름 → 미국 티커 별칭 ────────────────────────────────────────
+# 네이버 검색은 국내 상장만 돌려주고(디즈니 → 결과 0건), 야후는 한글 질의를
+# 받지 않는다. 한국 개인투자자가 실제로 한글로 부르는 미국 종목은 한정적이라
+# 그 범위만 표로 둔다. 표에 없으면 **추측하지 않고 404** 를 준다 —
+# 엉뚱한 종목을 대신 넣는 것은 빈칸으로 두는 것보다 나쁘다.
+_KR_ALIAS_US = {
+    '디즈니': 'DIS', '월트디즈니': 'DIS',
+    '애플': 'AAPL', '테슬라': 'TSLA', '엔비디아': 'NVDA',
+    '마이크로소프트': 'MSFT', '마소': 'MSFT',
+    '구글': 'GOOGL', '알파벳': 'GOOGL',
+    '아마존': 'AMZN', '메타': 'META', '페이스북': 'META',
+    '넷플릭스': 'NFLX',
+    '인텔': 'INTC', '에이엠디': 'AMD',
+    '스타벅스': 'SBUX', '코카콜라': 'KO', '펩시': 'PEP',
+    '나이키': 'NKE', '맥도날드': 'MCD', '비자': 'V', '마스터카드': 'MA',
+    '버크셔': 'BRK-B', '버크셔해서웨이': 'BRK-B',
+    '브로드컴': 'AVGO', '퀄컴': 'QCOM', '마이크론': 'MU',
+    '팔란티어': 'PLTR', '유니티': 'U', '우버': 'UBER',
+    '보잉': 'BA', '록히드마틴': 'LMT',
+    '존슨앤존슨': 'JNJ', '화이자': 'PFE', '일라이릴리': 'LLY',
+    '애브비': 'ABBV',
+    '코스트코': 'COST', '월마트': 'WMT',
+    '비트코인': 'BTC-USD', '이더리움': 'ETH-USD',
+}
+
+
+def _resolve_by_name(raw: str) -> dict:
+    """'삼성전자' / 'Apple' → {ticker, name, sector, market}.
+
+    사람은 티커를 외우고 있지 않다. '디즈니'는 알아도 DIS 는 모른다.
+    이름으로 넣어도 폼이 채워져야 등록이 끝난다.
+
+    ⚠ 확실할 때만 채운다 — 후보가 여럿이면 아무것도 돌려주지 않는다.
+      엉뚱한 종목을 대신 넣는 것은 빈칸으로 두는 것보다 나쁘다.
+    """
+    q = str(raw or '').strip()
+    if len(q) < 2:
+        return {}
+
+    # 한글로 부르는 미국 종목은 검색 소스가 없다 — 별칭표로 먼저 받는다.
+    alias = _KR_ALIAS_US.get(q.replace(' ', ''))
+    if alias:
+        d = _resolve_ticker(alias)
+        if d.get('ticker'):
+            return d
+
+    hits: list[dict] = []
+    has_hangul = any('가' <= ch <= '힣' for ch in q)
+    try:
+        if has_hangul:
+            hits = _search_kr(q) or []
+        else:
+            hits = _yf_search(q) or []
+            if not hits:
+                hits = _search_kr(q) or []
+    except Exception:
+        return {}
+    if not hits:
+        return {}
+
+    def nm(h): return str(h.get('shortname') or h.get('longname') or '').strip()
+    exact = [h for h in hits if nm(h).lower() == q.lower()]
+    pick = exact[0] if exact else (hits[0] if len(hits) == 1 else None)
+    # 후보가 여럿인데 정확히 일치하는 이름이 없으면 고르지 않는다.
+    if pick is None:
+        return {}
+
+    sym = str(pick.get('symbol') or '').strip().upper()
+    if not sym:
+        return {}
+    d = _resolve_ticker(sym)
+    if d and not d.get('name'):
+        d['name'] = nm(pick)
+    return d or {}
+
+
 @app.get("/api/ticker/resolve")
-def ticker_resolve(ticker: str, cu: dict = Depends(require_approved)):
-    d = _resolve_ticker(ticker)
-    if not d.get('ticker'):
-        raise HTTPException(400, "티커를 입력하세요.")
-    return d
+def ticker_resolve(ticker: str = '', name: str = '',
+                   cu: dict = Depends(require_approved)):
+    """티커로도, 종목명으로도 같은 답을 준다."""
+    if ticker.strip():
+        d = _resolve_ticker(ticker)
+        if not d.get('ticker'):
+            raise HTTPException(400, "티커를 입력하세요.")
+        return d
+    if name.strip():
+        d = _resolve_by_name(name)
+        if not d.get('ticker'):
+            raise HTTPException(404, "이름으로 종목을 찾지 못했습니다.")
+        return d
+    raise HTTPException(400, "티커 또는 종목명을 입력하세요.")

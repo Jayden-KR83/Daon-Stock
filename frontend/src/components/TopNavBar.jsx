@@ -100,6 +100,12 @@ export default function TopNavBar() {
           )}
         </form>
 
+        {/* 가림 스위치는 앱 모드 상단에만 있었다. 웹 모드에서는 포트폴리오
+            히어로 카드 안쪽이 유일한 스위치라, 분석 탭에서 켜진 가림을 끌 방법이
+            없었다 — 모드는 전역인데 스위치가 한 화면에만 있으면 갇힌다.
+            2026-09-09 재지적. 두 레이아웃 모두에 둔다. */}
+        <PrivacyQuickBtn />
+
         <NotificationsBell />
 
         <ThemeQuickBtn />
@@ -172,6 +178,32 @@ export function avatarInitials(name) {
 }
 
 /* 웹 모드 상단 테마 빠른 전환 버튼 */
+function PrivacyQuickBtn() {
+  const privacyMode   = useStore(s => s.privacyMode)
+  const togglePrivacy = useStore(s => s.togglePrivacy)
+  return (
+    <button className="top-nav-privacy-btn" onClick={togglePrivacy}
+      aria-pressed={privacyMode}
+      title={privacyMode ? '금액 보이기' : '금액 가리기'}
+      aria-label={privacyMode ? '금액 보이기' : '금액 가리기'}>
+      {privacyMode ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      )}
+    </button>
+  )
+}
+
 function ThemeQuickBtn() {
   const theme      = useStore(s => s.theme)
   const cycleTheme = useStore(s => s.cycleTheme)

@@ -106,6 +106,8 @@ export const setInviteCode     = (code)           => api.put('/admin/invite_code
 export const getAccounts    = ()        => api.get('/accounts').then(r => r.data)
 export const resolveTicker  = (ticker)  =>
   api.get('/ticker/resolve', { params: { ticker } }).then(r => r.data)
+export const resolveByName  = (name)    =>
+  api.get('/ticker/resolve', { params: { name } }).then(r => r.data)
 export const addAccount     = (body)    => api.post('/accounts', body).then(r => r.data)
 export const updateAccount  = (key, body) => api.put(`/accounts/${key}`, body).then(r => r.data)
 export const deleteAccount  = (key)     => api.delete(`/accounts/${key}`).then(r => r.data)

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPortfolio, savePortfolio, getUsdKrw, resolveTicker } from '../api'
+import { getPortfolio, savePortfolio, getUsdKrw, resolveTicker, resolveByName } from '../api'
 import { useAccounts } from '../utils/accounts'
 import * as XLSX from 'xlsx'
 
@@ -152,6 +152,35 @@ export default function AddTab() {
       }))
       setDirty(true)
     } catch { /* 조회 실패는 조용히 넘긴다 — 손으로 적으면 그만이다 */ }
+    finally { setResolving(v => ({ ...v, [k]: false })) }
+  }
+
+  /* ── 종목명 → 티커 (역방향) ────────────────────────────────────
+     티커를 외우고 있는 사람은 드물다. '디즈니'라고 적으면 DIS 가 들어와야 한다.
+     서버는 확실할 때만 답을 준다(후보가 여럿이면 404) — 엉뚱한 종목을 대신
+     넣는 것은 빈칸으로 두는 것보다 나쁘기 때문이다. */
+  async function resolveRowByName(k, rawName) {
+    const nm = String(rawName || '').trim()
+    if (!nm) return
+    let skip = false
+    setRows(rs => {                       // 최신 행 상태에서 티커 유무를 본다
+      const row = rs.find(r => r._k === k)
+      if (row && String(row.ticker).trim()) skip = true
+      return rs
+    })
+    if (skip) return                      // 티커가 이미 있으면 건드리지 않는다
+    setResolving(v => ({ ...v, [k]: true }))
+    try {
+      const d = await resolveByName(nm)
+      setRows(rs => rs.map(r => {
+        if (r._k !== k) return r
+        const next = { ...r }
+        if (d.ticker && !String(r.ticker).trim()) next.ticker = d.ticker
+        if (d.sector && !String(r.sector).trim()) next.sector = d.sector
+        return next
+      }))
+      setDirty(true)
+    } catch { /* 못 찾으면 사용자가 적은 이름을 그대로 둔다 */ }
     finally { setResolving(v => ({ ...v, [k]: false })) }
   }
   /* ── 원화 평단 → 달러 평단 환산 ──────────────────────────────
@@ -375,8 +404,11 @@ export default function AddTab() {
                 </td>
                 <td>
                   <div style={{ position: 'relative' }}>
+                    {/* 이름에서 티커로도 간다. 사람은 '디즈니'는 알아도 DIS 는 모른다. */}
                     <input value={r.name} placeholder={resolving[r._k] ? '조회 중…' : (ri === 0 ? '자동으로 채워집니다' : '')}
-                      onChange={e => setCell(r._k, 'name', e.target.value)} />
+                      onChange={e => setCell(r._k, 'name', e.target.value)}
+                      onBlur={e => resolveRowByName(r._k, e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
                   </div>
                 </td>
                 <td className="num">
@@ -478,14 +510,14 @@ export default function AddTab() {
         </div>
       )}
 
-      {/* 행 추가 */}
-      <button type="button" onClick={addRow}
-        style={{ width: '100%', marginTop: 8, padding: '9px', borderRadius: 4,
-          background: 'transparent', border: '1px dashed var(--clr-border-strong)',
-          color: 'var(--clr-text-sub)', fontSize: 12.5, fontWeight: 700,
-          cursor: 'pointer', fontFamily: 'inherit' }}>
-        ＋ 행 추가
-      </button>
+      {/* 행 추가 — 표 아래에 두면 종목이 많을 때 화면 밖으로 밀려난다.
+          종목이 많은 사람일수록 더 자주 누르는 버튼인데, 많을수록 멀어지는
+          구조였다. 화면 아래에 붙여 둔다(sticky). */}
+      <div className="addtab-addrow-bar">
+        <button type="button" onClick={addRow} className="addtab-addrow-btn">
+          ＋ 행 추가
+        </button>
+      </div>
 
       {/* 메시지 */}
       {msg && (

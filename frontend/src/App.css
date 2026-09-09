@@ -1090,3 +1090,82 @@ button.chat-send:not(.btn-primary) {
   border-color: var(--clr-warn-border);
   color: var(--clr-text-strong);
 }
+
+/* ── 등록 탭: 행 추가 버튼 고정 ──────────────────────────────────
+   종목이 많을수록 자주 누르는 버튼인데, 표 아래에 두면 많을수록 멀어졌다.
+   화면 하단에 붙여 스크롤과 무관하게 손이 닿게 한다.
+   ⚠ position:sticky 는 조상에 overflow 가 걸리면 죽는다. 등록 탭 본문은
+     페이지 스크롤을 쓰므로 동작한다 — 표를 별도 스크롤 컨테이너로 감싸면
+     이 버튼이 조용히 안 붙는다는 뜻이다. */
+.addtab-addrow-bar {
+  position: sticky; bottom: 0; z-index: 5;
+  margin-top: 8px; padding: 8px 0 4px;
+  background: linear-gradient(to top,
+    var(--clr-bg) 62%, transparent);
+}
+.addtab-addrow-btn {
+  width: 100%; padding: 10px; border-radius: 4px;
+  background: var(--clr-bg);
+  border: 1px dashed var(--clr-border-strong);
+  color: var(--clr-text-sub);
+  font-size: 12.5px; font-weight: 700; font-family: inherit;
+  cursor: pointer; min-height: var(--tap-h);
+}
+.addtab-addrow-btn:hover {
+  color: var(--clr-text); border-color: var(--clr-text-sub);
+}
+
+/* ── 빠른 등록 모달 ────────────────────────────────────────────
+   보던 화면을 떠나지 않고 한 종목만 넣는 자리. 등록 탭(표)을 대체하지 않는다. */
+.qa-backdrop {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(15, 23, 42, .38);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.qa-modal {
+  width: 100%; max-width: 460px;
+  max-height: calc(100dvh - 32px); overflow-y: auto;
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border-md);
+  border-radius: 4px;
+}
+.qa-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 16px; border-bottom: 1px solid var(--clr-border);
+}
+.qa-title { font-size: 14px; font-weight: 800; color: var(--clr-text-strong); }
+.qa-x {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--clr-text-muted); font-size: 14px;
+  min-width: var(--tap-h); min-height: var(--tap-h);
+}
+.qa-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.qa-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.qa-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.qa-field > span { font-size: 11px; font-weight: 700; color: var(--clr-text-sub); }
+.qa-field input, .qa-field select {
+  width: 100%; padding: 8px 10px; min-height: var(--tap-h);
+  border: 1px solid var(--clr-border-md); border-radius: 4px;
+  background: var(--clr-bg); color: var(--clr-text);
+  font-size: 12.5px; font-family: inherit;
+}
+.qa-field input:focus, .qa-field select:focus {
+  outline: 2px solid var(--clr-info-dark); outline-offset: -1px;
+}
+.qa-err {
+  font-size: 11.5px; color: var(--clr-neg-dark);
+  background: var(--clr-neg-bg); border: 1px solid var(--clr-neg-border);
+  border-radius: 4px; padding: 7px 9px; line-height: 1.6;
+}
+.qa-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 2px;
+}
+.qa-alt {
+  background: transparent; border: 1px solid var(--clr-border-md);
+  border-radius: 4px; padding: 8px 12px; min-height: var(--tap-h);
+  color: var(--clr-text-sub); font-size: 11.5px; font-weight: 700;
+  font-family: inherit; cursor: pointer;
+}
+.qa-alt:hover { color: var(--clr-text); border-color: var(--clr-text-sub); }
