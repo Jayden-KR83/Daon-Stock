@@ -576,8 +576,12 @@ export default function RightPanel() {
 
   return (
     <aside className="right-panel">
-      {renderPanel()}
+      {/* Market Status 를 맨 위로 올린다(지인 피드백 4·5).
+          예전에는 margin-top:auto 로 패널 바닥에 붙여 뒀는데, 보유 종목이 적으면
+          패널이 짧아 바닥이 화면 밖으로 나가고 스크롤할 것도 없어 영영 못 봤다.
+          '지금 장이 열렸나'는 화면에 들어오자마자 알아야 하는 정보다 — 위가 맞다. */}
       <MarketStatus />
+      {renderPanel()}
     </aside>
   )
 }

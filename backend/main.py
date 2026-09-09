@@ -9596,3 +9596,76 @@ def cron_refresh_strategy(req: RefreshStrategyReq):
     _log_event('__cron__', 'cron_refresh_strategy',
                {'refreshed': done, 'skipped': len(skipped), 'failed': len(failed)})
     return {'refreshed': done, 'skipped': skipped, 'failed': failed}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 티커 해석 — 등록 폼 자동 채우기 (2026-09-09)
+# ═══════════════════════════════════════════════════════════════════════════
+# 지인 피드백: "티커를 넣으면 종목명은 자동으로 불러와야 한다고 생각합니다."
+# 맞는 지적이다. 사람이 이미 아는 것을 컴퓨터가 다시 묻는 건 폼의 실패다.
+#
+# 섹터도 같이 돌려준다. 피드백에는 "섹터는 별로 필요 없다"고 했는데,
+# 섹터를 지우면 분석 탭의 섹터별 비중·집중도 진단이 통째로 죽는다.
+# 필요 없는 것은 '섹터'가 아니라 '섹터를 손으로 타이핑하는 일' 이다.
+#   → 데이터는 유지하고, 입력만 없앤다.
+#
+# 비용: 검색 API 만 쓰고 무거운 info 조회는 하지 않는다. 섹터는 이미 받아 둔
+#   종목 분석 캐시에 있으면 거기서 꺼내고, 없으면 빈 값으로 둔다(지어내지 않는다).
+
+@ttl_cache(3600)
+def _resolve_ticker(raw: str) -> dict:
+    """'AAPL' / '005930' / 'BTC' → {ticker, name, sector, market}."""
+    t = normalize_crypto(str(raw or '').strip().upper())
+    if not t:
+        return {}
+    out = {'ticker': t, 'name': '', 'sector': '', 'market': ''}
+
+    # 암호화폐는 이름표가 코드에 이미 들어 있다
+    base = t[:-4] if t.endswith('-USD') else t
+    if base in CRYPTO_SYMBOLS:
+        out['name'] = CRYPTO_SYMBOLS[base]
+        out['market'] = 'CRYPTO'
+        out['sector'] = '암호화폐'
+        return out
+
+    if is_kr(t):
+        out['market'] = 'KR'
+        code = t[1:] if re.match(r'^A\d[0-9A-Z]{5}$', t) else t
+        for r in (_search_kr(code) or []):
+            if str(r.get('symbol')) == code:
+                out['name'] = r.get('shortname') or ''
+                break
+        if not out['name']:
+            hits = _search_kr(code) or []
+            if hits:
+                out['name'] = hits[0].get('shortname') or ''
+    else:
+        out['market'] = 'US'
+        for r in (_yf_search(t) or []):
+            if str(r.get('symbol', '')).upper() == t:
+                out['name'] = r.get('shortname') or ''
+                break
+
+    # 섹터는 '이미 있는 것'만 쓴다 — 없으면 비워 둔다(추측하지 않는다)
+    try:
+        data, _ts = _get_stock_cache_by_ticker(t)
+        if data and isinstance(data.get('sector'), str):
+            out['sector'] = data['sector'].strip()
+    except Exception:
+        pass
+    if not out['sector']:
+        try:
+            full = _stock_full(t) or {}
+            if isinstance(full.get('sector'), str):
+                out['sector'] = full['sector'].strip()
+        except Exception:
+            pass
+    return out
+
+
+@app.get("/api/ticker/resolve")
+def ticker_resolve(ticker: str, cu: dict = Depends(require_approved)):
+    d = _resolve_ticker(ticker)
+    if not d.get('ticker'):
+        raise HTTPException(400, "티커를 입력하세요.")
+    return d

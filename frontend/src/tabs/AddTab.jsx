@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPortfolio, savePortfolio, getUsdKrw } from '../api'
+import { getPortfolio, savePortfolio, getUsdKrw, resolveTicker } from '../api'
 import { useAccounts } from '../utils/accounts'
 import * as XLSX from 'xlsx'
 
@@ -16,6 +16,43 @@ const TEMPLATE_SAMPLE = [
   ['Apple Inc.', 'AAPL', 180.50, 10, '미국', 'Technology'],
   ['삼성전자', '005930', 71000, 50, '개별', 'IT·반도체'],
 ]
+
+/* ── 숫자 입력칸 — 보이는 값에는 콤마, 저장되는 값은 순수 숫자 ──────────
+   지인 피드백 2: "평균단가 금액에 콤마를 추가해 주십쇼".
+   `type="number"` 로는 콤마를 넣을 수 없다(브라우저가 값을 거부한다).
+   그래서 텍스트 입력으로 바꾸고 표시만 포맷한다.
+
+   ⚠ 편집 중에는 포맷하지 않는다. 타이핑 도중 콤마가 끼어들면 커서가 튀어
+     '1,00,0' 같은 값이 만들어진다. 포커스가 빠질 때만 정돈한다.
+   ⚠ 소수점 입력(0.5주, $12.34)을 막지 않는다 — 암호화폐·해외주식에 필요하다. */
+function fmtWithComma(v) {
+  const n = Number(v)
+  if (v === '' || v === null || v === undefined || !isFinite(n)) return String(v ?? '')
+  const [i, d] = String(v).split('.')
+  const head = Number(i || 0).toLocaleString()
+  return d !== undefined ? `${head}.${d}` : head
+}
+
+function NumCell({ value, onChange, placeholder }) {
+  const [editing, setEditing] = React.useState(false)
+  const [draft, setDraft] = React.useState('')
+  const shown = editing ? draft : fmtWithComma(value)
+  return (
+    <input
+      type="text" inputMode="decimal" placeholder={placeholder}
+      value={shown}
+      style={{ minWidth: 0, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
+      onFocus={() => { setDraft(value === '' || value == null ? '' : String(value)); setEditing(true) }}
+      onChange={e => {
+        // 숫자·소수점·마이너스만 통과시킨다. 콤마는 여기서 걷어낸다.
+        const raw = e.target.value.replace(/[^\d.\-]/g, '')
+        setDraft(raw)
+        onChange(raw)
+      }}
+      onBlur={() => setEditing(false)}
+    />
+  )
+}
 
 function rowsFromPortfolio(pf) {
   const out = []
@@ -49,6 +86,8 @@ export default function AddTab() {
   const [dirty, setDirty] = useState(false)
   // 원화 평단 환산기 — 열려 있는 행 하나만. { _k, krw, rate }
   const [fxEdit, setFxEdit] = useState(null)
+  // 티커 조회 중인 행 { [_k]: true } — 행마다 따로 표시해야 어디가 도는지 보인다
+  const [resolving, setResolving] = useState({})
   const loadedRef = useRef(false)
   const fileRef = useRef(null)
 
@@ -74,12 +113,46 @@ export default function AddTab() {
     setDirty(true); setMsg(null)
   }
   function addRow() {
+    const k = ++_uid
     setRows(rs => [...rs, {
-      _k: ++_uid, account: accounts[0]?.key || ACCOUNTS[0] || '',
+      _k: k, account: accounts[0]?.key || ACCOUNTS[0] || '',
       ticker: '', name: '', quantity: '', avg_price: '', sector: '',
       krw_avg_price: 0, krw_fx: 0,
     }])
     setDirty(true); setMsg(null)
+    /* 추가한 행이 화면 밖이면 아무 일도 안 일어난 것처럼 보인다(지인 피드백 7).
+       렌더가 끝난 뒤 새 행으로 스크롤하고 티커 칸에 커서를 둔다 —
+       바로 타이핑을 시작할 수 있어야 '추가'가 완결된다. */
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-rowkey="${k}"] input`)
+      if (!el) return
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.focus({ preventScroll: true })
+    })
+  }
+
+  /* ── 티커 → 종목명·섹터 자동 조회 (피드백 1·9) ──────────────────────
+     사람이 이미 아는 것을 컴퓨터가 다시 묻는 건 폼의 실패다.
+     ⚠ 사용자가 직접 적은 값은 덮어쓰지 않는다 — 비어 있을 때만 채운다.
+        자동화가 사람이 쓴 것을 지우기 시작하면 신뢰를 잃는다. */
+  async function resolveRow(k, rawTicker) {
+    const t = String(rawTicker || '').trim()
+    if (!t) return
+    setResolving(v => ({ ...v, [k]: true }))
+    try {
+      const d = await resolveTicker(t)
+      setRows(rs => rs.map(r => {
+        if (r._k !== k) return r
+        const next = { ...r }
+        if (!String(r.name).trim() && d.name) next.name = d.name
+        if (!String(r.sector).trim() && d.sector) next.sector = d.sector
+        // 'BTC' → 'BTC-USD' 처럼 정규화된 티커가 오면 그걸로 맞춘다
+        if (d.ticker && d.ticker !== r.ticker.trim().toUpperCase()) next.ticker = d.ticker
+        return next
+      }))
+      setDirty(true)
+    } catch { /* 조회 실패는 조용히 넘긴다 — 손으로 적으면 그만이다 */ }
+    finally { setResolving(v => ({ ...v, [k]: false })) }
   }
   /* ── 원화 평단 → 달러 평단 환산 ──────────────────────────────
      왜 필요한가: 업비트는 원화로 매수하는데 앱은 BTC-USD(달러 표시)로 시세를 받는다.
@@ -283,33 +356,37 @@ export default function AddTab() {
                   아래 <strong>＋ 행 추가</strong> 또는 엑셀 업로드로 종목을 등록하세요.
                 </td>
               </tr>
-            ) : rows.map(r => (
-              <tr key={r._k}>
+            ) : rows.map((r, ri) => (
+              /* ⚠ placeholder 는 첫 행에만. 두 번째 행부터도 '삼성전자·10·150' 이 흐리게
+                 남아 있으면 이미 입력한 값인지 예시인지 헷갈린다(지인 피드백 3). */
+              <tr key={r._k} data-rowkey={r._k}>
                 <td>
                   <select value={r.account} onChange={e => setCell(r._k, 'account', e.target.value)}>
                     {ACCOUNTS.map(k => <option key={k} value={k}>{ACC_LABELS[k]}</option>)}
                   </select>
                 </td>
                 <td>
-                  {/* 암호화폐도 받는다 — 'BTC' 를 넣으면 저장 시 'BTC-USD' 로 정규화된다.
-                      placeholder 에 세 형태를 같이 보여줘야 "코인은 안 되나?" 를 없앤다. */}
-                  <input value={r.ticker} placeholder="AAPL · 005930 · BTC"
+                  {/* 암호화폐도 받는다 — 'BTC' 를 넣으면 저장 시 'BTC-USD' 로 정규화된다. */}
+                  <input value={r.ticker} placeholder={ri === 0 ? 'AAPL · 005930 · BTC' : ''}
                     title="미국 티커(AAPL) · 한국 6자리 코드(005930) · 암호화폐 심볼(BTC·ETH)"
-                    onChange={e => setCell(r._k, 'ticker', e.target.value)} />
+                    onChange={e => setCell(r._k, 'ticker', e.target.value)}
+                    onBlur={e => resolveRow(r._k, e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
                 </td>
                 <td>
-                  <input value={r.name} placeholder={KR_RE.test(String(r.ticker).trim()) ? '삼성전자' : '애플'}
-                    onChange={e => setCell(r._k, 'name', e.target.value)} />
+                  <div style={{ position: 'relative' }}>
+                    <input value={r.name} placeholder={resolving[r._k] ? '조회 중…' : (ri === 0 ? '자동으로 채워집니다' : '')}
+                      onChange={e => setCell(r._k, 'name', e.target.value)} />
+                  </div>
                 </td>
                 <td className="num">
-                  <input value={r.quantity} type="number" step="any" inputMode="decimal" placeholder="10"
-                    onChange={e => setCell(r._k, 'quantity', e.target.value)} />
+                  <NumCell value={r.quantity} placeholder={ri === 0 ? '10' : ''}
+                    onChange={v => setCell(r._k, 'quantity', v)} />
                 </td>
                 <td className="num">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                    <input value={r.avg_price} type="number" step="any" inputMode="decimal" placeholder="150"
-                      style={{ minWidth: 0 }}
-                      onChange={e => setCell(r._k, 'avg_price', e.target.value)} />
+                    <NumCell value={r.avg_price} placeholder={ri === 0 ? '150' : ''}
+                      onChange={v => setCell(r._k, 'avg_price', v)} />
                     {/* 달러 표시 종목(암호화폐·해외주식)만 — 한국 종목은 이미 원화라 필요 없다 */}
                     {!KR_RE.test(String(r.ticker).trim().toUpperCase()) && String(r.ticker).trim() && (
                       <button type="button" onClick={() => openFx(r)}
@@ -327,7 +404,10 @@ export default function AddTab() {
                   </div>
                 </td>
                 <td>
-                  <input value={r.sector} placeholder="AI·빅테크"
+                  {/* 섹터는 티커를 넣으면 자동으로 채워진다. 지우고 직접 적어도 된다.
+                      "섹터는 필요 없다"는 피드백의 진짜 뜻은 '타이핑하기 싫다' 였다 —
+                      데이터는 분석 탭의 섹터 비중·집중도 진단이 쓰므로 유지한다. */}
+                  <input value={r.sector} placeholder={ri === 0 ? '자동으로 채워집니다' : ''}
                     onChange={e => setCell(r._k, 'sector', e.target.value)} />
                 </td>
                 <td className="del">

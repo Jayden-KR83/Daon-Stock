@@ -1052,3 +1052,22 @@ button.chat-send:not(.btn-primary) {
   color: var(--clr-text-strong); cursor: pointer; font-family: inherit;
   min-height: var(--tap-seg);
 }
+
+/* 가림 빠른 전환 — 상단 컨트롤 줄. 모드는 전역인데 스위치가 포트폴리오 화면
+   안에만 있어 분석 탭에서 끌 수 없던 문제(2026-09-09 지인 피드백 8). */
+.app-privacy-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: var(--tap-h);
+  padding: 3px 9px;
+  background: var(--clr-bg);
+  border: 1px solid var(--clr-border-md);
+  border-radius: var(--r-md);
+  color: var(--clr-text-sub);
+  font-size: 11px; font-weight: 700; font-family: inherit;
+  white-space: nowrap; cursor: pointer;
+}
+.app-privacy-btn[aria-pressed="true"] {
+  background: var(--clr-warn-bg);
+  border-color: var(--clr-warn-border);
+  color: var(--clr-text-strong);
+}

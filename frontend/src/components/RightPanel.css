@@ -12,9 +12,15 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  position: sticky;
-  top: var(--nav-h);
-  height: calc(100vh - var(--nav-h));
+  /* ⚠ 높이를 상수로 계산하지 않는다.
+     예전에는 `height: calc(100vh - var(--nav-h))` 였는데, 패널 위에는 상단바만
+     있는 게 아니라 마켓바도 있다. 실측(1440×900)에서 패널이 화면 아래로 57px
+     삐져나가 바닥의 Market Status 가 통째로 잘렸고, 콘텐츠가 짧아 스크롤할 것도
+     없으니 영영 볼 수 없었다.
+     → 부모 플렉스가 실제 남은 높이를 주게 하고(stretch), 내부에서만 스크롤한다.
+       min-height:0 이 없으면 플렉스 아이템이 콘텐츠 높이로 부풀어 다시 삐져나간다. */
+  align-self: stretch;
+  min-height: 0;
 }
 .right-panel::-webkit-scrollbar { display: none; }
 
@@ -142,7 +148,7 @@
   background: var(--clr-dark);
   border-radius: var(--r-md);
   padding: 16px;
-  margin-top: auto;
+  flex-shrink: 0;   /* 위로 올렸으니 밀려서 찌그러지지 않게 */
 }
 .rp-status-header {
   display: flex;

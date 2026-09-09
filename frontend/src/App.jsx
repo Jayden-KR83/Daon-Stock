@@ -337,6 +337,7 @@ export default function App() {
   return (
     <div className="app-root app-mode-app">
       <div className="app-top-controls">
+        <PrivacyQuickToggle />
         <ChatTopButton />
         <NotificationsBell />
         <ThemeQuickToggle />
@@ -363,6 +364,39 @@ export default function App() {
       <Tour />
       <ChatPanel />
     </div>
+  )
+}
+
+/* 가림(privacy) 빠른 전환 — 어느 탭에서든.
+   지인 피드백 8: "포트폴리오에서 금액을 가렸더니 분석에서도 가려져 있는데,
+   분석에도 가림 해제하는 버튼이 필요합니다."
+   맞다. 가림은 앱 전체에 걸리는 모드인데 끄는 스위치는 포트폴리오 히어로 카드
+   안에만 있었다. **모드는 전역인데 스위치가 한 화면에만 있으면 갇힌다.**
+   → 탭과 무관한 상단 컨트롤 줄로 올린다. 분석·종목·설정 어디서든 끌 수 있다. */
+function PrivacyQuickToggle() {
+  const privacyMode   = useStore(s => s.privacyMode)
+  const togglePrivacy = useStore(s => s.togglePrivacy)
+  return (
+    <button className="app-privacy-btn" onClick={togglePrivacy}
+      aria-pressed={privacyMode}
+      title={privacyMode ? '금액 보이기' : '금액 가리기'}
+      aria-label={privacyMode ? '금액 보이기' : '금액 가리기'}>
+      {privacyMode ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      )}
+      {privacyMode ? '가림' : '표시'}
+    </button>
   )
 }
 

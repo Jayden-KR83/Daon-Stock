@@ -85,3 +85,18 @@
   border: 2px solid var(--clr-pos-bg);
   font-family: var(--font-sans);
 }
+
+/* 사용자 이름 — 아바타 옆에 그대로. 원 안의 약자만으로는 확인이 안 된다.
+   '김은숙'을 '김은'으로 자르던 문제(2026-09-09 지인 피드백)와 함께 고친 것. */
+.top-nav-user {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-width: 0; flex-shrink: 0;
+}
+.top-nav-username {
+  font-size: 12px; font-weight: 700;
+  color: var(--clr-text-strong);
+  white-space: nowrap;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+}
+/* 폭이 빠듯하면 이름만 접는다 — 아바타는 남겨 자리 감각을 유지한다 */
+@media (max-width: 1100px) { .top-nav-username { display: none; } }

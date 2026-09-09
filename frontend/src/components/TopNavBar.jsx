@@ -52,9 +52,11 @@ export default function TopNavBar() {
     else if (searchVal.trim()) gotoChart(searchVal)
   }
 
-  const initials = currentUser?.name
-    ? currentUser.name.slice(0, 2).toUpperCase()
-    : 'DA'
+  /* 아바타 약자 — 이름을 앞에서 두 글자 자르면 '김은숙'이 '김은'이 된다.
+     그건 줄임말이 아니라 **다른 이름**으로 읽힌다(지인 피드백 5).
+     한글·한자 이름은 통째로 쓰되(보통 2~3자) 길면 성 한 글자만,
+     라틴 이름은 관례대로 단어 첫 글자들(John Smith → JS)을 쓴다. */
+  const initials = avatarInitials(currentUser?.name)
 
   return (
     <header className="top-nav">
@@ -110,8 +112,15 @@ export default function TopNavBar() {
           </svg>
         </button>
 
-        <div className="top-nav-avatar" title={currentUser?.name || ''}>
-          {initials}
+        {/* 이름은 아바타 옆에 그대로 적는다. 원의 약자만으로는 누구인지 확인이 안 된다.
+            폭이 좁아지면 CSS 로 이름만 숨고 아바타는 남는다. */}
+        <div className="top-nav-user" title={currentUser?.name || ''}>
+          <div className="top-nav-avatar" style={initials.length > 2 ? { fontSize: 10 } : undefined}>
+            {initials}
+          </div>
+          {currentUser?.name && (
+            <span className="top-nav-username">{currentUser.name}</span>
+          )}
         </div>
       </div>
     </header>
@@ -145,6 +154,21 @@ function RecentSearches({ onPick, dropRef }) {
       ))}
     </div>
   )
+}
+
+/* 이름 → 아바타 약자.
+   ⚠ 앞 두 글자 자르기는 금지 — '김은숙' → '김은' 처럼 다른 이름이 된다. */
+export function avatarInitials(name) {
+  const n = String(name || '').trim()
+  if (!n) return 'DA'
+  const cjk = /[ㄱ-힝一-鿿぀-ヿ]/.test(n)
+  if (cjk) {
+    const clean = n.replace(/\s+/g, '')
+    return clean.length <= 3 ? clean : clean.slice(0, 1)
+  }
+  const words = n.split(/\s+/).filter(Boolean)
+  if (words.length >= 2) return (words[0][0] + words[words.length - 1][0]).toUpperCase()
+  return words[0].slice(0, 2).toUpperCase()
 }
 
 /* 웹 모드 상단 테마 빠른 전환 버튼 */

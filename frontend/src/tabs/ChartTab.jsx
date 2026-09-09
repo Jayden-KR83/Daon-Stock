@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import BulletList, { splitToSentences } from '../components/BulletList'
 import { ReportBullets, ReportSectionHead, ReportMeta, ReportFootnote } from '../components/report'
 import { sessionChange } from '../utils/effPrice'
+import { usePrivacy } from '../utils/privacy'
 import WatchStar from '../components/WatchStar'
 import { normalizeReco, recoColor as recoColorOf, RECO_HELP } from '../utils/reco'
 import InfoTip from '../components/InfoTip'
@@ -139,7 +140,8 @@ function aggregateOHLC(daily, level) {
 }
 
 /* ── 순수 SVG 캔들스틱 차트 (드래그 줌 지원) ── */
-function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoom, onResetZoom }) {
+function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoom, onResetZoom,
+                            avgPrice = null }) {
   const containerRef = useRef(null)
   const svgRef       = useRef(null)
   const [width, setWidth] = useState(0)
@@ -170,8 +172,12 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
   ].filter(v => v != null && v > 0))
   if (!allPrices.length) return <div ref={containerRef} style={{ height }} />
 
-  const minY = Math.min(...allPrices) * 0.997
-  const maxY = Math.max(...allPrices) * 1.003
+  /* 평단가를 y 범위에 포함시킨다. 안 넣으면 평단이 차트 밖일 때 기준선이
+     잘려 보이지 않는다 — "내 평단이 어디쯤인가"가 이 선의 존재 이유다. */
+  const hasAvg = typeof avgPrice === 'number' && isFinite(avgPrice) && avgPrice > 0
+  const spanPrices = hasAvg ? [...allPrices, avgPrice] : allPrices
+  const minY = Math.min(...spanPrices) * 0.997
+  const maxY = Math.max(...spanPrices) * 1.003
   const yRange = maxY - minY || 1
 
   const n = data.length
@@ -279,6 +285,20 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
           <line key={i} x1={PAD.left} y1={yOf(t)} x2={PAD.left + W} y2={yOf(t)}
             stroke="var(--clr-border)" strokeWidth={1} />
         ))}
+
+        {/* 내 평단가 기준선 — 보유 종목일 때만.
+            캔들이 이 선 위에 있으면 이익, 아래면 손실. 숫자를 읽지 않아도 보인다. */}
+        {hasAvg && (
+          <g>
+            <line x1={PAD.left} y1={yOf(avgPrice)} x2={PAD.left + W} y2={yOf(avgPrice)}
+              stroke="var(--clr-text-strong)" strokeWidth={1.2}
+              strokeDasharray="5 3" opacity="0.7" />
+            <text x={PAD.left + W + 4} y={yOf(avgPrice) + 3}
+              fontSize={9.5} fontWeight={800} fill="var(--clr-text-strong)">
+              평단
+            </text>
+          </g>
+        )}
 
         {/* Candles */}
         {data.map((d, i) => {
@@ -614,6 +634,19 @@ export default function ChartTab() {
 
   /* 정규장 밖이면 큰 숫자도 확장시간 체결가로 바꾼다. 어제 값을 오늘처럼
      띄우지 않기 위해서다 — 대신 아래 SessionLine 에 기준을 명시한다. */
+  /* 내가 보유한 종목이면 평단·수량을 찾아 둔다(피드백 10).
+     같은 티커가 여러 계좌에 있으면 수량 가중평균이 진짜 내 평단이다 —
+     계좌별로 나눠 보여주면 "그래서 나는 얼마에 샀나"에 답이 안 된다. */
+  const myPos = React.useMemo(() => {
+    const mine = allHoldings.filter(h => h.ticker === activeTicker && h.quantity > 0)
+    if (!mine.length) return null
+    const qty  = mine.reduce((s2, h) => s2 + Number(h.quantity || 0), 0)
+    const cost = mine.reduce((s2, h) => s2 + Number(h.quantity || 0) * Number(h.avg_price || 0), 0)
+    if (!(qty > 0) || !(cost > 0)) return null
+    return { qty, avg: cost / qty, cost, accounts: mine.length }
+  }, [allHoldings, activeTicker])
+  const myAvgPrice = myPos?.avg ?? null
+
   const _sc    = sessionChange(stockData)
   const cur    = stockData?.ext?.price ?? stockData?.current_price
   const chgPct = _sc.pct
@@ -791,11 +824,18 @@ export default function ChartTab() {
             </div>
           )}
 
+          {/* 내 포지션 요약 — 평단 대비 지금 얼마인가(피드백 10).
+              차트의 점선(평단)과 같은 이야기를 숫자로 한 번 더 못 박는다.
+              ⚠ 금액은 가림 모드를 통과시킨다 — 여기만 뚫리면 발표 중에 노출된다. */}
+          {myPos && cur > 0 && (
+            <MyPositionCard pos={myPos} cur={cur} fmtCur={fmtCur} isUs={isUs} />
+          )}
+
           {/* 캔들스틱 차트 (순수 SVG, 드래그 줌) */}
           {hist.length > 0 && (
             <div className="chart-card">
               <CandlestickChart data={hist} isUs={isUs} maVis={maVis}
-                range={rangeOpt} height={240}
+                range={rangeOpt} height={240} avgPrice={myAvgPrice}
                 onZoom={(i1, i2) => {
                   // 현재 표시 데이터 기준 인덱스 → scaledHist 절대 인덱스로 변환
                   const base = zoomRange ? zoomRange[0] : 0
@@ -2170,6 +2210,47 @@ function AppleStocksHero({
 
       {/* ETF 라면 '안에 뭐가 들어 있는지'가 첫 질문이다 */}
       <EtfHoldings data={stockData?.etf_holdings} />
+    </div>
+  )
+}
+
+/* 내 포지션 — 평단 대비 손익을 한 줄로.
+   "현재 주가가 몇 % 및 얼마나 수익이 났는지 직관적으로" 라는 요청에 대한 답이다.
+   퍼센트만 있으면 체감이 안 되고 금액만 있으면 규모 감각이 없다 — 둘 다 준다. */
+function MyPositionCard({ pos, cur, fmtCur, isUs }) {
+  const priv = usePrivacy()
+  const pnl    = (cur - pos.avg) * pos.qty
+  const pnlPct = pos.avg > 0 ? (cur / pos.avg - 1) * 100 : 0
+  const up     = pnl >= 0
+  const color  = up ? 'var(--clr-pos-dark)' : 'var(--clr-neg-dark)'
+  const money  = (v) => priv.on ? (isUs ? '$•••••' : '₩•••••••') : fmtCur(v)
+  return (
+    <div className="mono-card" style={{ marginBottom: 12 }}>
+      <div className="mono-section-header">
+        <span className="mono-section-title">내 포지션</span>
+        <span style={{ fontSize: 11, color: 'var(--m-text-tertiary)' }}>
+          {priv.on ? '•••' : pos.qty.toLocaleString()}주
+          {pos.accounts > 1 && ` · ${pos.accounts}개 계좌 합산`}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 22, fontWeight: 900, color, letterSpacing: '-.02em',
+          fontVariantNumeric: 'tabular-nums' }}>
+          {up ? '+' : ''}{pnlPct.toFixed(2)}%
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 800, color,
+          fontVariantNumeric: 'tabular-nums' }}>
+          {up ? '+' : '-'}{money(Math.abs(pnl))}
+        </div>
+        <div style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--m-text-secondary)',
+          fontVariantNumeric: 'tabular-nums' }}>
+          평단 {money(pos.avg)} → 현재 {money(cur)}
+        </div>
+      </div>
+      <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
+        marginTop: 6 }}>
+        차트의 점선이 평단입니다. 캔들이 선 위면 이익, 아래면 손실입니다.
+      </div>
     </div>
   )
 }

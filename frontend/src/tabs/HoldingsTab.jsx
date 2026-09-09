@@ -289,6 +289,18 @@ export default function HoldingsTab() {
               onClick={() => setCurrencyMode(v)} style={{ minWidth: 44 }}>{v === 'KRW' ? '₩원화' : '$달러'}</button>
           ))}
         </div>
+        {/* 종목 추가 — 등록 탭으로 바로 (지인 피드백 6).
+            "추가하려면 다른 탭으로 가라"는 안내만 있고 길이 없으면 그건 길이 아니다.
+            보유가 0개일 때만 있던 버튼을, 목록이 있을 때도 항상 둔다. */}
+        <button onClick={() => setActiveTab(5)}
+          title="등록 탭에서 종목 추가"
+          style={{ flex: 'none', marginLeft: 'auto', minHeight: 'var(--tap-seg)',
+            padding: '5px 11px', borderRadius: 4, cursor: 'pointer',
+            background: 'transparent', border: '1px dashed var(--clr-border-strong)',
+            color: 'var(--clr-text-sub)', fontSize: 12, fontWeight: 700,
+            fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+          ＋ 종목 추가
+        </button>
       </div>
 
       {/* Holdings list */}
