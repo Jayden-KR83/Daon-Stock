@@ -1,0 +1,62 @@
+# 다온 레이더 — 주간 자가발전 기록
+
+주 1회, 바깥에서 배운 것과 안에서 점검한 것을 남긴다.
+실행 방법은 `.claude/skills/daon-radar/SKILL.md`.
+
+이 문서의 가치는 **적힌 것보다 거른 것**에 있다. 채택은 주당 3건이 상한이고,
+기각도 이유와 함께 남긴다 — 그러지 않으면 반년 뒤 같은 것을 또 조사한다.
+
+---
+
+## 2026-09-09 (1주차)
+
+**안쪽 점검**
+
+| 검사 | 결과 |
+|---|---|
+| `ux-firstuse.mjs --selftest` | 심각 0 · 주의 0 · 자기검사 3/3 ✅ |
+| `privacy-scan.mjs` | 전 9탭 ✅ (수정 후) |
+| `answer-split-check.mjs` | ✅ |
+
+1주차에 **검사기 자체에서 3건**이 나왔다. 앱보다 검사기가 더 망가져 있었다.
+
+- **`privacy-scan.mjs` 가 리포에서 실행 불가능했다.** `playwright-core` 를 import 하는데
+  `scripts/package.json` 에는 `puppeteer-core` 만 있었다. 그동안은 스크래치패드에서만
+  돌았다는 뜻이다 — 아무도 모르는 디렉터리에서만 도는 가드는 가드가 아니다.
+  → 의존성 추가 + `npm run guard:all` 로 고정.
+- **`privacy-scan.mjs` 가 공개 기업 실적을 개인 자산으로 오인했다.**
+  "기아 매출 33조370억원"에서 `370억` 을 떼어내 🔴 를 띄웠다. 왼쪽 경계
+  `(?<![\d,.조억만])` 를 넣어 더 큰 숫자의 안쪽을 잘라 잡지 않게 했다.
+  그물은 그대로다 — "1억2,000만원" 이면 `1억` 쪽이 여전히 걸린다.
+- **`ux-firstuse.mjs` 의 화면 밖 규칙이 죽어 있었다.** 자기검사로 드러났고 원인이 두 겹이었다.
+  판정이 "문서가 긴가"였는데 셸이 `overflow:hidden` 이라 길어도 스크롤이 안 먹었고,
+  재현 CSS 자체가 결함을 못 만들고 있었다(배너를 맨 위로 올린 것이 고침이었으므로
+  `order` 로 되돌려야 결함이 살아난다). 잘라내는 조상을 찾는 방식으로 바꿔 해결.
+
+**교훈** — 검사기는 조용히 초록불을 켜면서 썩는다. 자기검사가 없으면 알 방법이 없다.
+
+**채택 (3건)**
+
+- **ETF 관통 노출(look-through) 집중도** — [Sharesight 2025~26 기능 추가](https://www.mycapitally.com/blog/best-portfolio-tracker-for-the-modern-diy-investor)
+  - 바뀌는 곳: 분석 탭 집중도 진단 · `_etf_top_holdings`
+  - 비용: 미국 ETF 0원(yfinance funds_data) / 한국 ETF 는 [KRX OPEN API](https://openapi.krx.co.kr/) 키 필요(무료, 오너 발급)
+  - 로드맵: `ETF 관통 노출(look-through) 집중도` (검토 예정)
+  - 왜: SPY 를 들고 애플을 따로 사면 실제 애플 노출이 화면보다 크다. 지금 다온은 ETF 를 한 종목으로 센다.
+
+- **복권형 편향 진단** — [자본시장연구원, 국내 개인투자자의 행태적 편의와 거래행태](https://www.kcmi.re.kr/report/report_view?report_no=1481)
+  - 바뀌는 곳: 분석 탭 진단 항목
+  - 비용: 0원 — 이미 있는 가격·변동성 데이터
+  - 로드맵: `복권형 편향 진단` (검토 예정)
+  - 왜: 국내 개인은 복권형 주식 비중이 높고 선호가 강할수록 성과가 저조하다는 실증이 있다. 다만 **비중만 보여주고 판정은 하지 않는다** — 잔소리가 되는 순간 안 쓰인다.
+
+- **드로다운 이력 카드** — [Dalbar QAIB 2026](https://www.ifa.com/articles/understanding-investor-behavior-portfolio-performance)
+  - 바뀌는 곳: 분석 탭 카드 1개
+  - 비용: 0원
+  - 로드맵: `드로다운 이력 카드` (검토 예정)
+  - 왜: 수익률을 갉아먹는 것은 종목 선택보다 하락장 이탈이다. 지난 조정에서 내가 실제로 얼마나 견뎠는지 아는 것이 다음 조정에서 버티게 한다. **보유 기간만 쓴다** — 보유 전 하락을 섞으면 거짓말이 된다.
+
+**기각 / 보류**
+
+- **Behavioral Performance Attribution 프레임워크** — [Springer, 2025](https://link.springer.com/article/10.1007/s11408-025-00485-6). Action Bias·Concentration Bias 로 수익률을 분해한다. 흥미롭지만 다온 사용자 대부분의 거래 이력이 분해를 지탱할 만큼 길지 않다. **다시 볼 조건: 거래 이력 1년 이상인 계정이 생겼을 때.**
+- **배당락일·실적발표일 푸시 알림** — [Snowball Analytics](https://stockunlock.com/snowball-analytics-alternatives.html) 가 제공. 기존 ±5% 급등락 푸시 인프라를 그대로 재사용할 수 있어 싸다. 채택 상한 3건에 걸려 미룬 것이지 나쁜 아이디어라서가 아니다. **다음 주 1순위 후보.**
+- **통합 자산관리(예적금·보험·IRP 연동)** — [재경일보 2026 재테크 앱 순위](https://news.jkn.co.kr/post/906983) 상위 앱들의 공통 기능. 다온의 범위를 넘고 마이데이터 인증이 필요하다. **다시 볼 조건: 없음(범위 밖).**

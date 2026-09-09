@@ -4,7 +4,10 @@
   "description": "",
   "main": "regression-test.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "guard:privacy": "node privacy-scan.mjs https://daonwealth.com",
+    "guard:answer": "node answer-split-check.mjs",
+    "guard:firstuse": "node ux-firstuse.mjs https://daonwealth.com --selftest",
+    "guard:all": "npm run guard:answer && npm run guard:privacy && npm run guard:firstuse"
   },
   "keywords": [],
   "author": "",
@@ -12,5 +15,8 @@
   "type": "commonjs",
   "dependencies": {
     "puppeteer-core": "^25.0.4"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
   }
 }

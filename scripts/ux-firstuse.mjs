@@ -17,8 +17,8 @@
      판정하는 것은 **"물리적으로 볼 수 없는가 / 닿을 수 없는가 / 오해를 부르는가"** 뿐이다.
 
    실행:
-     node scripts/ux-audit.mjs                     # http://localhost:3000
-     node scripts/ux-audit.mjs https://daonwealth.com
+     node scripts/ux-firstuse.mjs                     # http://localhost:3000
+     node scripts/ux-firstuse.mjs https://daonwealth.com
    필요: playwright-core (시스템 Edge/Chrome 사용, 브라우저 다운로드 없음)
    ══════════════════════════════════════════════════════════════════════ */
 import { chromium } from 'playwright-core'
