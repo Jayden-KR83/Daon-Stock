@@ -1,40 +1,21 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useInstall } from '../utils/installPrompt'
 
 /**
  * PWA 설치 안내 — A안 무채색 + 직사각형, 다크/그라데이션 제거.
  * 한 번 닫으면 sessionStorage 기록되어 같은 세션에서는 다시 안 뜸.
  */
 export default function InstallPrompt() {
-  const [deferred, setDeferred] = useState(null)
-  const [hidden, setHidden]     = useState(
+  const { deferred, install: doInstall } = useInstall()
+  const [hidden, setHidden] = useState(
     sessionStorage.getItem('pwa-install-dismissed') === '1'
   )
-
-  useEffect(() => {
-    function onBeforeInstall(e) {
-      e.preventDefault()
-      setDeferred(e)
-    }
-    function onAppInstalled() {
-      setDeferred(null)
-      setHidden(true)
-    }
-    window.addEventListener('beforeinstallprompt', onBeforeInstall)
-    window.addEventListener('appinstalled', onAppInstalled)
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onBeforeInstall)
-      window.removeEventListener('appinstalled', onAppInstalled)
-    }
-  }, [])
 
   if (!deferred || hidden) return null
 
   async function install() {
-    deferred.prompt()
-    const { outcome } = await deferred.userChoice
-    if (outcome === 'accepted') {
-      setDeferred(null)
-    } else {
+    const ok = await doInstall()
+    if (!ok) {
       setHidden(true)
       sessionStorage.setItem('pwa-install-dismissed', '1')
     }

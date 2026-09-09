@@ -21,6 +21,24 @@
       <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" />
     </noscript>
+    <!-- PWA 설치 이벤트 선점 —————————————————————————————
+         beforeinstallprompt 는 페이지당 한 번만 발생하고, 브라우저는
+         그 전에 리스너가 붙어 있기를 기다려 주지 않는다. React 가 마운트된
+         뒤에 리스너를 달면 이미 지나간 뒤라 설치 버튼이 영영 안 뜬다
+         (2026-09-09 갤럭시 탭 설치 불가의 원인).
+         그래서 번들보다 먼저, 여기서 잡아 창에 보관한다. -->
+    <script>
+      window.__daonInstallEvent = null
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault()
+        window.__daonInstallEvent = e
+        window.dispatchEvent(new Event('daon:installable'))
+      })
+      window.addEventListener('appinstalled', function () {
+        window.__daonInstallEvent = null
+        window.dispatchEvent(new Event('daon:installed'))
+      })
+    </script>
     <title>다온 포트폴리오</title>
   </head>
   <body>

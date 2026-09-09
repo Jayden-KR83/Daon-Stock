@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { pushSupported, getPushState, enablePush, disablePush, pushDiagnostics } from '../pushClient'
 import { sendTestPush, getMovePrefs, saveMovePrefs } from '../api'
+import { useInstall, isStandalone as pwaStandalone } from '../utils/installPrompt'
 
 /* ══════════════════════════════════════════════════════════════
    휴대폰 알림 설정 — 설정 탭의 독립 카드
@@ -18,12 +19,9 @@ import { sendTestPush, getMovePrefs, saveMovePrefs } from '../api'
    ══════════════════════════════════════════════════════════════ */
 
 const isIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent || '')
-const isAndroid = () => /Android/.test(navigator.userAgent || '')
 /* iOS 는 홈 화면에 설치된 상태(standalone)에서만 푸시를 허용한다.
-   사파리 탭에서는 권한 요청 자체가 실패하거나 조용히 아무 일도 안 일어난다. */
-const isStandalone = () =>
-  window.matchMedia?.('(display-mode: standalone)')?.matches
-  || window.navigator.standalone === true
+   사파리 탭에서는 권한 요청 자체가 실패하거나 조용히 아무 일도 안 일어난다.
+   판정은 utils/installPrompt.js 하나로 모았다 — 두 벌이면 한쪽만 고쳐진다. */
 
 /* ── 휴대폰 '앱 목록' 에 다온이 안 보이는 이유 ──────────────────────────
    휴대폰 설정 → 알림 목록은 **설치된 앱** 만 보여준다. 브라우저 탭에서 열어
@@ -36,18 +34,8 @@ const isStandalone = () =>
      · 아이폰: 공유 → 홈 화면에 추가 (프로그램적으로 띄울 방법이 없다).
    ────────────────────────────────────────────────────────────────── */
 function InstallSection({ installed }) {
-  const [deferred, setDeferred] = useState(null)
-
-  useEffect(() => {
-    const onPrompt = (e) => { e.preventDefault(); setDeferred(e) }
-    const onInstalled = () => setDeferred(null)
-    window.addEventListener('beforeinstallprompt', onPrompt)
-    window.addEventListener('appinstalled', onInstalled)
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onPrompt)
-      window.removeEventListener('appinstalled', onInstalled)
-    }
-  }, [])
+  const { deferred, install, manualSteps } = useInstall()
+  const [tried, setTried] = useState(false)
 
   if (installed) {
     return (
@@ -70,22 +58,31 @@ function InstallSection({ installed }) {
         {'지금은 브라우저에서 열려 있어서, 휴대폰 설정의 앱 목록에 다온이 없습니다.\n'
          + '홈 화면에 설치하면 독립된 앱으로 등록되고 그때부터 알림도 옵니다.'}
       </div>
-      {deferred ? (
+
+      {deferred && (
         <button className="btn-primary" style={{ marginTop: 9, padding: '9px 18px',
           fontSize: 13, width: 'auto' }}
-          onClick={async () => { deferred.prompt(); await deferred.userChoice; setDeferred(null) }}>
+          onClick={async () => { await install(); setTried(true) }}>
           앱으로 설치
         </button>
-      ) : (
-        <div style={{ marginTop: 6, whiteSpace: 'pre-line',
-          color: 'var(--clr-text-sub)' }}>
-          {isIos()
-            ? '사파리 하단 공유 버튼 → "홈 화면에 추가" → 홈 화면의 다온 아이콘으로 다시 열기.'
-            : isAndroid()
-              ? '크롬 우상단 ⋮ → "앱 설치"(또는 "홈 화면에 추가") → 홈 화면의 다온 아이콘으로 다시 열기.'
-              : '브라우저 주소창 오른쪽의 설치 아이콘(⊕)을 누르면 앱으로 설치됩니다.'}
+      )}
+
+      {/* 버튼이 뜨든 안 뜨든 손으로 하는 길은 항상 적어둔다.
+          브라우저가 설치 이벤트를 안 주는 경우가 실제로 있고(삼성 인터넷·
+          일부 태블릿), 그때 버튼만 없으면 사용자는 "설치를 막아놨다"고 읽는다. */}
+      <div style={{ marginTop: deferred ? 8 : 6, whiteSpace: 'pre-line',
+        color: 'var(--clr-text-sub)' }}>
+        {deferred ? '버튼이 안 눌리면 ' : ''}{manualSteps}
+      </div>
+
+      {!deferred && (
+        <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--clr-text-sub)' }}>
+          이 브라우저는 설치 버튼을 제공하지 않아 위 메뉴로만 설치됩니다.
+          다온이 막은 것이 아닙니다.
         </div>
       )}
+      {tried && <div style={{ marginTop: 6, fontSize: 10.5,
+        color: 'var(--clr-text-sub)' }}>설치를 마쳤다면 홈 화면의 다온 아이콘으로 다시 열어 주세요.</div>}
     </div>
   )
 }
@@ -103,7 +100,7 @@ export default function PushSetupCard() {
 
   useEffect(() => { getPushState().then(setState).catch(() => setState('off')) }, [])
 
-  const installed  = isStandalone()
+  const installed  = pwaStandalone()
   const iosBlocked = isIos() && !installed
 
   const toggle = async () => {

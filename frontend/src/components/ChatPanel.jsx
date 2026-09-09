@@ -4,6 +4,7 @@ import { maskText } from '../utils/privacy'
 import { chatHistory, chatClear, chatSend } from '../api'
 import { ReportBullets } from './report'
 import { splitAnswer } from '../utils/answerText'
+import AnswerActions from './AnswerActions'
 
 /* ══════════════════════════════════════════════════════════════════════
    다온 채팅 — 보던 화면의 맥락 그대로 묻는다
@@ -150,7 +151,17 @@ export default function ChatPanel() {
         {msgs.map((m, i) => (
           <div key={i} className={`chat-msg ${m.role}`}>
             {m.role === 'assistant'
-              ? <ReportBullets items={splitAnswer(show(m.content))} small />
+              ? <>
+                  <ReportBullets items={splitAnswer(show(m.content))} small />
+                  {/* 답변 원문을 넘긴다 — 노트는 내 것이므로 가림을 적용하지 않는다.
+                      화면에 그리는 것만 show() 를 거친다. */}
+                  <AnswerActions
+                    scope={scope}
+                    question={msgs[i - 1]?.role === 'user' ? msgs[i - 1].content : ''}
+                    answer={m.content}
+                    masked={privacyMode}
+                  />
+                </>
               : <div className="ko-keep">{show(m.content)}</div>}
           </div>
         ))}

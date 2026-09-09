@@ -6282,6 +6282,17 @@ class NoteUpsertReq(BaseModel):
     stop_loss: float | None = None
     target:    float | None = None
 
+class NoteAppendReq(BaseModel):
+    text:     str
+    question: str = ''
+    source:   str = '다온에게 물어봄'
+
+# 노트 상한. 채팅 답변을 덧붙이면 2000자로는 두어 번이면 찬다.
+# 상한이 append 와 upsert 에서 다르면, 저장해 둔 답변이 나중에 노트를 손볼 때
+# 조용히 잘려 나간다 — 한 곳에서만 정한다.
+NOTE_MAX_CHARS   = 12000
+NOTE_APPEND_MAX  = 1800   # 한 번에 덧붙일 수 있는 길이
+
 @app.get("/api/notes/{ticker}")
 def get_note(ticker: str, cu: dict = Depends(require_approved)):
     """단일 종목의 메모 조회 — 없으면 빈 객체."""
@@ -6308,7 +6319,7 @@ def list_notes(cu: dict = Depends(require_approved)):
 def upsert_note(ticker: str, req: NoteUpsertReq, cu: dict = Depends(require_approved)):
     """메모/손절가/목표가 upsert. 모두 빈값이면 행 삭제."""
     tkr = ticker.upper()
-    note = (req.note or '').strip()[:2000]
+    note = (req.note or '').strip()[:NOTE_MAX_CHARS]
     if not note and req.stop_loss is None and req.target is None:
         # 전부 비어있으면 삭제
         with _db() as conn:
@@ -6322,6 +6333,51 @@ def upsert_note(ticker: str, req: NoteUpsertReq, cu: dict = Depends(require_appr
             (cu['user_id'], tkr, note, req.stop_loss, req.target, time())
         )
     return {'ok': True, 'ticker': tkr}
+
+@app.post("/api/notes/{ticker}/append")
+def append_note(ticker: str, req: NoteAppendReq, cu: dict = Depends(require_approved)):
+    """채팅 답변을 그 종목의 투자 노트에 날짜와 함께 덧붙인다.
+
+    물어본 그 자리에서 남길 수 있어야 남는다. 창을 닫고 노트 탭으로 건너가
+    붙여 넣어야 한다면 아무도 안 한다.
+
+    포트폴리오 전체 질문은 종목이 없으므로 '_PORTFOLIO' 한 칸에 모은다.
+    데모 계정은 저장하지 않는다 — 공용 계정이라 다음 방문자에게 보인다.
+    """
+    if _is_demo(cu):
+        raise HTTPException(403, "데모 계정에서는 노트를 저장하지 않습니다.")
+
+    text = (req.text or '').strip()
+    if not text:
+        raise HTTPException(400, "저장할 내용이 없습니다.")
+    if len(text) > NOTE_APPEND_MAX:
+        text = text[:NOTE_APPEND_MAX].rstrip() + ' …(이하 생략)'
+
+    tkr = ticker.upper()
+    from zoneinfo import ZoneInfo
+    stamp = datetime.fromtimestamp(time(), ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M')
+    head = f"[{stamp} · {(req.source or '').strip()[:40]}]"
+    q = (req.question or '').strip()[:200]
+    block = f"{head}\n" + (f"문: {q}\n" if q else '') + text
+
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT note, stop_loss, target FROM holding_notes WHERE user_id=? AND ticker=?",
+            (cu['user_id'], tkr)
+        ).fetchone()
+        prev = (row['note'] if row else '') or ''
+        merged = (prev.rstrip() + "\n\n" + block) if prev.strip() else block
+        # 넘치면 조용히 앞을 버리지 않는다 — 무엇이 사라졌는지 모르는 게 더 나쁘다.
+        if len(merged) > NOTE_MAX_CHARS:
+            raise HTTPException(
+                413, f"노트가 가득 찼습니다({len(prev)}자). 오래된 내용을 정리한 뒤 다시 저장해 주세요.")
+        conn.execute(
+            "INSERT OR REPLACE INTO holding_notes(user_id, ticker, note, stop_loss, target, updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (cu['user_id'], tkr, merged,
+             row['stop_loss'] if row else None, row['target'] if row else None, time())
+        )
+    return {'ok': True, 'ticker': tkr, 'length': len(merged)}
 
 # ─── 거래내역 (P0-4) ──────────────────────────────────────────────────
 class TransactionReq(BaseModel):

@@ -117,6 +117,7 @@ export const updateAccountCash = (key, cash) =>
 export const getNote     = (ticker) => api.get(`/notes/${ticker}`).then(r => r.data)
 export const listNotes   = ()       => api.get('/notes').then(r => r.data)
 export const upsertNote  = (ticker, body) => api.put(`/notes/${ticker}`, body).then(r => r.data)
+export const appendNote  = (ticker, body) => api.post(`/notes/${ticker}/append`, body).then(r => r.data)
 
 // 거래내역 (P0-4)
 export const listTransactions = (ticker = '', limit = 200) =>
