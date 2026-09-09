@@ -48,6 +48,23 @@
      (가림 모드에서 전 탭 금액 노출 0건 확인).
 5. **배포** — `docs/deployment.md`의 검증 체크리스트 모두 통과 후에만 "완료" 보고
 
+## 주 1회 자가발전 루프 (daon-radar)
+
+2026-09-09 신설. 지인 피드백 10건이 전부 "먼저 찾을 수 있었던 것"이었기에 만들었다.
+실행 지침은 [.claude/skills/daon-radar/SKILL.md](.claude/skills/daon-radar/SKILL.md),
+기록은 [docs/RADAR.md](docs/RADAR.md).
+
+```
+cd scripts && npm run guard:all     # 답변분해 · 개인정보 · 첫사용UX(자기검사 포함)
+```
+
+- `--selftest` 에 🔴 가 하나라도 뜨면 **그 주 다른 작업보다 먼저 고친다.**
+  규칙이 죽은 검사기는 초록불을 켜면서 결함을 통과시킨다.
+- 바깥 조사 채택은 **주당 3건 상한**. "다온의 어떤 화면/함수가 바뀌나"를
+  못 쓰면 기각하고, 기각도 이유와 다시 볼 조건을 남긴다.
+- 로드맵 반영(`PresentationTab.jsx` 의 `ROADMAP`)까지가 루프의 일이고,
+  **구현 착수는 오너의 별개 결정이다.**
+
 ## Plan Mode 권장 시나리오 (바이브 코딩 무기고)
 
 복잡한 변경(여러 파일 + 여러 endpoint + DB 스키마)은 **즉시 코드 변경 금지**. Plan Mode로:
