@@ -11,6 +11,7 @@ import TopNavBar from './components/TopNavBar'
 import SideNavBar from './components/SideNavBar'
 import RightPanel from './components/RightPanel'
 import InstallPrompt from './components/InstallPrompt'
+import FeedbackButton from './components/FeedbackButton'
 import NotificationsBell from './components/NotificationsBell'
 import ErrorBoundary from './components/ErrorBoundary'
 import HoldingsTab from './tabs/HoldingsTab'        // 첫 진입 즉시 필요 — eager
@@ -329,6 +330,7 @@ export default function App() {
         <Tour />
         <ChatPanel />
         <ChatFab />
+        <FeedbackButton />
       </div>
     )
   }
@@ -363,6 +365,7 @@ export default function App() {
       {chromeReady && !tourOpen && <ChangelogModal />}
       <Tour />
       <ChatPanel />
+      <FeedbackButton />
     </div>
   )
 }

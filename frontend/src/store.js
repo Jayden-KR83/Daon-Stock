@@ -11,7 +11,10 @@ const savedToken    = localStorage.getItem('authToken') || null
 // 프라이버시 모드 — 페이지 로드 시 항상 가림 (true). 본문 클릭 시에만 표시. 새로고침 시 다시 가려짐.
 const savedPrivacy  = true
 // 테마: 'light' | 'dark' | 'pro' — 기본 light
-const savedTheme    = localStorage.getItem('theme') || 'light'
+/* 처음 오는 사람에게는 OS 설정을 따른다.
+   밤에 열면 어둡게, 낮에 열면 밝게 — 고르라고 하기 전에 맞춰 준다.
+   이미 고른 사람의 선택은 그대로 유지된다(localStorage 가 우선). */
+const savedTheme    = localStorage.getItem('theme') || 'auto'
 
 /* 테마 정본 — 순환 순서·라벨·설명을 한 곳에 둔다.
    예전에는 순환 순서(코드)와 설정 탭 카드 목록(다른 파일)이 어긋나 있었다.

@@ -295,3 +295,8 @@ export function chatSend({ message, scope = 'general', useSearch = false,
   })()
   return () => ctrl.abort()
 }
+
+/* 인앱 피드백 — 화면·기기 정보는 서버가 아니라 프론트가 붙여 보낸다
+   (서버는 요청 헤더만으로는 어느 탭이었는지 알 수 없다). */
+export const sendFeedback  = (body) => api.post('/feedback', body).then(r => r.data)
+export const listFeedback  = ()     => api.get('/feedback').then(r => r.data)

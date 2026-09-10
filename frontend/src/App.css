@@ -1169,3 +1169,73 @@ button.chat-send:not(.btn-primary) {
   font-family: inherit; cursor: pointer;
 }
 .qa-alt:hover { color: var(--clr-text); border-color: var(--clr-text-sub); }
+
+/* ── 인앱 피드백 ────────────────────────────────────────────────
+   묻기(ChatFab) 아래에 둔다. 두 버튼이 겹치면 둘 다 안 눌린다. */
+.fb-fab {
+  position: fixed; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  z-index: 9990;
+  min-height: 34px; padding: 0 12px;
+  border-radius: 4px;
+  border: 1px solid var(--clr-border-md);
+  background: var(--clr-surface); color: var(--clr-text-sub);
+  font-size: 11.5px; font-weight: 800; font-family: inherit;
+  cursor: pointer; box-shadow: var(--shadow-sm);
+}
+.fb-fab:hover { color: var(--clr-text-strong); border-color: var(--clr-text-sub); }
+
+.fb-backdrop {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(15, 23, 42, .38);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.fb-modal {
+  width: 100%; max-width: 440px;
+  max-height: calc(100dvh - 32px); overflow-y: auto;
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border-md); border-radius: 4px;
+}
+.fb-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 16px; border-bottom: 1px solid var(--clr-border);
+}
+.fb-title { font-size: 14px; font-weight: 800; color: var(--clr-text-strong); }
+.fb-x {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--clr-text-muted); font-size: 14px;
+  min-width: var(--tap-h); min-height: var(--tap-h);
+}
+.fb-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.fb-kinds { display: flex; gap: 6px; }
+.fb-kind {
+  flex: 1; min-height: var(--tap-h); padding: 7px 10px;
+  border: 1px solid var(--clr-border-md); border-radius: 4px;
+  background: transparent; color: var(--clr-text-sub);
+  font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer;
+}
+.fb-kind.is-on {
+  background: var(--clr-pos-bg-soft); color: var(--clr-pos-dark);
+  border-color: var(--clr-pos-border-md);
+}
+.fb-text {
+  width: 100%; min-height: 120px; resize: vertical;
+  padding: 10px; border: 1px solid var(--clr-border-md); border-radius: 4px;
+  background: var(--clr-bg); color: var(--clr-text);
+  font-size: 12.5px; font-family: inherit; line-height: 1.7;
+}
+.fb-text:focus { outline: 2px solid var(--clr-info-dark); outline-offset: -1px; }
+.fb-note { font-size: 10.5px; color: var(--clr-text-muted); line-height: 1.6; }
+.fb-done {
+  font-size: 13px; font-weight: 800; color: var(--clr-pos-dark);
+  background: var(--clr-pos-bg-soft); border: 1px solid var(--clr-pos-border);
+  border-radius: 4px; padding: 12px;
+}
+.fb-err {
+  font-size: 11.5px; color: var(--clr-neg-dark);
+  background: var(--clr-neg-bg); border: 1px solid var(--clr-neg-border);
+  border-radius: 4px; padding: 7px 9px;
+}
+.fb-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.fb-count { font-size: 10.5px; color: var(--clr-text-muted); font-variant-numeric: tabular-nums; }

@@ -35,6 +35,30 @@ from pydantic import BaseModel
 
 # ─── App ──────────────────────────────────────────────────────────────
 app = FastAPI(title="다온 포트폴리오 API", version="2.0.0")
+
+# ── 동시 접속 한계 완화 ────────────────────────────────────────────────
+# 이 앱의 엔드포인트는 전부 동기(def)다 — 320개 중 async 는 0개. FastAPI 는
+# 동기 엔드포인트를 anyio 스레드풀에서 돌리는데, 기본 슬롯이 40 개다.
+# yfinance·네이버 같은 **블로킹 네트워크 호출이 슬롯을 붙잡고 있는 동안**
+# 41 번째 요청부터 줄을 선다. 100 명 동시 접속에서 먼저 무너지는 지점이 여기다.
+#
+# 왜 워커를 늘리지 않는가: 프로세스를 2 개로 쪼개면 _demo_ai_calls(데모 AI
+# 일일 상한 40)가 프로세스마다 따로 세어져 상한이 조용히 80 이 되고,
+# ttl_cache 적중률이 반으로 떨어져 외부 호출이 오히려 늘어난다.
+# 지금 병목은 CPU 가 아니라 대기다 — 대기하는 쪽을 넓히는 게 맞다.
+#
+# ⚠ 스레드는 공짜가 아니다. 128 은 RAM 956MB 기준으로 잡은 값이다.
+#   더 늘리려면 메모리를 먼저 키워야 한다(Ampere A1 이전 시 재조정).
+@app.on_event("startup")
+def _widen_threadpool():
+    try:
+        import anyio
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        limiter.total_tokens = 128
+        print(f"[startup] 스레드풀 슬롯 {limiter.total_tokens}")
+    except Exception as e:
+        print(f"[startup] 스레드풀 조정 실패(기본값 유지): {e}")
+
 # CORS: 운영 도메인으로 제한 (이전 "*" → 상용 공개 후 출처 제한).
 # 프론트는 daonwealth.com 동일 출처에서 서빙되므로 앱 동작엔 영향 없음.
 # 로컬 개발은 Vite 프록시(동일 출처)라 CORS 미적용.
@@ -139,6 +163,22 @@ def _init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_chat_user_scope
             ON chat_messages(user_id, scope, id);
+        /* 인앱 피드백 — 지인 10건을 카톡으로 받아 적던 것을 앱 안으로 들인다.
+           화면·기기·앱 버전을 자동으로 붙여, "어디서요?" 를 되묻지 않는다.
+           그 왕복 한 번이 대부분의 피드백을 사라지게 만든다. */
+        CREATE TABLE IF NOT EXISTS feedback (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     TEXT NOT NULL,
+            kind        TEXT NOT NULL DEFAULT 'etc',   -- bug | idea | etc
+            message     TEXT NOT NULL,
+            tab         TEXT NOT NULL DEFAULT '',
+            context     TEXT NOT NULL DEFAULT '',      -- JSON: UA·화면크기·레이아웃·버전
+            created_at  REAL NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'open',  -- open | done
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_feedback_created
+            ON feedback(created_at DESC);
         CREATE TABLE IF NOT EXISTS accounts (
             user_id     TEXT NOT NULL,
             key         TEXT NOT NULL,
@@ -1305,7 +1345,12 @@ def _get_user_from_token(token: str) -> Optional[dict]:
         "user_id":    row['user_id'],
         "email":      row['email'],
         "name":       row['name'],
-        "nickname":   row['nickname'] or row['name'],
+        # 🟥 nickname 자리에 name 을 대신 채우지 않는다.
+        #    이 한 줄 때문에, 화면이 nickname 만 보도록 고쳐도 닉네임을 안 정한
+        #    사용자에게는 여전히 실명이 내려갔다. 프론트에서 아무리 막아도
+        #    서버가 실명을 담아 보내면 소용이 없다(2026-09-10).
+        #    비면 빈 채로 보낸다 — 화면은 이메일 앞부분으로 대신 부른다.
+        "nickname":   row['nickname'] or '',
         "is_admin":   bool(row['is_admin']),
         "status":     row['status'] if 'status' in row.keys() else 'approved',
         "ai_enabled": bool(row['ai_enabled']) if 'ai_enabled' in row.keys() else False,
@@ -1916,6 +1961,66 @@ def auth_me(current_user: dict = Depends(get_current_user)):
     except Exception:
         pass
     return out
+
+# ─── 인앱 피드백 (2026-09-10) ──────────────────────────────────────────
+# 왜 앱 안에 두는가: 지인 피드백 10 건은 전부 맞는 말이었는데 카톡으로 왔다.
+# 밖에서 오면 ① 어느 화면인지 되물어야 하고 ② 대부분은 아예 오지 않는다.
+# 불편을 느낀 그 자리에서 한 번에 보내야 남는다.
+class FeedbackReq(BaseModel):
+    message: str
+    kind:    str = 'etc'          # bug | idea | etc
+    tab:     str = ''
+    context: dict = {}
+
+_FEEDBACK_KINDS = {'bug', 'idea', 'etc'}
+_FEEDBACK_COOLDOWN_SEC = 20       # 실수로 두 번 누르는 것만 막는다
+
+@app.post("/api/feedback")
+def submit_feedback(req: FeedbackReq, cu: dict = Depends(require_approved)):
+    msg = (req.message or '').strip()
+    if len(msg) < 5:
+        raise HTTPException(400, "조금만 더 적어 주세요(5자 이상).")
+    msg = msg[:2000]
+    kind = req.kind if req.kind in _FEEDBACK_KINDS else 'etc'
+
+    # 컨텍스트는 우리가 붙이는 것만 남긴다. 프론트가 보낸 걸 통째로 저장하면
+    # 나중에 무엇이 들어 있는지 아무도 모르게 된다.
+    ctx = req.context if isinstance(req.context, dict) else {}
+    safe = {k: str(ctx.get(k, ''))[:200] for k in
+            ('ua', 'viewport', 'layout', 'theme', 'version', 'path')}
+
+    with _db() as conn:
+        last = conn.execute(
+            "SELECT created_at FROM feedback WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            (cu['user_id'],)).fetchone()
+        if last and (time() - float(last['created_at'])) < _FEEDBACK_COOLDOWN_SEC:
+            raise HTTPException(429, "방금 보냈습니다. 잠시 후 다시 시도해 주세요.")
+        conn.execute(
+            "INSERT INTO feedback(user_id, kind, message, tab, context, created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (cu['user_id'], kind, msg, str(req.tab or '')[:40],
+             json.dumps(safe, ensure_ascii=False), time()))
+    _log_event(cu['user_id'], 'feedback', {'kind': kind})
+    return {"ok": True}
+
+
+@app.get("/api/feedback")
+def list_feedback(cu: dict = Depends(require_approved)):
+    """관리자는 전부, 그 외에는 자기가 보낸 것만 본다."""
+    with _db() as conn:
+        if cu.get('is_admin'):
+            rows = conn.execute(
+                "SELECT f.id, f.kind, f.message, f.tab, f.context, f.created_at, f.status, "
+                "       COALESCE(NULLIF(u.nickname,''), u.email) AS who "
+                "FROM feedback f LEFT JOIN users u ON u.user_id = f.user_id "
+                "ORDER BY f.id DESC LIMIT 200").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, kind, message, tab, context, created_at, status, '' AS who "
+                "FROM feedback WHERE user_id=? ORDER BY id DESC LIMIT 50",
+                (cu['user_id'],)).fetchall()
+    return {"items": [dict(r) for r in rows]}
+
 
 @app.get("/api/ai/quota")
 def ai_quota(cu: dict = Depends(require_approved)):
