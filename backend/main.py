@@ -2546,8 +2546,20 @@ def _ai_error_message(status_code: int, body_excerpt: str = "") -> str:
     if status_code == 401:
         return "API Key 인증 실패 (401) — 관리 탭에서 Anthropic API Key를 다시 확인해주세요."
     if status_code == 400:
-        snippet = f" · 상세: {body_excerpt[:120]}" if body_excerpt else ""
-        return f"AI 요청 형식 오류 (400){snippet}"
+        low = (body_excerpt or '').lower()
+        # 잔액 소진은 '형식 오류'가 아니다. 2026-09-10~11 며칠 동안 사용자 화면에
+        # 영문 JSON 이 그대로 노출되면서 원인까지 틀리게 안내됐다.
+        # 원문을 그대로 흘리면 ① 읽을 수 없고 ② 내부 사정이 밖으로 나간다.
+        if 'credit balance' in low or 'purchase credits' in low:
+            return ("AI 사용량이 모두 소진되었습니다 — 관리자가 크레딧을 충전하면 "
+                    "바로 다시 쓸 수 있습니다. 잠시 뒤 다시 시도해 주세요.")
+        if 'rate_limit' in low or 'quota' in low:
+            return "AI 요청이 몰려 잠시 제한되었습니다 — 1분 뒤 다시 시도해 주세요."
+        # 그 밖의 400 은 우리 코드 문제일 가능성이 크다. 사용자에게는 짧게 알리고,
+        # 원문은 서버 로그로만 남긴다.
+        if body_excerpt:
+            print(f"[ai-400] {body_excerpt[:400]}")
+        return "AI 요청을 처리하지 못했습니다 (400) — 반복되면 관리자에게 알려 주세요."
     if status_code == 529:
         return "AI 서버 과부하 (529) — Anthropic이 일시적으로 혼잡합니다. 30~90초 뒤 다시 시도해주세요."
     if status_code in (500, 502, 503, 504):
