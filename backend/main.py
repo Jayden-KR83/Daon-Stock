@@ -1439,9 +1439,11 @@ def auth_register(req: RegisterReq):
     try:
         with _db() as conn:
             conn.execute(
-                "INSERT INTO users(user_id,email,name,pw_hash,created_at,status,ai_enabled,is_admin,approved_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?)",
-                (uid, email, name, _hash_password(req.password), datetime.now().isoformat(),
+                # 가입 폼은 닉네임만 받는다(실명 수집 안 함). 같은 값을 nickname 에도
+                # 넣어, 화면이 name 을 볼 일이 없게 한다 — 2026-09-10 실명 노출 정리.
+                "INSERT INTO users(user_id,email,name,nickname,pw_hash,created_at,status,ai_enabled,is_admin,approved_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (uid, email, name, name, _hash_password(req.password), datetime.now().isoformat(),
                  'approved' if is_first else 'pending',
                  1 if is_first else 0,
                  1 if is_first else 0,

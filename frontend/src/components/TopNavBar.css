@@ -121,5 +121,11 @@
   white-space: nowrap;
   max-width: 120px; overflow: hidden; text-overflow: ellipsis;
 }
-/* 폭이 빠듯하면 이름만 접는다 — 아바타는 남겨 자리 감각을 유지한다 */
-@media (max-width: 1100px) { .top-nav-username { display: none; } }
+/* 같은 이름을 두 번 쓰지 않는다.
+   넓으면 글자로만, 좁으면 원으로만 — 둘 중 하나다.
+   (아바타 원이 CJK 이름을 통째로 담게 되면서 옆 글자와 겹쳐 보였다.) */
+.top-nav-avatar { display: none; }
+@media (max-width: 1100px) {
+  .top-nav-username { display: none; }
+  .top-nav-avatar { display: flex; }
+}

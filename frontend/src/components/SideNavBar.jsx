@@ -1,4 +1,5 @@
 import React from 'react'
+import { displayNameOf } from '../utils/userName'
 import { useStore } from '../store'
 import './SideNavBar.css'
 
@@ -93,7 +94,7 @@ export default function SideNavBar() {
       <div className="side-nav-label-box">
         <div className="side-nav-label-box-title">다온 포트폴리오</div>
         <div className="side-nav-label-box-sub">
-          {currentUser?.nickname || currentUser?.name || '투자자'}
+          {displayNameOf(currentUser)}
         </div>
       </div>
 

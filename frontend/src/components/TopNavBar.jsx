@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { searchStocks } from '../api'
 import { useStore, THEME_META } from '../store'
 import NotificationsBell from './NotificationsBell'
+import { displayNameOf } from '../utils/userName'
 import './TopNavBar.css'
 
 export default function TopNavBar() {
@@ -56,7 +57,13 @@ export default function TopNavBar() {
      그건 줄임말이 아니라 **다른 이름**으로 읽힌다(지인 피드백 5).
      한글·한자 이름은 통째로 쓰되(보통 2~3자) 길면 성 한 글자만,
      라틴 이름은 관례대로 단어 첫 글자들(John Smith → JS)을 쓴다. */
-  const initials = avatarInitials(currentUser?.name)
+  /* 🟥 화면에는 닉네임만 쓴다 — 실명은 절대 찍지 않는다.
+     가입 폼이 '이름 / 홍길동' 을 물었기 때문에 users.name 에는 실명이 들어 있다.
+     상단 바만 nickname 을 거치지 않고 name 을 그대로 찍어, 밝힌 적 없는
+     실명이 화면 오른쪽 위에 계속 떠 있었다(2026-09-10 오너·동료 지적).
+     닉네임이 없으면 이메일 앞부분으로 대신한다. */
+  const displayName = displayNameOf(currentUser)
+  const initials = avatarInitials(displayName)
 
   return (
     <header className="top-nav">
@@ -118,15 +125,12 @@ export default function TopNavBar() {
           </svg>
         </button>
 
-        {/* 이름은 아바타 옆에 그대로 적는다. 원의 약자만으로는 누구인지 확인이 안 된다.
-            폭이 좁아지면 CSS 로 이름만 숨고 아바타는 남는다. */}
-        <div className="top-nav-user" title={currentUser?.name || ''}>
-          <div className="top-nav-avatar" style={initials.length > 2 ? { fontSize: 10 } : undefined}>
-            {initials}
-          </div>
-          {currentUser?.name && (
-            <span className="top-nav-username">{currentUser.name}</span>
-          )}
+        {/* 한 번만 보여 준다. 예전에는 아바타 원과 옆 글자가 둘 다 이름을
+            통째로 찍어 같은 이름이 두 번 나왔다(CJK 3자까지 원 안에 다 넣도록
+            바꾼 것이 겹침을 만들었다). 넓으면 글자, 좁으면 원 — 둘 중 하나만. */}
+        <div className="top-nav-user" title={displayName}>
+          <div className="top-nav-avatar" aria-hidden="true">{initials}</div>
+          <span className="top-nav-username">{displayName}</span>
         </div>
       </div>
     </header>

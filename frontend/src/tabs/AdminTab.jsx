@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { displayNameOf } from '../utils/userName'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'motion/react'
 import { useStore } from '../store'
@@ -363,7 +364,7 @@ function UserCard({ user, onChange }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--clr-text-strong)' }}>
-              {user.nickname || user.name}
+              {displayNameOf(user)}
             </span>
             {user.is_admin && (
               <span style={{ padding: '1px 6px', background: 'var(--clr-ai)', color: '#fff',

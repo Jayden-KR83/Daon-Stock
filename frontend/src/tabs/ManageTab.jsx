@@ -89,10 +89,10 @@ export default function ManageTab() {
    ────────────────────────────────────────────────────── */
 function ProfileCard({ user, totalVal = 0, onSaved, onLogout }) {
   const priv = usePrivacy()   // 총 투자금도 개인 금액이다 — 발표 중 설정 탭에서 노출됐다
-  const [nick, setNick] = useState(user.nickname || user.name || '')
+  const [nick, setNick] = useState(user.nickname || '')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const dirty = nick.trim() !== (user.nickname || user.name || '')
+  const dirty = nick.trim() !== (user.nickname || '')
 
   async function save() {
     if (!nick.trim()) return

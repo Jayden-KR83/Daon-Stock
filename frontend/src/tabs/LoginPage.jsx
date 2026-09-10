@@ -128,9 +128,17 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit}>
               {mode === 'register' && (
                 <div className="dl-field">
-                  <label className="dl-label">이름</label>
-                  <input className="dl-input" type="text" placeholder="홍길동"
+                  {/* 🟥 실명을 묻지 않는다.
+                      '이름 / 홍길동' 이라고 물으면 사람은 실명을 적는다. 그리고
+                      그 값이 화면 오른쪽 위에 계속 떠서, 밝힌 적 없는 실명이
+                      노출된다(2026-09-10 오너·동료 지적). 다온은 실명이 필요한
+                      서비스가 아니다 — 처음부터 닉네임만 받는다. */}
+                  <label className="dl-label">닉네임 <span style={{ fontSize: 10, fontWeight: 600 }}>— 화면에 표시됩니다</span></label>
+                  <input className="dl-input" type="text" placeholder="쿠든카피" maxLength={30}
                     value={name} onChange={e => setName(e.target.value)} />
+                  <div style={{ fontSize: 10.5, color: 'var(--clr-text-muted)', marginTop: 4 }}>
+                    실명을 넣지 마세요. 언제든 설정에서 바꿀 수 있습니다.
+                  </div>
                 </div>
               )}
               <div className="dl-field">
