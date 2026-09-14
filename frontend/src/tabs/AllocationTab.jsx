@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'motion/react'
+import * as strategyJob from '../utils/strategyJob'
 import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsCached, getPortfolioStrategy, getPortfolioStrategyCached, pollPortfolioStrategy, getPortfolioHealth, getPortfolioAlerts, getPortfolioDividends } from '../api'
 import { useStore } from '../store'
 import { usePrivacy, maskText } from '../utils/privacy'
@@ -391,29 +392,40 @@ export default function AllocationTab() {
         setStrategyComputedAt(Math.floor(Date.now() / 1000))
         return
       }
+      /* 폴링은 이 컴포넌트가 아니라 모듈(strategyJob)이 맡는다.
+         여기서 while 루프를 돌리면 탭을 옮기는 순간 컴포넌트가 언마운트되고
+         결과를 받을 곳이 사라진다 — 서버는 계속 만드는데 화면만 잊는다. */
       const fp = res?.fingerprint
-      const started = Date.now()
-      // AI 생성은 1~3분 소요 — 5초 간격으로 최대 ~3.5분 폴링 (Cloudflare 100s 한도 우회)
-      while (fp && Date.now() - started < 210_000) {
-        await new Promise(r => setTimeout(r, 5000))
-        let p
-        try { p = await pollPortfolioStrategy(fp, strategyAcc) } catch { continue }
-        if (p.status === 'done') {
-          setStrategyReport(p.data)
-          setStrategyComputedAt(Math.floor(Date.now() / 1000))
-          return
-        }
-        if (p.status === 'error') { setStrategyErr(p.error || 'AI 분석 실패'); return }
-        // running / unknown → 계속 폴링
-      }
-      setStrategyErr('분석이 지연되고 있습니다 — 잠시 후 다시 시도해주세요')
+      if (!fp) { setStrategyErr('분석을 시작하지 못했습니다'); return }
+      strategyJob.start(strategyAcc, fp)
+      return                       // 결과는 구독(useEffect)이 받는다
     } catch (e) {
       const msg = e.response?.data?.detail || e.message || '분석 실패'
       setStrategyErr(msg)
-    } finally {
       setStrategyLoading(false)
     }
   }
+
+  /* 돌고 있는 작업을 구독한다 — 탭을 떠났다 돌아와도 이어서 받는다.
+     화면이 처음 열릴 때도 한 번 확인하므로, 다른 탭에 있는 동안 끝난 결과가
+     돌아오자마자 그대로 붙는다. */
+  React.useEffect(() => {
+    return strategyJob.subscribe(strategyAcc, (snap) => {
+      if (snap.status === 'running') { setStrategyLoading(true); setStrategyErr(''); return }
+      if (snap.status === 'done' && snap.data) {
+        setStrategyReport(snap.data)
+        setStrategyComputedAt(Math.floor(Date.now() / 1000))
+        setStrategyLoading(false)
+        strategyJob.clear(strategyAcc)
+        return
+      }
+      if (snap.status === 'error') {
+        setStrategyErr(snap.error || 'AI 분석 실패')
+        setStrategyLoading(false)
+        strategyJob.clear(strategyAcc)
+      }
+    })
+  }, [strategyAcc])
 
   // 보유 종목 구성 fingerprint 계산 (백엔드와 동일 로직)
   const currentFingerprint = React.useMemo(() => {

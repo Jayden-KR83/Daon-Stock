@@ -113,6 +113,39 @@ export default function BottomNav() {
 
   const [moreOpen, setMoreOpen] = useState(false)
   const stripRef = useRef(null)
+
+  /* ── 하단바를 누른 채 좌우로 끌어 메뉴 이동 (2026-09-14 요청) ──────────
+     본문 스와이프는 이미 있었지만 하단바는 가로 스크롤 때문에 제외돼 있었다.
+     여기서는 스크롤 대신 **손가락 밑의 메뉴를 그대로 고른다** — 끌면 선택이
+     따라오고 손을 떼면 그 자리에 머문다. 슬라이더처럼 쓰인다.
+
+     ⚠ 탭이 실제로 바뀌는 것은 끌기 임계값(8px)을 넘은 뒤부터다.
+       그러지 않으면 그냥 누른 것도 미세한 손떨림에 옆 탭으로 튄다.
+     ⚠ 가로 스크롤은 touch-action 으로 막는다. 화면 밖 메뉴는 '전체' 버튼으로
+       가면 되므로 접근이 막히지 않는다. */
+  const dragRef = useRef({ on: false, moved: false, x0: 0 })
+
+  function tabAtPoint(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY)
+    const btn = el && el.closest ? el.closest('.nav-btn') : null
+    if (!btn || !stripRef.current?.contains(btn)) return null
+    const idx = Object.entries(btnRefs.current).find(([, node]) => node === btn)?.[0]
+    return idx == null ? null : Number(idx)
+  }
+
+  function onNavPointerDown(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    dragRef.current = { on: true, moved: false, x0: e.clientX }
+  }
+  function onNavPointerMove(e) {
+    const d = dragRef.current
+    if (!d.on) return
+    if (!d.moved && Math.abs(e.clientX - d.x0) < 8) return
+    d.moved = true
+    const idx = tabAtPoint(e.clientX, e.clientY)
+    if (idx != null && idx !== activeTab) setActiveTab(idx)
+  }
+  function onNavPointerUp() { dragRef.current.on = false }
   const btnRefs  = useRef({})
 
   const visible = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
@@ -145,7 +178,13 @@ export default function BottomNav() {
       <div className="bottom-nav-wrap">
         <nav className="bottom-nav" aria-label="주요 메뉴">
           {/* data-noswipe: 탭 전환 스와이프가 이 스트립의 가로 스크롤을 삼키지 않도록 */}
-          <div className="nav-strip" ref={stripRef} data-noswipe>
+          <div className="nav-strip" ref={stripRef} data-noswipe
+            onPointerDown={onNavPointerDown}
+            onPointerMove={onNavPointerMove}
+            onPointerUp={onNavPointerUp}
+            onPointerCancel={onNavPointerUp}
+            onPointerLeave={onNavPointerUp}
+            style={{ touchAction: 'pan-y' }}>
             {visible.map(tab => {
               const active = activeTab === tab.idx
               return (
@@ -154,7 +193,7 @@ export default function BottomNav() {
                   data-tour={`nav-${tab.idx}`}
                   className={`nav-btn ${active ? 'active' : ''}`}
                   aria-current={active ? 'page' : undefined}
-                  onClick={() => go(tab.idx)}>
+                  onClick={() => { if (!dragRef.current.moved) go(tab.idx) }}>
                   <span className="nav-icon">{icons[tab.iconKey]}</span>
                   <span className="nav-label">{tab.label}</span>
                 </button>

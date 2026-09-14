@@ -9687,6 +9687,10 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
 class RefreshStrategyReq(BaseModel):
     cron_secret: str = ''
     scope:       str = 'ALL'
+    # 매일 돌리기 시작하면서(2026-09-14) 상한을 둔다. 사용자가 늘면 이 한 줄이
+    # 하루 청구서를 결정한다 — 1명이면 $0.06, 100명이면 $6, 매일이면 그 30배다.
+    # 상한에 걸린 사용자는 다음 회차로 넘어간다(오래된 것부터).
+    max_users:   int = 20
 
 
 def _build_strategy_req_for(user_id: str, scope: str = 'ALL'):
@@ -9766,6 +9770,10 @@ def cron_refresh_strategy(req: RefreshStrategyReq):
             "SELECT user_id FROM users WHERE ai_enabled=1 AND status='approved'"
         ).fetchall()]
 
+    cap = max(1, min(int(req.max_users or 20), 200))
+    over = max(0, len(users) - cap)
+    users = users[:cap]
+
     done, skipped, failed = 0, [], []
     for uid in users:
         if _is_demo({'user_id': uid}):
@@ -9784,8 +9792,9 @@ def cron_refresh_strategy(req: RefreshStrategyReq):
             failed.append({'user': uid[:4], 'error': str(e)[:160]})
 
     _log_event('__cron__', 'cron_refresh_strategy',
-               {'refreshed': done, 'skipped': len(skipped), 'failed': len(failed)})
-    return {'refreshed': done, 'skipped': skipped, 'failed': failed}
+               {'refreshed': done, 'skipped': len(skipped), 'failed': len(failed),
+                'over_cap': over})
+    return {'refreshed': done, 'skipped': skipped, 'failed': failed, 'over_cap': over}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react'
+import './DiscoverTab.css'
+import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { normalizeReco } from '../utils/reco'
 import WatchStar from '../components/WatchStar'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -486,6 +487,27 @@ export default function DiscoverTab() {
   const items = data?.items || []
   const ago = agoLabel(data?.computed_at)
 
+  /* ⑧ 섹터 목록을 펼친 뒤 다른 곳을 눌러도 닫히지 않았다.
+     <details> 는 바깥 클릭을 스스로 처리하지 않는다 — 직접 닫아 준다.
+     mousedown 을 쓰는 이유: click 은 체크박스를 누르는 순간에도 먼저 튀어
+     방금 연 목록이 닫혀 버린다. 안쪽에서 시작한 클릭은 건너뛴다. */
+  const secRef = useRef(null)
+  useEffect(() => {
+    const onDown = (e) => {
+      const el = secRef.current
+      if (el && el.open && !el.contains(e.target)) el.open = false
+    }
+    const onEsc = (e) => {
+      if (e.key === 'Escape' && secRef.current) secRef.current.open = false
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [])
+
   const sectors = useMemo(
     () => [...new Set(items.map(r => r.sector).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko')),
     [items])
@@ -537,6 +559,7 @@ export default function DiscoverTab() {
 
   return (
     <div style={{ paddingTop: 8 }}>
+      <div className="disc-sticky">
       <div className="mono-card" style={{ marginBottom: 10 }}>
         <div className="mono-section-header">
           <div>
@@ -552,16 +575,21 @@ export default function DiscoverTab() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
-          <div className="seg-ctrl">
+          {/* 가장 중요한 축인데 라벨이 없어 시장·등급과 달리 무엇을 고르는지
+              알 수 없었다(2026-09-14 지적). */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span className="filter-axis-label">종류</span>
+          <div className="seg-ctrl is-compact">
             {[['stock', '개별종목'], ['etf', 'ETF'], ['innov', '저점발굴']].map(([v, l]) => (
               <button key={v} onClick={() => { setQtype(v); setExpanded(null); setSecFilter(new Set())
                 setSortKey('composite_score'); setSortDir('desc'); if (v === 'innov') setGrade('pass') }}
-                className={`seg-btn ${qtype === v ? 'active' : ''}`} style={{ fontSize: 11, fontWeight: 700 }}>{l}</button>))}
+                className={`seg-btn ${qtype === v ? 'active' : ''}`} style={{ fontWeight: 700 }}>{l}</button>))}
+          </div>
           </div>
           {!isInnov && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <span className="filter-axis-label">시장</span>
-              <div className="seg-ctrl">
+              <div className="seg-ctrl is-compact">
                 {[['ALL', '전체'], ['US', '미국'], ['KR', '한국']].map(([v, l]) => (
                   <button key={v} onClick={() => setMarket(v)} className={`seg-btn ${market === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
               </div>
@@ -571,7 +599,7 @@ export default function DiscoverTab() {
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
             title="추천만: 종합 60점 이상 · 기준통과: 최소 기준(PEG·성장·부채) 통과 전체 · 전체: 기준 미달 종목까지 포함(참고용)">
             <span className="filter-axis-label">등급</span>
-            <div className="seg-ctrl">
+            <div className="seg-ctrl is-compact">
               {[['reco', '추천만'], ['pass', '기준통과'], ['all', '전체']].map(([v, l]) => (
                 <button key={v} onClick={() => setGrade(v)} className={`seg-btn ${grade === v ? 'active' : ''}`} style={{ fontSize: 11 }}>{l}</button>))}
             </div>
@@ -579,7 +607,7 @@ export default function DiscoverTab() {
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 종목·티커·섹터 검색"
             style={{ fontSize: 11.5, padding: '5px 9px', borderRadius: 4, border: '1px solid var(--m-outline-variant)',
               background: 'var(--m-surface)', color: 'var(--m-text)', width: 170, fontFamily: 'inherit' }} />
-          <details style={{ position: 'relative' }}>
+          <details ref={secRef} style={{ position: 'relative' }}>
             <summary style={{ fontSize: 11, fontWeight: 600, color: 'var(--m-text-secondary)', cursor: 'pointer',
               listStyle: 'none', padding: '5px 9px', border: '1px solid var(--m-outline-variant)', borderRadius: 4 }}>
               섹터{secFilter.size ? ` (${secFilter.size})` : ' ▾'}
@@ -603,6 +631,7 @@ export default function DiscoverTab() {
           </span>
         </div>
       </div>
+      </div>
 
       <ScoringMethodology qtype={qtype} />
 
@@ -618,13 +647,13 @@ export default function DiscoverTab() {
         </div>
       ) : (
         <div className="mono-card" style={{ padding: '4px 6px', overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', borderSpacing: 0 }}>
+          <table className="disc-table" style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', borderSpacing: 0 }}>
             <thead>
               <tr>
                 <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('name')} title="클릭: 오름/내림 정렬">종목{arrow('name')}</th>
                 <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('ticker')} title="클릭: 정렬">티커{arrow('ticker')}</th>
-                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('market')} title="클릭: 정렬">국가{arrow('market')}</th>
-                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('sector')} title="클릭: 정렬">{isEtf ? '테마' : isInnov ? '분야' : '섹터'}{arrow('sector')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('market')} className="disc-col-market" title="클릭: 정렬">국가{arrow('market')}</th>
+                <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => sortBy('sector')} className="disc-col-sector" title="클릭: 정렬">{isEtf ? '테마' : isInnov ? '분야' : '섹터'}{arrow('sector')}</th>
                 {isEtf ? (
                   <th style={{ ...th, textAlign: 'right', cursor: 'pointer' }} onClick={() => sortBy('ret_6m')} title="최근 6개월 수익률 · 클릭: 정렬">6개월{arrow('ret_6m')}</th>
                 ) : isInnov ? (
@@ -661,8 +690,8 @@ export default function DiscoverTab() {
                           <WatchStar ticker={row.ticker} name={row.name || ''} size={14} />
                         </span>
                       </td>
-                      <td style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)' }}>{mktKo(row.market)}</td>
-                      <td style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sector}</td>
+                      <td className="disc-col-market" style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)' }}>{mktKo(row.market)}</td>
+                      <td className="disc-col-sector" style={{ ...td, fontSize: 11.5, color: 'var(--m-text-secondary)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sector}</td>
                       <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                         {isInnov
                           ? <span style={row.pct_momentum == null ? { color: 'var(--m-text-tertiary)' } : { fontWeight: 700 }}>{row.pct_momentum == null ? '—' : Math.round(row.pct_momentum)}</span>

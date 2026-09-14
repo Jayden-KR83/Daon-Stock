@@ -1,0 +1,73 @@
+/* ══════════════════════════════════════════════════════════════
+   발굴 탭 — 모바일 대응 · 필터 고정 · 압축 토글
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── ⑥ 필터 줄 고정 ────────────────────────────────────────────
+   종목을 훑어 내리다 종류를 바꾸려면 매번 맨 위로 올라가야 했다.
+   토글은 목록을 보는 내내 손이 닿아야 한다.
+   ⚠ sticky 는 스크롤 조상 기준이다. 탭 본문(.web-main-col / .app-main)이
+     스크롤을 맡고 있으므로 여기서 동작한다. 표를 따로 감싸 스크롤을 주면
+     이 고정이 조용히 풀린다. */
+.disc-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--clr-bg);
+  /* 카드 배경이 반투명이면 아래 내용이 비쳐 글자가 겹쳐 보인다 */
+  padding-top: 4px;
+  margin-bottom: 10px;
+}
+.disc-sticky .mono-card { margin-bottom: 0; }
+
+/* 고정된 줄과 그 아래 목록의 경계 — 없으면 떠 있는 게 아니라 겹친 것처럼 보인다 */
+.disc-sticky::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: var(--clr-border);
+}
+
+/* ── ⑦ 압축 토글 + 선택 효과 ───────────────────────────────────
+   기존 .seg-btn 은 상하 여백이 커서 필터 줄이 화면의 3분의 1을 먹었다.
+   눈에 보이는 높이는 줄이되 **손가락이 닿는 넓이는 줄이지 않는다** —
+   ::after 로 보이지 않는 여유를 위아래로 깔아 44px 규칙을 지킨다. */
+.seg-ctrl.is-compact { padding: 1px; gap: 0; }
+.seg-ctrl.is-compact .seg-btn {
+  position: relative;
+  padding: 1px 8px;
+  min-height: 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.seg-ctrl.is-compact .seg-btn::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: -10px; bottom: -10px;   /* 실제 터치 영역 ≈ 42px */
+}
+
+/* 선택 순간에만 한 번 번지는 빛. 계속 빛나면 눈이 피로하고,
+   무엇이 선택됐는지는 배경색이 이미 말해 준다. */
+.seg-ctrl.is-compact .seg-btn.active {
+  animation: disc-pick .45s ease-out;
+}
+@keyframes disc-pick {
+  0%   { box-shadow: 0 0 0 0 var(--clr-pos-border-md); }
+  45%  { box-shadow: 0 0 0 3px var(--clr-pos-bg-soft),
+                     0 0 10px 1px var(--clr-pos-border-md); }
+  100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+}
+/* 움직임을 원치 않는 사용자에게는 깜빡임을 주지 않는다 */
+@media (prefers-reduced-motion: reduce) {
+  .seg-ctrl.is-compact .seg-btn.active { animation: none; }
+}
+
+/* ── ⑤ 모바일에서 표가 잘리는 문제 ─────────────────────────────
+   표 최소폭이 520px 인데 화면은 390px 이라, 가로 스크롤이 있어도
+   사용자에게는 '잘린 화면'으로 읽힌다. 좁은 화면에서는 곁가지 열을 접는다.
+   국가·섹터는 행을 펼치면 상세에 그대로 다 나온다 — 지워지는 정보는 없다. */
+@media (max-width: 640px) {
+  .disc-table { min-width: 0 !important; }
+  /* 티커 열은 남긴다 — 거기 관심 담기(★) 버튼이 있다. 지우면 기능이 사라진다. */
+  .disc-col-market,
+  .disc-col-sector { display: none; }
+  .disc-sticky .mono-section-sub { display: none; }   /* 설명문은 고정 줄에서 뺀다 */
+}
