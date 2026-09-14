@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { useStore } from '../store'
+import { SHORTCUT_TABS } from './SideNavBar'
 
 /**
  * 전역 단축키 핸들러 + 도움말 모달.
@@ -52,12 +53,15 @@ export default function KeyboardShortcuts() {
         return
       }
 
-      // 1-5: 주요 탭 이동 (Cmd/Ctrl 없을 때만, 단순 키)
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[1-5]$/.test(e.key)) {
-        e.preventDefault()
-        const tabMap = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 }
-        setActiveTab(tabMap[e.key])
-        return
+      // 숫자 키: 좌측 메뉴에 보이는 순서 그대로 이동 (Cmd/Ctrl 없을 때만)
+      // 순서는 SideNavBar 가 정본이다 — 여기서 따로 정하면 또 어긋난다.
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+        const hit = SHORTCUT_TABS.find(t => t.key === e.key)
+        if (hit) {
+          e.preventDefault()
+          setActiveTab(hit.idx)
+          return
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -99,12 +103,10 @@ export default function KeyboardShortcuts() {
             }}>×</button>
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
+            {/* 목록도 정본에서 만든다. 손으로 적어두면 메뉴가 바뀔 때 여기만 남는다 —
+                실제로 '비중 탭'·'트렌드 탭' 같은 옛 이름이 그대로 있었다. */}
             {[
-              ['1', '보유 탭'],
-              ['2', '관심 탭'],
-              ['3', '비중 탭'],
-              ['4', '차트 탭'],
-              ['5', '트렌드 탭'],
+              ...SHORTCUT_TABS.map(t => [t.key, `${t.label} 탭`]),
               ['/', '검색창 포커스'],
               ['ESC', '모달 / 시트 닫기'],
               ['?', '이 도움말 보기'],

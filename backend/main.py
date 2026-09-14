@@ -458,6 +458,13 @@ def _migrate_schema():
         nt_cols = {row['name'] for row in conn.execute("PRAGMA table_info(notifications)").fetchall()}
         if nt_cols and 'change_pct' not in nt_cols:
             conn.execute("ALTER TABLE notifications ADD COLUMN change_pct REAL")
+        # 예수금은 스냅샷에 아예 없었다 — 그래서 '자산 추이'가 주식 평가액만 그리면서
+        # 포트폴리오 탭의 총자산과 어긋났다(2026-09-14). 과거는 되살릴 수 없으니
+        # total_krw(주식만)는 그대로 두고 현금을 별도 칸에 오늘부터 쌓는다.
+        # NULL = '그날은 현금을 몰랐다' 이고 0 = '현금이 0이었다' 이다. 둘을 섞지 않는다.
+        nw_cols = {row['name'] for row in conn.execute("PRAGMA table_info(net_worth_snapshots)").fetchall()}
+        if nw_cols and 'cash_krw' not in nw_cols:
+            conn.execute("ALTER TABLE net_worth_snapshots ADD COLUMN cash_krw INTEGER")
         # 자산 타입 분기 — 비상장 펀드는 거래소 시세가 없어 실시간 조회 대상이 아니다.
         # nav = 기준가(1좌당), nav_date = 그 기준가의 기준일. 둘 다 nullable.
         # manual_price 와 역할 분리: manual_price = 상장종목의 사용자 수동 override,
@@ -6800,7 +6807,8 @@ def _kst_today_str() -> str:
     kst = timezone(timedelta(hours=9))
     return datetime.now(kst).strftime('%Y-%m-%d')
 
-def _capture_net_worth_snapshot(user_id: str, portfolio_dict: dict, prices: dict, usd_krw: float = 1380.0):
+def _capture_net_worth_snapshot(user_id: str, portfolio_dict: dict, prices: dict,
+                                usd_krw: float = 1380.0, cash_krw=None):
     """현재 portfolio dict + prices로 KRW 평가액 계산 후 SQLite 저장.
     portfolio_dict: {account_key: [holding, ...], ...}
     prices: {ticker: {current_price: ...}}
@@ -6833,10 +6841,12 @@ def _capture_net_worth_snapshot(user_id: str, portfolio_dict: dict, prices: dict
         with _db() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO net_worth_snapshots "
-                "(user_id, snapshot_date, total_krw, holdings_count, breakdown, usd_krw, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "(user_id, snapshot_date, total_krw, holdings_count, breakdown, usd_krw, "
+                " created_at, cash_krw) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (user_id, today, round(total), holdings_count,
-                 json.dumps(breakdown, ensure_ascii=False), usd_krw, time())
+                 json.dumps(breakdown, ensure_ascii=False), usd_krw, time(),
+                 None if cash_krw is None else round(float(cash_krw)))
             )
     except Exception:
         pass
@@ -6845,13 +6855,16 @@ class SnapshotCaptureReq(BaseModel):
     portfolios: dict = {}      # {account_key: [{ticker, quantity, avg_price}, ...], ...}
     prices:     dict = {}      # {ticker: {current_price: ...}, ...}
     usd_krw:    float = 1380.0
+    # 예수금(KRW 환산). 보내지 않으면 NULL 로 남는다 = '그날은 몰랐다'.
+    cash_krw:   float | None = None
 
 @app.post("/api/snapshots/capture")
 def capture_snapshot(req: SnapshotCaptureReq, cu: dict = Depends(require_approved)):
     """현재 portfolio + prices로 오늘자 Net Worth 스냅샷 저장.
     같은 날 여러 번 호출돼도 INSERT OR REPLACE로 마지막 값 유지.
     프론트엔드가 portfolio+prices가 모두 로드된 후 1회 호출 (세션당 1회 제한 권장)."""
-    _capture_net_worth_snapshot(cu['user_id'], req.portfolios, req.prices, req.usd_krw)
+    _capture_net_worth_snapshot(cu['user_id'], req.portfolios, req.prices, req.usd_krw,
+                                getattr(req, 'cash_krw', None))
     with _db() as conn:
         row = conn.execute(
             "SELECT snapshot_date, total_krw FROM net_worth_snapshots "
@@ -6869,7 +6882,7 @@ def get_networth_snapshots(days: int = 365, cu: dict = Depends(require_approved)
     with _db() as conn:
         if days == 0:
             rows = conn.execute(
-                "SELECT snapshot_date, total_krw, holdings_count, breakdown, usd_krw "
+                "SELECT snapshot_date, total_krw, holdings_count, breakdown, usd_krw, cash_krw "
                 "FROM net_worth_snapshots WHERE user_id=? ORDER BY snapshot_date",
                 (cu['user_id'],)
             ).fetchall()
@@ -6879,7 +6892,7 @@ def get_networth_snapshots(days: int = 365, cu: dict = Depends(require_approved)
             kst = _tz(_td(hours=9))
             since = (datetime.now(kst) - _td(days=days)).strftime('%Y-%m-%d')
             rows = conn.execute(
-                "SELECT snapshot_date, total_krw, holdings_count, breakdown, usd_krw "
+                "SELECT snapshot_date, total_krw, holdings_count, breakdown, usd_krw, cash_krw "
                 "FROM net_worth_snapshots WHERE user_id=? AND snapshot_date >= ? "
                 "ORDER BY snapshot_date",
                 (cu['user_id'], since)
@@ -6896,6 +6909,8 @@ def get_networth_snapshots(days: int = 365, cu: dict = Depends(require_approved)
             'holdings_count': r['holdings_count'],
             'breakdown':      breakdown,
             'usd_krw':        r['usd_krw'],
+            # None = 그날 현금을 기록하지 않았다(2026-09-14 이전). 0 과 구분한다.
+            'cash_krw':       r['cash_krw'] if 'cash_krw' in r.keys() else None,
         })
     # 시작/끝/변동률 요약
     if len(snapshots) >= 2:

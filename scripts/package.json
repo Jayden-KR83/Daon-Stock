@@ -7,8 +7,9 @@
     "guard:privacy": "node privacy-scan.mjs https://daonwealth.com",
     "guard:answer": "node answer-split-check.mjs",
     "guard:firstuse": "node ux-firstuse.mjs https://daonwealth.com --selftest",
-    "guard:all": "npm run guard:answer && npm run guard:radar && npm run guard:privacy && npm run guard:firstuse",
-    "guard:radar": "node radar-stall-check.mjs"
+    "guard:all": "npm run guard:answer && npm run guard:radar && npm run guard:privacy && npm run guard:numbers && npm run guard:firstuse",
+    "guard:radar": "node radar-stall-check.mjs",
+    "guard:numbers": "node number-consistency.mjs https://daonwealth.com"
   },
   "keywords": [],
   "author": "",

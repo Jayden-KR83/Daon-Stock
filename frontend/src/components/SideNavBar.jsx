@@ -72,6 +72,18 @@ const SIDE_TABS = [
   },
 ]
 
+/* 단축키 정본 — 화면에 보이는 순서가 곧 1,2,3… 이다.
+   예전에는 KeyboardShortcuts 가 내부 탭 번호(0~10)를 그대로 썼다. 내부 번호는
+   기능이 추가된 순서라 화면 순서와 아무 관계가 없어서, 3번을 누르면 '분석'이
+   아니라 엉뚱한 탭이 열렸다(2026-09-14 지적). 순서를 두 곳에서 정하면 반드시
+   어긋나므로 여기 하나만 둔다.
+   관리자 전용(여정)은 번호를 주지 않는다 — 대부분의 사용자에게는 없는 메뉴다. */
+export const SHORTCUT_TABS = SIDE_TABS
+  // 구분선({type:'divider'})은 메뉴가 아니다. 걸러내지 않으면 번호를 하나 먹어
+  // 6번부터 한 칸씩 밀린다 — 실제로 그랬다.
+  .filter(t => t.type !== 'divider' && t.idx != null && !t.adminOnly)
+  .map((t, i) => ({ key: String(i + 1), idx: t.idx, label: t.label }))
+
 export default function SideNavBar() {
   const activeTab    = useStore(s => s.activeTab)
   const setActiveTab = useStore(s => s.setActiveTab)

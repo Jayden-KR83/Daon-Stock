@@ -119,6 +119,19 @@ export default function HoldingsTab() {
     })
   }, [filtered, prices, usdKrw, sortOrder])
 
+  /* 행마다 계좌명을 붙이면 모바일에서 한 줄이 너무 빽빽해진다. 계좌는 이미 위쪽
+     필터에 있으니 대개 군더더기다(2026-09-14 지적).
+     다만 같은 종목을 두 계좌에 나눠 담은 경우에는 계좌명을 지우는 순간 두 행이
+     똑같아 보인다 — 그때만 남긴다. */
+  const dupTickers = React.useMemo(() => {
+    const seen = new Map()
+    for (const h of sorted) {
+      const t = String(h.ticker || '').toUpperCase()
+      seen.set(t, (seen.get(t) || 0) + 1)
+    }
+    return new Set([...seen].filter(([, n]) => n > 1).map(([t]) => t))
+  }, [sorted])
+
   // 표시용 분해 — 각 항목을 따로 반올림하면 '주식 + 예수금'이 총자산과 1원씩 어긋난다.
   // 총자산과 예수금을 먼저 반올림하고 주식은 그 차이로 낸다(합이 반드시 맞는다).
   const toUnit      = (krwAmt) => (currencyMode === 'USD' ? krwAmt / usdKrw : krwAmt)
@@ -444,8 +457,12 @@ export default function HoldingsTab() {
                 style={{ cursor: 'pointer' }}>
                 <span>{privacyMode ? `•••${qtyUnit(h)}`
                   : `${h.quantity.toLocaleString(undefined, { maximumFractionDigits: 8 })}${qtyUnit(h)}`}</span>
-                <span className="h-meta-divider" />
-                <span>{ACC_LABELS[h.account]}</span>
+                {dupTickers.has(String(h.ticker || '').toUpperCase()) && (
+                  <>
+                    <span className="h-meta-divider" />
+                    <span>{ACC_LABELS[h.account]}</span>
+                  </>
+                )}
                 {/* 오늘(또는 프리·애프터) 등락 — 평가액 모드에는 일간 변동이 아예 없어서
                     "지금 오르는 중인지" 를 알 수 없었다. 작은 글씨로 항상 붙인다.
                     평가손익(누적)과 헷갈리지 않도록 라벨을 앞에 둔다. */}
