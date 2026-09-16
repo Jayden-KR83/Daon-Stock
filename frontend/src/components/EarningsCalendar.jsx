@@ -108,11 +108,12 @@ export default function EarningsCalendar() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <button onClick={() => setMonthOffset(o => o - 1)} className="mono-pill"
+          {/* ‹ › 글자 폭만큼(18px)이라 좌우로 닿기 어려웠다 — 양옆이 누를 수 없는 요소라 tap-target 로 사방 확장 */}
+          <button onClick={() => setMonthOffset(o => o - 1)} className="mono-pill tap-target"
             aria-label="이전 달" style={{ cursor: 'pointer' }}>‹</button>
           <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--m-text)',
             minWidth: 78, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{monthLabel}</span>
-          <button onClick={() => setMonthOffset(o => o + 1)} className="mono-pill"
+          <button onClick={() => setMonthOffset(o => o + 1)} className="mono-pill tap-target"
             aria-label="다음 달" style={{ cursor: 'pointer' }}>›</button>
         </div>
       </div>

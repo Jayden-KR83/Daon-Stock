@@ -34,6 +34,7 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
   }, [allHoldings.length, usdKrw])
 
   if (allHoldings.length === 0) return null
+  const todayStr = new Date().toLocaleDateString('sv-SE')   // 기기 시간대 기준 'YYYY-MM-DD'
 
   const fmtKrw = (v) => {
     if (privacyMode) return '••••'
@@ -161,8 +162,11 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--m-text-tertiary)',
                       marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
-                      주당 ${v.per_share_annual.toFixed(2)}/년
-                      {v.ex_date && <span style={{ marginLeft: 6 }}>· ex-date {v.ex_date}</span>}
+                      {/* 한국 종목은 원화다 — '$' 고정이라 원화 값에 달러 기호가 붙었다 */}
+                      주당 {v.is_kr ? `₩${Math.round(v.per_share_annual).toLocaleString()}` : `$${v.per_share_annual.toFixed(2)}`}/년
+                      {/* yfinance 는 지난 배당락일을 주기도 한다 — 다음인지 최근인지 구분해 적는다 */}
+                      {v.ex_date && <span style={{ marginLeft: 6 }}>
+                        · {v.ex_date >= todayStr ? '다음' : '최근'} 배당락 {v.ex_date}</span>}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>

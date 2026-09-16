@@ -286,7 +286,9 @@ function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
         </div>
 
         {/* Actions */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {/* 그룹 변경 바로 밑이 확인 없는 삭제다. 간격 2px·높이 24px 이면 빗맞은 손가락이
+            종목을 지운다 — 손가락 입력에서는 --tap-act-gap(10px)만큼 떼고 높이도 올린다. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'max(2px, var(--tap-act-gap))' }}>
           <button className="btn-icon" onClick={() => {
             const g = window.prompt(`'${item.ticker}' 그룹 이름 (예: AI인프라, 배당)`,
               item.group_name || '기본')

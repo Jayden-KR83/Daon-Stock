@@ -7741,6 +7741,25 @@ def _fetch_dividends_single(tkr: str, months_back: int):
         return None
 
 
+def _upcoming_dividend(d: dict, annual_est: float, today: str):
+    """'예정' 배당 한 건. 오늘 이후 배당락일만 예정이다.
+
+    yfinance calendar 의 'Ex-Dividend Date' 는 **다음이 아니라 가장 최근** 배당락일인
+    경우가 많다(2026-09-16 실측: 삼성전자 06-29·AAPL 08-10 · O 만 09-30). 거르지 않으면
+    지난 날짜가 '예정' 목록에 뜨고, 분기 막대에서 이미 받은 배당과 같은 분기에
+    '예상'으로 한 번 더 더해진다.
+    1회 금액은 최근 1년 실제 지급 횟수로 나눈다 — 연 1회 배당 종목을 4로 나누면 1/4 로 보인다.
+    """
+    ex = d.get('ex_date')
+    if not ex or ex < today:
+        return None
+    from datetime import timedelta as _td
+    year_ago = (datetime.strptime(today, '%Y-%m-%d') - _td(days=365)).strftime('%Y-%m-%d')
+    n = sum(1 for p in d.get('past') or [] if p['date'] >= year_ago)
+    per_payment = annual_est / (n or 4) if annual_est else 0
+    return {'ex_date': ex, 'est_total_krw': round(per_payment, 0)}
+
+
 @app.post("/api/portfolio/dividends")
 def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved)):
     """보유 종목 배당 이력 + 연간 예상 배당 + 다가오는 ex-date."""
@@ -7783,6 +7802,7 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
                 'per_share_annual':     d['annual_rate_per_share'],
                 'past_count':           len(d['past']),
                 'ex_date':              d['ex_date'],
+                'is_kr':                d['is_kr'],
             }
             for p in d['past']:
                 events.append({
@@ -7790,13 +7810,9 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
                     'date': p['date'], 'per_share': p['per_share'],
                     'total_krw': round(p['per_share'] * qty * mul, 0),
                 })
-            if d['ex_date']:
-                est_q = annual_est / 4 if annual_est else 0
-                upcoming.append({
-                    'ticker': tkr, 'name': name,
-                    'ex_date': d['ex_date'],
-                    'est_total_krw': round(est_q, 0),
-                })
+            up = _upcoming_dividend(d, annual_est, _kst_today_str())
+            if up:
+                upcoming.append({'ticker': tkr, 'name': name, **up})
 
             annual_total += annual_est
             ttm_total    += ttm_received

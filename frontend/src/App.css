@@ -15,9 +15,12 @@
   left: 50%;
   transform: translateX(-50%);
 }
+/* 하단 여백은 하단바(≈60px)가 아니라 그 위에 뜬 '의견' 버튼(.fb-fab, bottom 84 + 높이 34)
+   까지 비워야 한다. 72px 였을 때 끝까지 내려도 마지막 행의 노트 버튼이 의견 버튼에
+   덮여 눌리지 않았다(2026-09-16 레이더 한 손 시나리오). fb-fab 위치를 바꾸면 여기도 바꾼다. */
 .app-main {
   flex: 1;
-  padding: 0 14px calc(72px + env(safe-area-inset-bottom, 0px));
+  padding: 0 14px calc(126px + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
