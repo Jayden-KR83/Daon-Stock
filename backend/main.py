@@ -789,7 +789,29 @@ US_ETF_SECTOR = {
 # ─── TTL Cache ────────────────────────────────────────────────────────
 _cache: Dict[str, Any] = {}
 _cache_ts: Dict[str, float] = {}
+_cache_ttl: Dict[str, int] = {}
 _lock = Lock()
+
+# TTL 은 '신선한가'만 판단할 뿐 항목을 지우지 않는다. 2026-09-23 실측: 8일 가동에
+# 앱이 1.4GB(RSS 445MB + 스왑 985MB)를 잡아 1GB VM 의 스왑을 가득 채웠다.
+# 키에 종목·인자가 들어가므로 종목 수만큼 무한히 는다. 그래서 상한을 둔다.
+# 상한은 넉넉하게 — 좁히면 적중률이 떨어져 외부 호출이 오히려 는다(§워커 증설 금지와 같은 이유).
+_CACHE_MAX_ITEMS = 1200
+_CACHE_SWEEP_EVERY = 100          # 삽입 N 회마다 만료분 청소 (매번 훑으면 삽입이 O(n))
+_cache_inserts = 0
+
+
+def _sweep_ttl_cache_locked():
+    """만료된 항목을 버리고, 그래도 상한을 넘으면 오래된 순으로 버린다. _lock 안에서 호출."""
+    now = time()
+    for k in [k for k, ts in _cache_ts.items()
+              if now - ts >= _cache_ttl.get(k, 0)]:
+        _cache.pop(k, None); _cache_ts.pop(k, None); _cache_ttl.pop(k, None)
+    over = len(_cache) - _CACHE_MAX_ITEMS
+    if over > 0:
+        for k, _ in sorted(_cache_ts.items(), key=lambda kv: kv[1])[:over]:
+            _cache.pop(k, None); _cache_ts.pop(k, None); _cache_ttl.pop(k, None)
+
 
 def ttl_cache(ttl: int):
     def dec(fn):
@@ -801,11 +823,25 @@ def ttl_cache(ttl: int):
                     return _cache[key]
             result = fn(*args, **kwargs)
             with _lock:
+                global _cache_inserts
                 _cache[key] = result
                 _cache_ts[key] = time()
+                _cache_ttl[key] = ttl
+                _cache_inserts += 1
+                if _cache_inserts % _CACHE_SWEEP_EVERY == 0 or len(_cache) > _CACHE_MAX_ITEMS:
+                    _sweep_ttl_cache_locked()
             return result
         return wrapper
     return dec
+
+
+def _trim_ts_dict(store: dict, max_items: int, ts_of=lambda v: v[0]):
+    """value 안에 타임스탬프를 갖는 캐시(_earnings_cache 등)를 오래된 순으로 잘라낸다.
+    호출부가 이미 락을 잡고 있지 않은 캐시들이라 각자의 삽입 지점에서만 부른다."""
+    if len(store) <= max_items:
+        return
+    for k, _ in sorted(store.items(), key=lambda kv: ts_of(kv[1]))[:len(store) - max_items]:
+        store.pop(k, None)
 
 # ─── AI 분석 24h 캐시 (in-memory + SQLite persist) ─────────────────────
 # 서버 재시작 시에도 캐시 보존 + 외부 도구(Claude Code/채팅)로 만든 분석을
@@ -813,6 +849,7 @@ def ttl_cache(ttl: int):
 _ai_cache: Dict[str, Any]      = {}
 _ai_cache_ts: Dict[str, float] = {}
 _AI_TTL = 86400  # 24시간
+_AI_CACHE_MAX_ITEMS = 500   # DB 가 정본이므로 메모리는 잘라도 된다(2026-09-23 메모리 상한)
 
 # ai_cache 는 **모든 사용자가 공유**하는 캐시다(stock_v2 = 종목 분석, 개인정보 아님).
 # 여기에 개인 스코프 결과(전략 리포트·포트폴리오 분석)를 넣으면 안 된다.
@@ -896,6 +933,12 @@ def _set_ai_cache(key: str, value, source: str = 'api'):
     with _lock:
         _ai_cache[key]    = value
         _ai_cache_ts[key] = now
+        # 메모리는 DB(ai_cache 테이블)의 앞단 캐시일 뿐이라 잘라내도 데이터는 남는다.
+        # 값이 분석 전문(JSON 수 KB~수십 KB)이라 항목 수가 곧 메모리다.
+        if len(_ai_cache) > _AI_CACHE_MAX_ITEMS:
+            for k, _ in sorted(_ai_cache_ts.items(),
+                               key=lambda kv: kv[1])[:len(_ai_cache) - _AI_CACHE_MAX_ITEMS]:
+                _ai_cache.pop(k, None); _ai_cache_ts.pop(k, None)
     # DB persist (best-effort)
     try:
         with _db() as conn:
@@ -3175,6 +3218,10 @@ def _kr_price(ticker: str) -> dict | None:
         _kr_price_cache[ticker] = (now + _KR_FRESH_TTL, fetched)
         _kr_price_stale[ticker] = (now, fetched)
         _kr_price_neg.pop(ticker, None)
+        # 발굴 스캔이 한국 전 종목을 훑으므로 종목 수만큼 쌓인다. 항목은 작지만 상한은 둔다.
+        _trim_ts_dict(_kr_price_cache, 4000)
+        _trim_ts_dict(_kr_price_stale, 4000)
+        _trim_ts_dict(_kr_price_neg, 4000, ts_of=lambda v: v)
         return fetched
 
     # 4) Stale fallback — 30분 내 마지막 정상값 반환 (0 표시 방지)
@@ -7574,6 +7621,7 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
         except Exception:
             pass
         _earnings_cache[tkr] = (nowt, out)
+        _trim_ts_dict(_earnings_cache, 1000)
         return out
 
     # 보유·관심 + 참고 유니버스(S&P500·Nasdaq100 상위) 병합
@@ -7736,6 +7784,7 @@ def _fetch_dividends_single(tkr: str, months_back: int):
             'is_kr':   kr_flag,
         }
         _dividends_cache[cache_key] = (now, data)
+        _trim_ts_dict(_dividends_cache, 1000)
         return data
     except Exception:
         return None
