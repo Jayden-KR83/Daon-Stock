@@ -38,13 +38,61 @@ function Log($msg) {
     Add-Content -Path $LOG -Value $line -Encoding utf8
 }
 
+# 2026-10-08: 9/2~10/8 실행 대부분이 "시작" 한 줄만 남기고 죽어 있었다. 마지막 주입 성공은
+# 8/20 — 7주간 분석이 멈춰 있었는데 로그만 봐서는 이유를 알 수 없었다.
+# 원인 두 겹:
+#  ① 작업이 06:00 이 아니라 PC 가 깨어난 시각(22:10·23:29·16:01)에 밀려 실행된다
+#     (-StartWhenAvailable). 그때는 네트워크가 아직 안 올라와 ssh/scp 가 실패한다.
+#  ② $ErrorActionPreference='Stop' + PowerShell 5.1 에서는 네이티브 명령의 stderr 가
+#     종료 오류로 바뀌어, Log 한 줄 남기지 못하고 스크립트가 끝난다.
+# → 네이티브 호출은 전부 이 함수를 통과시킨다. 실패하면 이유를 남기고 기다렸다 다시 한다.
+function Invoke-Native([string]$What, [scriptblock]$Block, [int]$Tries = 3, [int]$WaitSec = 60) {
+    for ($i = 1; $i -le $Tries; $i++) {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'    # stderr 한 줄에 스크립트가 죽지 않게
+        $global:LASTEXITCODE = 0
+        try {
+            $out = & $Block
+            $code = $LASTEXITCODE
+        } catch {
+            $out = $null; $code = -1
+            Log "  $What 예외: $($_.Exception.Message)"
+        } finally {
+            $ErrorActionPreference = $prev
+        }
+        if ($code -eq 0) { return $out }
+        Log "  $What 실패(exit=$code) — 시도 $i/$Tries"
+        if ($i -lt $Tries) { Start-Sleep -Seconds $WaitSec }
+    }
+    return $null
+}
+
+# 네트워크가 올라올 때까지 기다린다 — 깨어난 직후 실행되는 경우 때문이다.
+function Wait-Server([int]$Tries = 10, [int]$WaitSec = 30) {
+    for ($i = 1; $i -le $Tries; $i++) {
+        if (Test-Connection -ComputerName '168.107.13.20' -Count 1 -Quiet -ErrorAction SilentlyContinue) {
+            return $true
+        }
+        Log "서버에 닿지 않음 — 네트워크 대기 $i/$Tries"
+        Start-Sleep -Seconds $WaitSec
+    }
+    return $false
+}
+
+# 어떤 경로로 끝나든 마지막 줄을 남긴다. 침묵은 '안 돌았다'와 '돌다 죽었다'를 구분 못 한다.
+trap {
+    Log "예기치 못한 오류로 종료: $($_.Exception.Message)"
+    exit 1
+}
+
 New-Item -ItemType Directory -Force -Path $WORK | Out-Null
 Log "=== 일일 분석 갱신 시작 (Count=$Count, MinAge=$MinAge) ==="
 
 # ── 1. 갱신 대상 조회 (서버 DB 읽기전용) ─────────────────────────
-scp @SSH "$APP_DIR\scripts\analysis_gap.py" "${SERVER}:/tmp/analysis_gap.py" | Out-Null
-$targetsJson = ssh @SSH $SERVER "python3 /tmp/analysis_gap.py --json --limit $Count --min-age $MinAge"
-if (-not $targetsJson) { Log "대상 조회 실패"; exit 1 }
+if (-not (Wait-Server)) { Log "서버에 끝내 닿지 못함 — 종료(다음 회차에 재시도)"; exit 1 }
+$null = Invoke-Native "검사기 전송(scp)" { scp @SSH "$APP_DIR\scripts\analysis_gap.py" "${SERVER}:/tmp/analysis_gap.py" }
+$targetsJson = Invoke-Native "대상 조회(ssh)" { ssh @SSH $SERVER "python3 /tmp/analysis_gap.py --json --limit $Count --min-age $MinAge" }
+if (-not $targetsJson) { Log "대상 조회 실패 — 종료"; exit 1 }
 
 $targets = $targetsJson | ConvertFrom-Json
 if ($targets.Count -eq 0) {
@@ -90,9 +138,22 @@ for ($try = 1; $try -le $maxTry; $try++) {
         '--add-dir', $WORK,
         '--model', 'sonnet'
     )
-    & claude @claudeArgs 2>&1 | Out-Null
+    # claude 의 출력은 파일로 받는다. 예전엔 `2>&1 | Out-Null` 이라 실패 이유가 사라졌다 —
+    # 인증 만료("OAuth session expired")처럼 사람이 조치해야 하는 오류도 로그에 안 남았다.
+    $claudeLog = Join-Path $WORK "claude-last.log"
+    $null = Invoke-Native "분석 생성(claude)" { & claude @claudeArgs *> $claudeLog } -Tries 1
 
-    if (-not (Test-Path $outFile)) { Log "  payload.json 이 생성되지 않음"; continue }
+    if (-not (Test-Path $outFile)) {
+        Log "  payload.json 이 생성되지 않음"
+        if (Test-Path $claudeLog) {
+            $tail = (Get-Content $claudeLog -Tail 5) -join ' / '
+            Log "  claude 출력 끝부분: $tail"
+            if ($tail -match 'OAuth|authenticate|login|credit') {
+                Log "  ⚠ 인증·크레딧 문제로 보인다 — 이 PC 에서 `claude /login` 또는 잔액 확인이 필요하다."
+            }
+        }
+        continue
+    }
 
     # 검증기는 UTF-8 파일로 분리해 둔다 — here-string 에 한글을 심으면 리터럴이 깨져
     # 정상 payload 를 불합격 처리한다(2026-08-18 실제 발생).
@@ -106,9 +167,10 @@ if (-not $ok) { Log "검증 실패 — 주입하지 않고 종료"; exit 1 }
 if ($DryRun) { Log "DryRun — 주입 생략. 결과: $outFile"; exit 0 }
 
 # ── 5. 주입 ───────────────────────────────────────────────────────
-scp @SSH "$APP_DIR\scripts\inject_subscription_analysis.py" "${SERVER}:/tmp/inject.py" | Out-Null
-scp @SSH $outFile "${SERVER}:/tmp/payload.json" | Out-Null
-$injectOut = ssh @SSH $SERVER "cp ~/portfolio/daon.db ~/portfolio/backup/daon-preinject-`$(date +%Y%m%d).db && python3 /tmp/inject.py /tmp/payload.json"
+$null = Invoke-Native "주입기 전송(scp)" { scp @SSH "$APP_DIR\scripts\inject_subscription_analysis.py" "${SERVER}:/tmp/inject.py" }
+$null = Invoke-Native "payload 전송(scp)" { scp @SSH $outFile "${SERVER}:/tmp/payload.json" }
+$injectOut = Invoke-Native "주입(ssh)" { ssh @SSH $SERVER "cp ~/portfolio/daon.db ~/portfolio/backup/daon-preinject-`$(date +%Y%m%d).db && python3 /tmp/inject.py /tmp/payload.json" }
+if (-not $injectOut) { Log "주입 실패 — 서버에 반영되지 않았다"; exit 1 }
 Log ($injectOut -join "`n")
 Log "=== 완료 ==="
 
