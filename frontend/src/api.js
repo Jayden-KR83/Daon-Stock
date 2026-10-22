@@ -50,10 +50,6 @@ export const pollPortfolioStrategy = (fp, scope = 'ALL') =>
   api.get('/portfolio/strategy/poll', { params: { fp, scope } }).then(r => r.data)
 
 // ETF 비교 도구
-export const getEtfCompare    = (tickers) =>
-  api.get('/etf/compare', { params: { tickers: tickers.join(',') }, timeout: 30_000 }).then(r => r.data)
-export const getEtfCompareAi  = (etfs) =>
-  api.post('/etf/compare/ai', { etfs }, { timeout: 90_000 }).then(r => r.data)
 export const analyzeYoutube   = (body)      => api.post('/youtube/analyze', body, { timeout: 60_000 }).then(r => r.data)
 
 export const getFundamentals = (tkr)  => api.get(`/stock/${tkr}/fundamentals`).then(r => r.data)
@@ -165,8 +161,6 @@ export const getEarningsCalendar = (body) =>
   api.post('/earnings/calendar', body, { timeout: 30_000 }).then(r => r.data)
 
 // B안-B5 차트 비교 시계열
-export const getCompareSeries = (body) =>
-  api.post('/compare/series', body, { timeout: 20_000 }).then(r => r.data)
 
 // 배당금 이력 + 연간 예상 + 다가오는 ex-date
 export const getPortfolioDividends = (body) =>

@@ -9,9 +9,7 @@ import {
 import { useStore } from '../store'
 import LogoCircle from '../components/LogoCircle'
 import Sparkline from '../components/Sparkline'
-import EtfCompare from '../components/EtfCompare'
 import EarningsCalendar from '../components/EarningsCalendar'
-import CompareChart from '../components/CompareChart'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Cell,
@@ -373,19 +371,11 @@ export default function TrendsTab() {
         ))}
       </div>
 
-      {/* ── 실적 캘린더 (B4) — 위로 배치 ── */}
+      {/* ── 실적 캘린더 (B4) ──
+          아래에 있던 '차트 비교'·'한·미 ETF 비교'는 2026-10-11 제거했다(한 번도 안 씀).
+          왜 뺐는지와 되살리는 법: docs/removed-features.md */}
       <div style={{ marginTop: 18 }}>
         <EarningsCalendar />
-      </div>
-
-      {/* ── 차트 비교 모드 (B5) — 실적 캘린더 아래 ── */}
-      <div style={{ marginTop: 12 }}>
-        <CompareChart />
-      </div>
-
-      {/* ── 한·미 ETF 비교 도구 ── */}
-      <div style={{ marginTop: 12 }}>
-        <EtfCompare />
       </div>
 
       <div style={{ height: 24 }} />

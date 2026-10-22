@@ -6506,110 +6506,17 @@ def etf_info(ticker: str = ''):
     return _etf_info(ticker.strip())
 
 
-@app.get("/api/etf/compare")
-def etf_compare(tickers: str = ''):
-    """ETF 2~4종 정보 일괄 조회. tickers는 쉼표 구분."""
-    tlist = [t.strip() for t in tickers.split(',') if t.strip()]
-    if not (2 <= len(tlist) <= 4):
-        raise HTTPException(400, "2~4개의 티커가 필요합니다")
-    results = []
-    with _cf.ThreadPoolExecutor(max_workers=4) as ex:
-        futs = {ex.submit(_etf_info, t): t for t in tlist}
-        for fut in _as_completed_safe(futs, timeout=25):
-            try:
-                results.append(fut.result(timeout=0))
-            except Exception as e:
-                results.append({'ticker': futs[fut], 'error': str(e)[:80]})
-    # 원래 입력 순서 유지
-    order = {t: i for i, t in enumerate(tlist)}
-    results.sort(key=lambda x: order.get(x.get('ticker'), 99))
-    return {'etfs': results}
-
-
-class EtfCompareAiReq(BaseModel):
-    etfs: list  # /api/etf/compare 결과의 etfs 그대로
-
-
-@app.post("/api/etf/compare/ai")
-def etf_compare_ai(req: EtfCompareAiReq, cu: dict = Depends(require_ai_enabled)):
-    """ETF 비교 데이터를 기반으로 AI 투자 시사점 생성."""
-    api_key = _stored_api_key()
-    if not api_key:
-        raise HTTPException(400, "관리 탭에서 Anthropic API Key를 먼저 입력해주세요")
-    _log_event(cu['user_id'], 'ai_call', {
-        'kind': 'etf_compare_ai',
-        'tickers': [e.get('ticker') for e in (req.etfs or [])][:5]
-    })
-    _bump_ai_call(cu['user_id'])
-    if not req.etfs or len(req.etfs) < 2:
-        raise HTTPException(400, "비교할 ETF가 부족합니다")
-
-    # ETF 데이터를 한국어로 정리
-    lines = []
-    for e in req.etfs:
-        mkt = e.get('market', '?')
-        nm  = e.get('name') or e.get('ticker')
-        tkr = e.get('ticker', '')
-        price = e.get('current_price')
-        chg   = e.get('change_pct')
-        aum   = e.get('aum_usd') or e.get('aum_krw')
-        aum_str = ''
-        if aum:
-            if mkt == 'US':
-                aum_str = f"AUM ${aum/1e9:.2f}B" if aum >= 1e9 else f"AUM ${aum/1e6:.0f}M"
-            else:
-                aum_str = f"AUM ₩{aum/1e8:.0f}억" if aum >= 1e8 else f"AUM ₩{aum:,}"
-        vol = e.get('avg_volume')
-        vol_str = f"평균거래량 {vol:,}주" if vol else ''
-        er = e.get('expense_ratio')
-        er_str = f"보수율 {er*100:.2f}%" if er else ''
-        sector = e.get('sector_focus') or e.get('category') or ''
-        holdings = e.get('top_holdings') or []
-        hold_str = ''
-        if holdings:
-            top5 = holdings[:5]
-            hold_str = ' / 상위보유: ' + ', '.join(
-                f"{h.get('name') or h.get('symbol','')}({(h.get('weight') or 0)*100:.1f}%)"
-                for h in top5
-            )
-        line = f"- [{mkt}] {nm} ({tkr})"
-        parts = []
-        if price: parts.append(f"현재가 {price}")
-        if chg is not None: parts.append(f"({chg:+.2f}%)")
-        if sector: parts.append(f"섹터: {sector}")
-        if aum_str: parts.append(aum_str)
-        if vol_str: parts.append(vol_str)
-        if er_str: parts.append(er_str)
-        if parts:
-            line += ' · ' + ' · '.join(parts)
-        line += hold_str
-        lines.append(line)
-
-    prompt = (
-        "당신은 글로벌 ETF 시장 전문가입니다. 아래 한국·미국 ETF들을 비교 분석하여 "
-        "투자 관점의 시사점을 한국어로 작성해주세요.\n\n"
-        "=== 비교 대상 ETF ===\n"
-        + "\n".join(lines)
-        + "\n\n다음 JSON 형식으로만 응답해주세요 (다른 텍스트 없이):\n"
-        "{\n"
-        '  "thesis": "비교 핵심 시사점 (2-3문장)",\n'
-        '  "similarities": "공통점/유사 노출 (1-2문장, 동일/유사 섹터일 때 강조)",\n'
-        '  "differences": "결정적 차이점 (담는 종목·보수율·유동성·시가총액 관점 1-3문장)",\n'
-        '  "verdict": [\n'
-        '    {"ticker": "...", "best_for": "이 ETF가 가장 적합한 투자 시나리오 (1문장)"},\n'
-        '    {"ticker": "...", "best_for": "..."}\n'
-        '  ],\n'
-        '  "risk_note": "주의해야 할 공통 리스크 (1-2문장)"\n'
-        "}"
-    )
-    try:
-        text = _call_claude(api_key, MODEL_LIGHT, prompt, 1500, 60)
-        return _parse_claude_json(text)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"AI 비교 분석 실패: {str(e)[:100]}")
-
+@app.get("/api/notes/{ticker}")
+def get_note(ticker: str, cu: dict = Depends(require_approved)):
+    """단일 종목의 메모 조회 — 없으면 빈 객체."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT note, stop_loss, target, updated_at FROM holding_notes WHERE user_id=? AND ticker=?",
+            (cu['user_id'], ticker.upper())
+        ).fetchone()
+    if not row:
+        return {'ticker': ticker.upper(), 'note': '', 'stop_loss': None, 'target': None, 'updated_at': 0}
+    return {'ticker': ticker.upper(), **dict(row)}
 
 # ─── 종목별 메모/투자노트 (P0-3) ─────────────────────────────────────
 class NoteUpsertReq(BaseModel):
@@ -6627,18 +6534,6 @@ class NoteAppendReq(BaseModel):
 # 조용히 잘려 나간다 — 한 곳에서만 정한다.
 NOTE_MAX_CHARS   = 12000
 NOTE_APPEND_MAX  = 1800   # 한 번에 덧붙일 수 있는 길이
-
-@app.get("/api/notes/{ticker}")
-def get_note(ticker: str, cu: dict = Depends(require_approved)):
-    """단일 종목의 메모 조회 — 없으면 빈 객체."""
-    with _db() as conn:
-        row = conn.execute(
-            "SELECT note, stop_loss, target, updated_at FROM holding_notes WHERE user_id=? AND ticker=?",
-            (cu['user_id'], ticker.upper())
-        ).fetchone()
-    if not row:
-        return {'ticker': ticker.upper(), 'note': '', 'stop_loss': None, 'target': None, 'updated_at': 0}
-    return {'ticker': ticker.upper(), **dict(row)}
 
 @app.get("/api/notes")
 def list_notes(cu: dict = Depends(require_approved)):
@@ -7820,59 +7715,6 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
         e['held'] = e['ticker'] in held
     events.sort(key=lambda x: x['date'])
     return {'events': events, 'tickers_checked': len(all_tickers)}
-
-# ─── 차트 비교 모드 (B안-B5) — 가격 시계열 일괄 ────────────────────
-class CompareSeriesReq(BaseModel):
-    tickers: list = []
-    period:  str = '1y'   # '1mo'|'3mo'|'6mo'|'1y'|'2y'|'5y'
-
-@app.post("/api/compare/series")
-def compare_series(req: CompareSeriesReq, cu: dict = Depends(require_approved)):
-    """2~6종목의 일별 종가 시계열 (정규화는 프론트에서)."""
-    if not (2 <= len(req.tickers) <= 6):
-        raise HTTPException(400, "2~6개 종목이 필요합니다")
-    period = req.period if req.period in ('1mo','3mo','6mo','1y','2y','5y') else '1y'
-
-    def _fetch(tkr):
-        try:
-            if is_kr(tkr):
-                code = re.sub(r'^A', '', tkr)
-                for sfx in ('.KS', '.KQ'):
-                    try:
-                        res = _yf_chart(f"{code}{sfx}", period, '1d')
-                        if res:
-                            q0 = (res.get('indicators', {}).get('quote', [{}]) or [{}])[0]
-                            ts = res.get('timestamp', [])
-                            closes = q0.get('close') or []
-                            pts = [(t, c) for t, c in zip(ts, closes) if c is not None]
-                            if len(pts) > 5:
-                                return {'ticker': tkr, 'series': pts}
-                    except Exception: pass
-                return None
-            res = _yf_chart(tkr.upper(), period, '1d')
-            if res:
-                q0 = (res.get('indicators', {}).get('quote', [{}]) or [{}])[0]
-                ts = res.get('timestamp', [])
-                closes = q0.get('close') or []
-                pts = [(t, c) for t, c in zip(ts, closes) if c is not None]
-                if len(pts) > 5:
-                    return {'ticker': tkr.upper(), 'series': pts}
-        except Exception: pass
-        return None
-
-    results = []
-    with _cf.ThreadPoolExecutor(max_workers=len(req.tickers)) as ex:
-        futs = [ex.submit(_fetch, t) for t in req.tickers]
-        for fut in _as_completed_safe(futs, timeout=20):
-            try:
-                r = fut.result(timeout=0)
-                if r: results.append(r)
-            except Exception: pass
-    # 원래 순서 유지
-    order = {t: i for i, t in enumerate(req.tickers)}
-    results.sort(key=lambda x: order.get(x['ticker'], 99))
-    return {'series': results, 'period': period}
-
 
 # ─── 배당금 이력 & 캘린더 ─────────────────────────────────────────
 class DividendsReq(BaseModel):
