@@ -208,7 +208,9 @@ if ($fail) {
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Green
 Write-Host "  배포 완료!" -ForegroundColor Green
-Write-Host "  메인 앱:   http://168.107.13.20:8501" -ForegroundColor Cyan
-Write-Host "  발표 자료: http://168.107.13.20:8501/presentation.html" -ForegroundColor Cyan
+# 8501 은 127.0.0.1 바인딩이라 외부에서 안 닿는다(위 124행에서 이미 그렇게 적어 두고도
+# 여기서는 그 주소를 안내하고 있었다). 사람이 복사해 여는 주소는 공개 주소여야 한다.
+Write-Host "  메인 앱:   $BASE" -ForegroundColor Cyan
+Write-Host "  발표 자료: $BASE/presentation.html" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Green
 Write-Host ""
