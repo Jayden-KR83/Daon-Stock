@@ -782,7 +782,8 @@ KOSPI_SECTOR_ETFS = {
 # 섹터 분류 정본은 backend/sectors.py 한 곳이다 — 라벨·대분류·ETF 표가 모두 거기 있다.
 # 여기서 다시 적지 않는 이유: 표가 두 벌이 되는 순간 반드시 어긋난다(2026-10-10 실제 발생).
 from sectors import (KR_ETF_SECTOR, US_ETF_SECTOR, SECTOR_GROUPS,
-                     LABEL_TO_GROUP, sector_group, labels_by_group, unknown_labels)
+                     LABEL_TO_GROUP, LEGACY_ALIASES,
+                     sector_group, labels_by_group, unknown_labels)
 
 # ─── TTL Cache ────────────────────────────────────────────────────────
 _cache: Dict[str, Any] = {}
@@ -2445,6 +2446,82 @@ def list_sectors():
     backend/sectors.py 를 고치면 화면도 같이 바뀐다.
     """
     return {'groups': SECTOR_GROUPS, 'by_group': labels_by_group()}
+
+
+@app.get("/api/sectors/unknown")
+def sectors_unknown(cu: dict = Depends(require_approved)):
+    """정본에 없는 라벨을 쓰는 보유 종목 — 미분류 점검의 입력.
+
+    왜 필요한가: 모르는 라벨은 `sector_group()` 이 '기타'로 떨군다. 배분 탭에는
+    '기타' 덩어리로 보일 뿐이라 **틀렸다는 사실 자체가 화면에 나타나지 않는다.**
+    2026-10-11 에 정본과 함께 `unknown_labels()` 를 만들어 두고도 호출하는 곳이
+    없어 11일간 죽은 코드였다 — 돌리지 않는 감지기는 감지기가 아니다.
+
+    `suggestion` 은 ETF 표에 있을 때만 채운다. 개별주의 영어 업종('Technology' 등)은
+    종목마다 맞는 중분류가 달라(데이터 소스는 NVDA 에도 'Technology' 를 준다)
+    추측하지 않는다 — 고르는 것은 오너의 몫이고, 틀린 제안은 '기타'보다 나쁘다.
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT account, ticker, name, sector, quantity FROM portfolios "
+            "WHERE user_id=? AND quantity > 0", (cu['user_id'],)).fetchall()
+    bad   = set(unknown_labels([r['sector'] for r in rows]))
+    items = []
+    for r in rows:
+        sec = (r['sector'] or '').strip()
+        if sec and sec not in bad:
+            continue                      # 정본에 있는 라벨 — 볼 것 없다
+        tkr = (r['ticker'] or '').strip().upper()
+        items.append({
+            'account':    r['account'],
+            'ticker':     r['ticker'],
+            'name':       r['name'] or '',
+            'sector':     sec,            # 빈칸이면 애초에 안 적힌 것
+            'group':      sector_group(sec),
+            'suggestion': US_ETF_SECTOR.get(tkr) or KR_ETF_SECTOR.get(tkr) or '',
+        })
+    # 빈칸을 먼저 — 잘못 적힌 것보다 아예 안 적힌 것이 급하다
+    items.sort(key=lambda x: (x['sector'] != '', x['sector'], x['ticker']))
+    return {'items': items, 'count': len(items), 'labels': sorted(bad)}
+
+
+class SectorFixReq(BaseModel):
+    ticker:  str = ''
+    sector:  str = ''
+    account: str = ''      # 비우면 그 티커가 든 모든 계좌
+
+
+@app.post("/api/sectors/fix")
+def sectors_fix(req: SectorFixReq, cu: dict = Depends(require_approved)):
+    """한 종목의 섹터만 고친다.
+
+    전체 저장(`PUT /api/portfolio`)을 쓰지 않는 이유: 그것은 포트폴리오를 통째로
+    덮어쓴다. 라벨 하나 고치자고 쓰기에는 사고 반경이 너무 크다 — 증권사 임포트가
+    표 전체를 덮어써서 계좌 4개 중 마지막 것만 남던 결함이 바로 그 모양이었다.
+
+    정본에 등록된 라벨만 받는다. 자유 입력을 열어 두면 '반도체'와 '반도체 '와
+    '반도체(AI)'가 각각 생기고, 그 순간 정본은 정본이 아니게 된다.
+    """
+    label = (req.sector or '').strip()
+    tkr   = (req.ticker or '').strip().upper()
+    if not tkr:
+        raise HTTPException(400, "ticker 가 필요합니다")
+    if label not in LABEL_TO_GROUP or label in LEGACY_ALIASES:
+        raise HTTPException(400, f"정본에 없는 섹터입니다: {label or '(빈 값)'}")
+    with _db() as conn:
+        if req.account:
+            cur = conn.execute(
+                "UPDATE portfolios SET sector=? "
+                "WHERE user_id=? AND UPPER(ticker)=? AND account=?",
+                (label, cu['user_id'], tkr, req.account))
+        else:
+            cur = conn.execute(
+                "UPDATE portfolios SET sector=? WHERE user_id=? AND UPPER(ticker)=?",
+                (label, cu['user_id'], tkr))
+        n = cur.rowcount
+    if not n:
+        raise HTTPException(404, f"보유 종목에 없습니다: {tkr}")
+    return {'ok': True, 'updated': n, 'sector': label, 'group': sector_group(label)}
 
 @app.get("/api/accounts")
 def get_accounts(cu: dict = Depends(require_approved)):

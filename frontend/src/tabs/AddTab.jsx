@@ -5,6 +5,7 @@ import { useAccounts } from '../utils/accounts'
 import * as XLSX from 'xlsx'
 import BrokerImportSheet from '../components/BrokerImportSheet'
 import SectorSelect from '../components/SectorSelect'
+import SectorFixCard from '../components/SectorFixCard'
 import { decodeFileBytes, parseCsv, parseHoldingsFile, brokerTicker } from '../utils/brokerImport'
 
 /**
@@ -354,6 +355,10 @@ export default function AddTab() {
 
   return (
     <div style={{ paddingTop: 8 }}>
+      {/* 미분류 섹터 — 0건이면 스스로 아무것도 그리지 않는다.
+          보유 종목을 고치는 화면이므로 여기가 제자리다. */}
+      <SectorFixCard />
+
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
         gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
         <div>

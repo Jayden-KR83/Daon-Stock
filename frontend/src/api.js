@@ -300,6 +300,11 @@ export const listFeedback  = ()     => api.get('/feedback').then(r => r.data)
    (2026-10-10 에 ETF 표와 보유종목 라벨이 갈라져 있던 것이 그 사례다). */
 export const getSectors = () => api.get('/sectors').then(r => r.data)
 
+/* 미분류 점검 — 정본에 없는 라벨을 쓰는 보유 종목.
+   모르는 라벨은 '기타'로 묶여 **틀렸다는 사실이 화면에 안 보인다.** 그래서 따로 묻는다. */
+export const getUnknownSectors = () => api.get('/sectors/unknown').then(r => r.data)
+export const fixSector = (body) => api.post('/sectors/fix', body).then(r => r.data)
+
 /* 능동 브리핑 — 비서가 **먼저** 건넬 말이 있는지 묻는다.
    신호가 없으면 서버가 {speak:false} 를 준다. 조용할 자유를 남겨 두는 게 핵심이다 —
    매번 뭔가 말하는 비서는 금방 꺼진다. */
