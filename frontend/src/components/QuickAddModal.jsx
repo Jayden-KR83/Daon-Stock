@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getPortfolio, addHolding, resolveTicker, resolveByName } from '../api'
 import { useAccounts } from '../utils/accounts'
+import SectorSelect from './SectorSelect'
 
 /* ══════════════════════════════════════════════════════════════════════
    빠른 등록 — 보던 화면을 떠나지 않고 한 종목만 넣는다
@@ -138,6 +139,15 @@ export default function QuickAddModal({ open, onClose, onGoToAddTab }) {
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }} />
             </label>
           </div>
+
+          {/* 섹터 — 2026-10-11 추가. 예전엔 state 만 있고 입력칸이 없어
+              자동 조회가 실패하면(한국 종목·ETF 는 거의 항상 실패한다) 빈칸인 채로
+              저장됐다. 분석 탭이 섹터로 묶는데 새로 넣은 종목만 '기타'로 빠졌다.
+              목록은 서버(backend/sectors.py) 정본에서 온다. */}
+          <label className="qa-field">
+            <span>섹터</span>
+            <SectorSelect value={sector} onChange={setSector} />
+          </label>
 
           <div className="qa-two">
             <label className="qa-field">

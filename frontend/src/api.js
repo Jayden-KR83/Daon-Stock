@@ -294,3 +294,23 @@ export function chatSend({ message, scope = 'general', useSearch = false,
    (서버는 요청 헤더만으로는 어느 탭이었는지 알 수 없다). */
 export const sendFeedback  = (body) => api.post('/feedback', body).then(r => r.data)
 export const listFeedback  = ()     => api.get('/feedback').then(r => r.data)
+
+/* 섹터 분류 정본 — backend/sectors.py 가 주는 목록을 그대로 쓴다.
+   프런트에 라벨을 다시 적지 않는 이유: 목록이 두 벌이 되면 반드시 어긋난다
+   (2026-10-10 에 ETF 표와 보유종목 라벨이 갈라져 있던 것이 그 사례다). */
+export const getSectors = () => api.get('/sectors').then(r => r.data)
+
+/* 능동 브리핑 — 비서가 **먼저** 건넬 말이 있는지 묻는다.
+   신호가 없으면 서버가 {speak:false} 를 준다. 조용할 자유를 남겨 두는 게 핵심이다 —
+   매번 뭔가 말하는 비서는 금방 꺼진다. */
+export const getBriefing = (force = false) =>
+  api.get('/assistant/briefing', { params: { force }, timeout: 25_000 }).then(r => r.data)
+
+/* 투자 원칙 — 쌓인 대화에서 뽑아 다음 판단에 되먹이는 고리.
+   오너가 직접 쓴 것(source:'owner')이 AI 가 뽑은 것보다 우선하고, 언제든 지울 수 있다. */
+export const listPrinciples   = ()      => api.get('/principles').then(r => r.data)
+export const addPrinciple     = (text, pinned = true) =>
+  api.post('/principles', { text, pinned }).then(r => r.data)
+export const deletePrinciple  = (id)    => api.delete(`/principles/${id}`).then(r => r.data)
+export const distillPrinciples = ()     =>
+  api.post('/principles/distill', {}, { timeout: 90_000 }).then(r => r.data)

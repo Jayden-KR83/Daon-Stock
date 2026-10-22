@@ -3,6 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getPortfolio, savePortfolio, getUsdKrw, resolveTicker, resolveByName } from '../api'
 import { useAccounts } from '../utils/accounts'
 import * as XLSX from 'xlsx'
+import BrokerImportSheet from '../components/BrokerImportSheet'
+import SectorSelect from '../components/SectorSelect'
+import { decodeFileBytes, parseCsv, parseHoldingsFile, brokerTicker } from '../utils/brokerImport'
 
 /**
  * 등록 탭 — 엑셀식 인라인 편집기 + 엑셀 파일 가져오기/내보내기.
@@ -74,8 +77,6 @@ function rowsFromPortfolio(pf) {
 export default function AddTab() {
   const qc = useQueryClient()
   const { accounts, accountKeys: ACCOUNTS, accLabels: ACC_LABELS } = useAccounts()
-  const ACC_NAME_TO_KEY = React.useMemo(
-    () => Object.fromEntries(accounts.map(a => [a.label, a.key])), [accounts])
   const { data: portfolio } = useQuery({ queryKey: ['portfolio'], queryFn: getPortfolio })
   const { data: fx } = useQuery({ queryKey: ['usdkrw'], queryFn: getUsdKrw, staleTime: 5 * 60_000 })
   const nowRate = Number(fx?.rate) || 0
@@ -88,6 +89,8 @@ export default function AddTab() {
   const [fxEdit, setFxEdit] = useState(null)
   // 티커 조회 중인 행 { [_k]: true } — 행마다 따로 표시해야 어디가 도는지 보인다
   const [resolving, setResolving] = useState({})
+  // 증권사 파일 검토 시트 — 파싱 결과 배열이 들어오면 열린다
+  const [importFiles, setImportFiles] = useState(null)
   const loadedRef = useRef(false)
   const fileRef = useRef(null)
 
@@ -298,50 +301,52 @@ export default function AddTab() {
     XLSX.writeFile(wb, '다온_포트폴리오_템플릿.xlsx')
   }
 
-  /* ── 엑셀 업로드 → 그리드에 채움 (검토 후 저장) ── */
-  function handleFile(e) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      try {
-        const wb = XLSX.read(ev.target.result, { type: 'array' })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
-        if (aoa.length < 2) { setMsg({ type: 'err', text: '데이터가 없습니다.' }); return }
-        const header = aoa[0].map(h => String(h).trim())
-        const idx = {}; TEMPLATE_COLS.forEach(c => { idx[c] = header.indexOf(c) })
-        const missing = TEMPLATE_COLS.filter(c => idx[c] === -1)
-        if (missing.length) { setMsg({ type: 'err', text: `누락된 열: ${missing.join(', ')}` }); return }
+  /* ── 증권사 내보내기 파일 업로드 → 검토 시트 ──────────────────
+     이전 구현은 다온 템플릿의 6개 열이 1행에 정확히 있어야만 읽었고,
+     읽으면 표 **전체**를 덮어썼다. HTS 내보내기는 ① 헤더가 1행이 아니고
+     ② 계좌 열이 없고 ③ 계좌 하나짜리 스냅샷이라 셋 다 걸렸다.
+     이제 파싱은 utils/brokerImport 가, 계좌 배정·범위 결정은 검토 시트가 한다. */
+  async function fileToAoa(file) {
+    const buf = await file.arrayBuffer()
+    if (/\.(csv|txt|tsv)$/i.test(file.name)) return parseCsv(decodeFileBytes(buf))
+    // xlsx 는 SheetJS 가 인코딩까지 처리한다
+    const wb = XLSX.read(buf, { type: 'array' })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true })
+  }
 
-        const parsed = []; const errors = []
-        aoa.slice(1).forEach((row, i) => {
-          if (row.every(c => c === '' || c == null)) return
-          const name = String(row[idx['종목명']] || '').trim()
-          let ticker = String(row[idx['티커명']] || '').trim().toUpperCase()
-          if (/^\d+$/.test(ticker) && ticker.length < 6) ticker = ticker.padStart(6, '0')
-          else if (/^A\d+$/.test(ticker) && ticker.length < 7) ticker = 'A' + ticker.slice(1).padStart(6, '0')
-          const accName = String(row[idx['계좌명']] || '').trim()
-          const accKey = ACC_NAME_TO_KEY[accName]
-          if (!ticker) { errors.push(`행 ${i + 2}: 티커 누락`); return }
-          if (!accKey) { errors.push(`행 ${i + 2} (${ticker}): 계좌명 '${accName}' 없음`); return }
-          parsed.push({
-            _k: ++_uid, account: accKey, ticker, name,
-            quantity: row[idx['수량']] !== '' ? Number(row[idx['수량']]) : '',
-            avg_price: row[idx['평균단가']] !== '' ? Number(row[idx['평균단가']]) : '',
-            sector: String(row[idx['섹터']] || '').trim(),
-          })
-        })
-        if (errors.length) { setMsg({ type: 'err', text: errors.slice(0, 6).join('\n') }); return }
-        if (!parsed.length) { setMsg({ type: 'err', text: '유효한 데이터 행이 없습니다.' }); return }
-        setRows(parsed); setDirty(true)
-        setMsg({ type: 'ok', text: `엑셀 ${parsed.length}종목을 불러왔습니다. 확인 후 아래 저장을 누르세요.` })
-      } catch (err) {
-        setMsg({ type: 'err', text: '파일 파싱 오류: ' + err.message })
+  async function handleFiles(e) {
+    const files = [...(e.target.files || [])]
+    e.target.value = ''
+    if (!files.length) return
+    setMsg(null)
+    try {
+      const parsed = []
+      for (const file of files) {
+        const aoa = await fileToAoa(file)
+        parsed.push(parseHoldingsFile({ filename: file.name, aoa, accounts }))
       }
+      const got = parsed.reduce((n, p) => n + p.rows.length, 0)
+      if (!got) {
+        setMsg({ type: 'err', text: `읽을 종목이 없습니다. 첫 파일에서 본 열: ${parsed[0]?.headers.slice(0, 10).join(', ') || '(없음)'}` })
+        return
+      }
+      setImportFiles(parsed)
+    } catch (err) {
+      setMsg({ type: 'err', text: '파일 파싱 오류: ' + err.message })
     }
-    reader.readAsArrayBuffer(file)
+  }
+
+  /** 검토 시트가 만든 행으로 표를 교체 — 업로드한 계좌만 바뀌고 나머지는 그대로다. */
+  function applyImport(nextRows, info) {
+    setRows(nextRows.map(r => ({ ...r, _k: ++_uid })))
+    setDirty(true)
+    setImportFiles(null)
+    const accNames = info.accounts.map(k => ACC_LABELS[k] || k).join(' · ')
+    setMsg({ type: 'ok', text: `${accNames} 계좌를 갱신했습니다 — 총 ${info.total}종목`
+      + (info.dropped ? ` (파일에 없던 ${info.dropped}종목 삭제)` : '')
+      + (info.kept ? ` (예수금·펀드 ${info.kept}건은 그대로 유지)` : '')
+      + '. 확인 후 아래 저장을 누르세요.' })
   }
 
   const filledCount = rows.filter(r => String(r.ticker || '').trim()).length
@@ -395,12 +400,22 @@ export default function AddTab() {
                   </select>
                 </td>
                 <td>
-                  {/* 암호화폐도 받는다 — 'BTC' 를 넣으면 저장 시 'BTC-USD' 로 정규화된다. */}
+                  {/* 암호화폐도 받는다 — 'BTC' 를 넣으면 저장 시 'BTC-USD' 로 정규화된다.
+                      한국 종목은 'A005490'(증권사 표기)으로 넣어도 받는다 — 저장은 KRX
+                      단축코드 6자리로 통일하고, 증권사 표기는 아래에 같이 보여 준다.
+                      같은 종목이 두 형태로 갈라지면 시세 조회도 배분 집계도 두 번 돈다
+                      (2026-10-11 운영 DB 9건 정리). */}
                   <input value={r.ticker} placeholder={ri === 0 ? 'AAPL · 005930 · BTC' : ''}
-                    title="미국 티커(AAPL) · 한국 6자리 코드(005930) · 암호화폐 심볼(BTC·ETH)"
+                    title="미국 티커(AAPL) · 한국 6자리 코드(005930, A005490 도 가능) · 암호화폐(BTC)"
                     onChange={e => setCell(r._k, 'ticker', e.target.value)}
                     onBlur={e => resolveRow(r._k, e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+                  {KR_RE.test(String(r.ticker || '').trim()) && (
+                    <div style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginTop: 2 }}
+                      title="증권사 HTS 엑셀이 쓰는 표기입니다. KRX 공식 코드는 6자리입니다.">
+                      증권사 표기 {brokerTicker(r.ticker)}
+                    </div>
+                  )}
                 </td>
                 <td>
                   <div style={{ position: 'relative' }}>
@@ -436,11 +451,13 @@ export default function AddTab() {
                   </div>
                 </td>
                 <td>
-                  {/* 섹터는 티커를 넣으면 자동으로 채워진다. 지우고 직접 적어도 된다.
+                  {/* 섹터는 티커를 넣으면 자동으로 채워진다. 직접 고를 수도 있다.
                       "섹터는 필요 없다"는 피드백의 진짜 뜻은 '타이핑하기 싫다' 였다 —
-                      데이터는 분석 탭의 섹터 비중·집중도 진단이 쓰므로 유지한다. */}
-                  <input value={r.sector} placeholder={ri === 0 ? '자동으로 채워집니다' : ''}
-                    onChange={e => setCell(r._k, 'sector', e.target.value)} />
+                      데이터는 분석 탭의 섹터 비중·집중도 진단이 쓰므로 유지한다.
+                      2026-10-11: 자유 입력 → 목록 선택. 손으로 적으면 같은 섹터가
+                      철자만 다른 여러 칸으로 갈라진다(실제로 52건이 31종으로 쪼개졌다). */}
+                  <SectorSelect value={r.sector}
+                    onChange={v => setCell(r._k, 'sector', v)} />
                 </td>
                 <td className="del">
                   <button type="button" title="행 삭제" onClick={() => removeRow(r._k)}>🗑</button>
@@ -551,7 +568,8 @@ export default function AddTab() {
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--clr-text-strong)', marginBottom: 8 }}>
           엑셀 파일로 한 번에
         </div>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFile} />
+        <input ref={fileRef} type="file" multiple accept=".xlsx,.xls,.csv,.txt"
+          style={{ display: 'none' }} onChange={handleFiles} />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" onClick={downloadTemplate}
             style={{ flex: '1 1 140px', padding: '9px', borderRadius: 4, background: 'transparent',
@@ -563,14 +581,26 @@ export default function AddTab() {
             style={{ flex: '1 1 140px', padding: '9px', borderRadius: 4, background: 'transparent',
               border: '1px solid var(--clr-border-md)', color: 'var(--clr-text-sub)',
               fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-            ⬆ 엑셀 업로드
+            ⬆ 파일 업로드 (여러 개 가능)
           </button>
         </div>
         <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--clr-text-muted)', marginTop: 8, lineHeight: 1.6 }}>
-          업로드하면 위 표에 채워집니다 — 확인 후 <strong>저장</strong>을 눌러야 반영됩니다(자동 백업).<br />
-          필수 열: 종목명·티커명·평균단가·수량·계좌명·섹터 / 계좌명: {accounts.map(a => a.label).join(' · ')}
+          증권사 HTS에서 내보낸 <strong>보유 종목 엑셀·CSV를 그대로</strong> 올리세요 — 열 이름·헤더 위치를
+          스스로 찾습니다(키움·미래에셋 실파일로 검증). 계좌별 파일을 <strong>한 번에 여러 개</strong> 올려도 됩니다.<br />
+          <strong>계좌는 파일명에서 읽습니다</strong> — 파일명에 {accounts.map(a => a.label).join(' · ')} 중
+          하나(또는 미국·퇴직연금·한국·ISA)가 들어 있으면 자동으로 배정되고, 못 읽으면 직접 고르면 됩니다.
+          섹터를 파일명에 넣고 싶으면 <code>섹터=반도체</code> 형태로 적으세요(빈칸만 채웁니다).<br />
+          업로드하면 <strong>무엇이 바뀌는지 먼저 보여주고</strong>, 표에 반영 후 <strong>저장</strong>을
+          눌러야 서버에 들어갑니다(저장 직전 자동 백업).
         </div>
       </div>
+
+      {importFiles && (
+        <BrokerImportSheet
+          files={importFiles} accounts={accounts} accLabels={ACC_LABELS}
+          existingRows={rows}
+          onApply={applyImport} onClose={() => setImportFiles(null)} />
+      )}
     </div>
   )
 }

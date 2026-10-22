@@ -2437,6 +2437,15 @@ class AccountUpsertReq(BaseModel):
     sort_order: int = 0
 
 
+@app.get("/api/sectors")
+def list_sectors():
+    """섹터 분류 정본을 그대로 내보낸다 — 신규 종목 등록 드롭다운이 쓴다.
+
+    프런트에 라벨을 다시 적지 않는 이유: 목록이 두 벌이 되면 반드시 어긋난다.
+    backend/sectors.py 를 고치면 화면도 같이 바뀐다.
+    """
+    return {'groups': SECTOR_GROUPS, 'by_group': labels_by_group()}
+
 @app.get("/api/accounts")
 def get_accounts(cu: dict = Depends(require_approved)):
     """현재 사용자의 계좌 목록 — 없으면 기본 4종 자동 시드."""
@@ -10126,6 +10135,8 @@ def _resolve_by_name(raw: str) -> dict:
         if d.get('ticker'):
             return d
 
+    def nm(h): return str(h.get('shortname') or h.get('longname') or '').strip()
+
     hits: list[dict] = []
     has_hangul = any('가' <= ch <= '힣' for ch in q)
     try:
@@ -10133,14 +10144,22 @@ def _resolve_by_name(raw: str) -> dict:
             hits = _search_kr(q) or []
         else:
             hits = _yf_search(q) or []
-            if not hits:
-                hits = _search_kr(q) or []
+            # 한글이 없어도 국내 종목일 수 있다 — 'TIGER 200'·'KODEX 200' 같은 ETF.
+            # 야후가 뭐라도 돌려주면 거기서 멈추던 탓에 이런 이름은 늘 404 였다.
+            # 국내에 이름이 **정확히** 일치하는 종목이 있을 때만 그걸로 바꾼다 —
+            # 후보만 늘리면 '확실할 때만 채운다'는 원칙이 깨진다.
+            if not any(nm(h).lower() == q.lower() for h in hits):
+                kr = _search_kr(q) or []
+                kr_exact = [h for h in kr if nm(h).lower() == q.lower()]
+                if kr_exact:
+                    hits = kr_exact
+                elif not hits:
+                    hits = kr
     except Exception:
         return {}
     if not hits:
         return {}
 
-    def nm(h): return str(h.get('shortname') or h.get('longname') or '').strip()
     exact = [h for h in hits if nm(h).lower() == q.lower()]
     pick = exact[0] if exact else (hits[0] if len(hits) == 1 else None)
     # 후보가 여럿인데 정확히 일치하는 이름이 없으면 고르지 않는다.
