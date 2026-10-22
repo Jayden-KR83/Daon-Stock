@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import { maskText } from '../utils/privacy'
-import { chatHistory, chatClear, chatSend } from '../api'
+import { chatHistory, chatClear, chatSend, getBriefing } from '../api'
+import PrinciplesPanel from './PrinciplesPanel'
 import { ReportBullets } from './report'
 import { splitAnswer } from '../utils/answerText'
 import AnswerActions from './AnswerActions'
@@ -60,6 +61,8 @@ export default function ChatPanel() {
   const [useSearch, setUseSearch] = useState(false)
   const [quota, setQuota]     = useState(null)
   const [truncated, setTruncated] = useState(false)
+  /* 비서가 먼저 건넨 말. null = 아직 안 물어봄 / false = 할 말 없음 */
+  const [brief, setBrief] = useState(null)
   const abortRef = useRef(null)
   const endRef   = useRef(null)
 
@@ -73,6 +76,19 @@ export default function ChatPanel() {
       .catch(() => { if (alive) setMsgs([]) })
     return () => { alive = false }
   }, [open, scope])
+
+  /* 패널을 열면 **묻기 전에** 먼저 말을 건다.
+     2026-10-11 오너: "'묻기'는 수동이다. 먼저 조언하고 대화를 이어가는 비서를 원한다."
+     다만 말할 거리가 없으면 입을 다문다 — 서버가 speak:false 를 돌려준다.
+     대화가 이미 있으면 브리핑을 띄우지 않는다. 하던 이야기를 끊고 끼어드는 꼴이 된다. */
+  useEffect(() => {
+    if (!open || brief !== null) return
+    let alive = true
+    getBriefing()
+      .then(d => { if (alive) setBrief(d?.speak ? d : false) })
+      .catch(() => { if (alive) setBrief(false) })
+    return () => { alive = false }
+  }, [open, brief])
 
   // 새 내용이 붙으면 아래로
   useEffect(() => {
@@ -135,8 +151,34 @@ export default function ChatPanel() {
         <button className="chat-x tap-target" onClick={closeChat} aria-label="닫기">✕</button>
       </div>
 
+      {/* 투자 원칙 — 대화에서 나온 것이므로 대화와 같은 자리에. 평소엔 접혀 있다. */}
+      <PrinciplesPanel />
+
       <div className="chat-body">
-        {msgs.length === 0 && !stream && (
+        {/* 비서가 먼저 건넨 말 — 묻기 전에 이미 여기 있다.
+            제안 질문은 누르면 그대로 대화로 이어진다(브리핑이 맥락으로 남아 있다). */}
+        {brief && brief.speak && msgs.length === 0 && (
+          <div className="chat-msg assistant" style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.02em',
+              color: 'var(--clr-accent, #0EA5E9)', marginBottom: 4 }}>
+              오늘 먼저 드릴 말씀
+            </div>
+            <div className="ko-keep" style={{ fontSize: 13, lineHeight: 1.75,
+              whiteSpace: 'pre-line' }}>{brief.brief}</div>
+            {brief.questions?.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                {brief.questions.map(q => (
+                  <button key={q} className="chat-suggest" onClick={() => send(q)}>{q}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 빈 상태는 **즉시** 보여준다. 브리핑을 기다리느라 가리면 안 된다 —
+            2026-10-11: brief 로딩 중(최대 90초) 패널이 통째로 비어 보여
+            "묻기 버튼이 사라졌다"는 제보가 나왔다. 브리핑은 오면 위에 끼어든다. */}
+        {msgs.length === 0 && !stream && !brief?.speak && (
           <div className="chat-empty">
             <div className="chat-empty-lead">
               지금 보고 있는 {SCOPE_LABEL(scope)} 내용을 그대로 알고 있습니다.

@@ -9703,6 +9703,263 @@ class ChatReq(BaseModel):
     use_search: bool = False     # 기본 끔 — 회당 $10/1000 이라 토큰비와 맞먹는다
 
 
+# ─── 투자 원칙 — 쌓인 대화에서 뽑아내 다음 판단에 되먹인다 ──────────────
+# 2026-10-11 오너: "지식화 되고 축적되어 내 장기 투자 전략에 맞게끔 진화하면 좋겠다."
+#
+# 대화는 이미 chat_messages 에 쌓인다. 빠진 것은 **되먹임**이다 —
+# 쌓이기만 하고 다음 답변이 그걸 읽지 않으면 비서는 영원히 처음 만난 사람처럼 군다.
+#
+# 설계에서 중요한 두 가지:
+#  1. 원문을 그대로 프롬프트에 붓지 않는다. 대화가 길어질수록 토큰이 선형으로 늘고,
+#     옛 잡담이 최근 판단을 밀어낸다. **압축해서 원칙으로** 만들어 둔다.
+#  2. AI 가 뽑은 원칙을 사실로 확정하지 않는다. 오너가 고치고 지울 수 있어야 한다 —
+#     틀린 원칙이 조용히 모든 답변을 오염시키는 것이 최악이다.
+PRINCIPLES_MAX      = 12      # 이보다 많아지면 더는 '원칙'이 아니라 메모다
+PRINCIPLES_MIN_TURN = 6       # 이만큼 대화가 쌓여야 뽑을 거리가 생긴다
+
+
+def _ensure_principles_table():
+    with _db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS investment_principles (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    TEXT NOT NULL,
+                text       TEXT NOT NULL,
+                source     TEXT NOT NULL DEFAULT 'ai',   -- 'ai' | 'owner'
+                evidence   TEXT NOT NULL DEFAULT '',     -- 어떤 대화에서 나왔나
+                created_at REAL NOT NULL,
+                pinned     INTEGER NOT NULL DEFAULT 0    -- 오너가 고정하면 자동 정리에서 제외
+            )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_principles_user "
+                     "ON investment_principles(user_id, created_at DESC)")
+
+
+def _principles_text(user_id: str) -> str:
+    """프롬프트에 끼울 원칙 블록. 없으면 빈 문자열 — 없는 걸 지어내지 않는다."""
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT text FROM investment_principles WHERE user_id=? "
+                "ORDER BY pinned DESC, created_at DESC LIMIT ?",
+                (user_id, PRINCIPLES_MAX)).fetchall()
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    lines = "\n".join(f"- {r['text']}" for r in rows)
+    return ("[이 사용자의 투자 원칙 — 지금까지의 대화에서 정리된 것]\n" + lines +
+            "\n위 원칙과 어긋나는 제안을 할 때는 **왜 예외인지** 먼저 밝히세요.")
+
+
+@app.get("/api/principles")
+def list_principles(cu: dict = Depends(require_approved)):
+    _ensure_principles_table()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id, text, source, evidence, created_at, pinned FROM investment_principles "
+            "WHERE user_id=? ORDER BY pinned DESC, created_at DESC", (cu['user_id'],)).fetchall()
+    return {'principles': [dict(r) for r in rows], 'max': PRINCIPLES_MAX}
+
+
+class PrincipleReq(BaseModel):
+    text: str = ''
+    pinned: bool = False
+
+
+@app.post("/api/principles")
+def add_principle(req: PrincipleReq, cu: dict = Depends(require_approved)):
+    """오너가 직접 적는 원칙. AI 가 뽑은 것보다 우선한다."""
+    t = _sanitize_unicode(str(req.text or '')).strip()
+    if not (2 <= len(t) <= 300):
+        raise HTTPException(400, "원칙은 2~300자로 적어주세요.")
+    _ensure_principles_table()
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO investment_principles(user_id, text, source, evidence, created_at, pinned) "
+            "VALUES(?,?,?,?,?,?)",
+            (cu['user_id'], t, 'owner', '직접 입력', time(), 1 if req.pinned else 0))
+    return {'ok': True}
+
+
+@app.delete("/api/principles/{pid}")
+def delete_principle(pid: int, cu: dict = Depends(require_approved)):
+    _ensure_principles_table()
+    with _db() as conn:
+        conn.execute("DELETE FROM investment_principles WHERE id=? AND user_id=?",
+                     (pid, cu['user_id']))
+    return {'ok': True}
+
+
+@app.post("/api/principles/distill")
+def distill_principles(cu: dict = Depends(require_approved)):
+    """쌓인 대화에서 투자 원칙을 뽑아낸다. **제안일 뿐** — 오너가 지울 수 있다."""
+    uid = cu['user_id']
+    _ensure_principles_table()
+    with _db() as conn:
+        turns = conn.execute(
+            "SELECT role, content, created_at FROM chat_messages WHERE user_id=? "
+            "ORDER BY id DESC LIMIT 60", (uid,)).fetchall()
+        have = [r['text'] for r in conn.execute(
+            "SELECT text FROM investment_principles WHERE user_id=?", (uid,))]
+    if len(turns) < PRINCIPLES_MIN_TURN:
+        return {'ok': False, 'reason': 'not_enough',
+                'need': PRINCIPLES_MIN_TURN, 'have': len(turns)}
+
+    api_key = _stored_api_key()
+    if not api_key:
+        return {'ok': False, 'reason': 'no_api_key'}
+
+    convo = "\n".join(
+        f"{'나' if r['role'] == 'user' else '비서'}: {str(r['content'])[:600]}"
+        for r in reversed(turns))
+    prompt = (
+        "아래는 한 투자자와 비서의 대화 기록입니다.\n\n" + convo + "\n\n"
+        + ("이미 정리된 원칙(중복 금지):\n" + "\n".join(f"- {h}" for h in have) + "\n\n"
+           if have else "")
+        + "이 사람의 **투자 원칙**을 뽑아내세요. 규칙:\n"
+        "1. 대화에서 **실제로 드러난 것만**. 추측해서 지어내지 마세요.\n"
+        "2. 일반론 금지('분산투자가 중요하다' 같은 건 누구에게나 해당합니다). "
+        "   이 사람만의 기준·선호·금기여야 합니다.\n"
+        "3. 한 줄에 하나, 각 60자 이내, 최대 4개. 뽑을 게 없으면 빈 배열.\n"
+        "4. 각 원칙마다 근거가 된 대화를 한 조각 인용하세요.\n"
+        'JSON 으로만: {"principles":[{"text":"...","evidence":"..."}]}'
+    )
+    try:
+        data = _parse_claude_json(_call_claude(api_key, MODEL_LIGHT, prompt, 1200, 60))
+    except Exception as e:
+        return {'ok': False, 'reason': 'ai_failed', 'detail': str(e)[:120]}
+
+    added = []
+    with _db() as conn:
+        for p in (data.get('principles') or [])[:4]:
+            t = str(p.get('text') or '').strip()[:300]
+            if not t or t in have:
+                continue
+            conn.execute(
+                "INSERT INTO investment_principles(user_id, text, source, evidence, created_at) "
+                "VALUES(?,?,?,?,?)",
+                (uid, t, 'ai', str(p.get('evidence') or '')[:400], time()))
+            added.append(t)
+        # 상한을 넘으면 오래된 AI 원칙부터 정리한다(오너가 고정한 것은 남긴다)
+        conn.execute(
+            "DELETE FROM investment_principles WHERE id IN ("
+            "  SELECT id FROM investment_principles WHERE user_id=? AND pinned=0 "
+            "  ORDER BY created_at DESC LIMIT -1 OFFSET ?)", (uid, PRINCIPLES_MAX))
+    return {'ok': True, 'added': added, 'turns_read': len(turns)}
+
+
+# ─── 능동 브리핑 ────────────────────────────────────────────────────
+# 2026-10-11 오너: "우측 하단 '묻기'는 수동이다. 내가 물어야 답하는 게 아니라
+# 먼저 조언해 주고 대화를 이어가는 비서였으면 한다."
+#
+# 능동의 핵심은 모델이 아니라 **계기**다. 말할 거리가 없는데 말을 걸면 잔소리가 된다.
+# 그래서 순서를 뒤집는다 — 먼저 신호를 모으고, 신호가 있을 때만 모델을 부른다.
+# 신호원은 이미 다 있다: 등락 알림(5% 임계·5분 cron), 보유 종목, 시세 캐시.
+BRIEF_MIN_SIGNALS = 1          # 신호가 이보다 적으면 말을 걸지 않는다
+BRIEF_LOOKBACK_H  = 20         # 몇 시간 안의 신호를 '오늘 것'으로 볼지
+BRIEF_COOLDOWN_H  = 6          # 같은 브리핑을 반복하지 않는 최소 간격
+
+
+def _brief_signals(user_id: str) -> list:
+    """오늘 말할 거리. 없으면 빈 목록 — 그러면 비서는 조용히 있는다."""
+    since = time() - BRIEF_LOOKBACK_H * 3600
+    out = []
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ticker, name, kind, message, change_pct, current_price, created_at "
+            "FROM notifications WHERE user_id=? AND created_at>=? "
+            "ORDER BY ABS(COALESCE(change_pct,0)) DESC LIMIT 12",
+            (user_id, since)).fetchall()
+        held = {r['ticker'] for r in conn.execute(
+            "SELECT ticker FROM portfolios WHERE user_id=? AND quantity>0", (user_id,))}
+    seen = set()
+    for r in rows:
+        t = r['ticker']
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append({
+            'ticker': t, 'name': r['name'] or t, 'kind': r['kind'],
+            'change_pct': r['change_pct'], 'price': r['current_price'],
+            'held': t in held, 'message': r['message'],
+        })
+    # 보유 종목을 먼저 — 관심 종목보다 내 돈이 걸린 쪽이 먼저다
+    out.sort(key=lambda s: (not s['held'], -abs(s.get('change_pct') or 0)))
+    return out
+
+
+@app.get("/api/assistant/briefing")
+def assistant_briefing(force: bool = False, cu: dict = Depends(require_approved)):
+    """비서가 먼저 건넬 말. 신호가 없으면 `{'speak': False}` 를 돌려준다.
+
+    조용할 자유를 남겨 두는 게 중요하다. 매번 뭔가 말하는 비서는 곧 꺼진다.
+    """
+    uid = cu['user_id']
+    sig = _brief_signals(uid)
+    if len(sig) < BRIEF_MIN_SIGNALS and not force:
+        return {'speak': False, 'reason': 'no_signal'}
+
+    # 최근에 같은 말을 했으면 다시 하지 않는다
+    if not force:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT created_at FROM chat_messages WHERE user_id=? AND scope='briefing' "
+                "AND role='assistant' ORDER BY id DESC LIMIT 1", (uid,)).fetchone()
+        if row and (time() - row['created_at']) < BRIEF_COOLDOWN_H * 3600:
+            return {'speak': False, 'reason': 'cooldown'}
+
+    api_key = _stored_api_key()
+    if not api_key:
+        return {'speak': False, 'reason': 'no_api_key'}
+    if _chat_monthly_count(uid) >= CHAT_MONTHLY_QUOTA and not cu.get('is_admin'):
+        return {'speak': False, 'reason': 'quota'}
+
+    lines = []
+    for s in sig[:8]:
+        tag = '보유' if s['held'] else '관심'
+        pct = f"{s['change_pct']:+.1f}%" if s.get('change_pct') is not None else '—'
+        lines.append(f"- [{tag}] {s['name']}({s['ticker']}) {pct} · {s['message']}")
+
+    _brief_principles = _principles_text(uid)
+    prompt = (
+        _chat_portfolio_context(uid) + "\n\n"
+        # 쌓인 원칙을 먼저 읽힌다 — 이것이 '진화하는 비서'의 고리다.
+        # 없으면 빈 문자열이라 처음 쓰는 사람에게도 그대로 동작한다.
+        + (_brief_principles + "\n\n" if _brief_principles else "")
+        + "오늘 포착된 신호:\n" + "\n".join(lines) + "\n\n"
+        + _chat_live_context(uid) + "\n\n"
+        "위 신호를 바탕으로 **먼저 말을 거는 한 마디**를 쓰세요. 규칙:\n"
+        "1. 3~5문장. 인사·사족 없이 바로 본론.\n"
+        "2. 신호를 나열하지 말고 **무슨 뜻인지** 말하세요. 숫자는 근거로만.\n"
+        "3. 보유 비중이 큰 종목을 먼저. 관심 종목은 뒤.\n"
+        "4. 사라/팔라고 단정하지 마세요. 무엇을 **확인해야 하는지**를 말하세요.\n"
+        "5. 마지막에 이어서 물어볼 만한 질문 2개를 제안하세요.\n"
+        "JSON 으로만 답하세요: "
+        '{"brief": "본문", "questions": ["질문1", "질문2"]}'
+    )
+    try:
+        text = _call_claude(api_key, MODEL_LIGHT, prompt, 1200, 60)
+        data = _parse_claude_json(text)
+    except HTTPException as e:
+        return {'speak': False, 'reason': 'ai_failed', 'detail': str(e.detail)[:120]}
+    except Exception as e:
+        return {'speak': False, 'reason': 'ai_failed', 'detail': str(e)[:120]}
+
+    brief = str(data.get('brief') or '').strip()
+    if not brief:
+        return {'speak': False, 'reason': 'empty'}
+    qs = [str(q).strip() for q in (data.get('questions') or []) if str(q).strip()][:3]
+
+    # 대화로 이어지도록 비서의 첫 턴으로 저장한다 — 이어 묻는 말이 맥락을 잇는다.
+    if not _is_demo(cu):
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO chat_messages(user_id, scope, role, content, created_at) "
+                "VALUES(?,?,?,?,?)", (uid, 'briefing', 'assistant', brief, time()))
+    return {'speak': True, 'brief': brief, 'questions': qs,
+            'signals': sig[:8], 'as_of': time()}
+
+
 @app.get("/api/chat/history")
 def chat_history(scope: str = 'general', limit: int = 50,
                  cu: dict = Depends(require_approved)):
@@ -9769,6 +10026,11 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
     #       [캐시 안 되는 블록] 시세·평가액 — 1원만 움직여도 매번 달라진다
     #     시세를 캐시 블록에 넣으면 캐시가 사실상 한 번도 안 걸린다.
     stable = CHAT_SYSTEM + "\n" + _chat_portfolio_context(uid)
+    # 투자 원칙도 턴마다 바뀌지 않는다 → 캐시되는 접두에 넣는다.
+    # 여기 있어야 모든 답변이 "이 사람은 이런 기준으로 본다"를 전제로 깔고 시작한다.
+    _p = _principles_text(uid)
+    if _p:
+        stable += "\n\n" + _p
     focus  = _chat_focus_context(uid, scope)
     if focus:
         stable += "\n\n" + focus
