@@ -2687,7 +2687,25 @@ def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout
         except Exception:
             body_excerpt = resp.text[:200]
         raise HTTPException(resp.status_code, _ai_error_message(resp.status_code, body_excerpt))
-    return resp.json()["content"][0]["text"]
+
+    # 2026-10-11: 여기가 `resp.json()["content"][0]["text"]` 한 줄이었다.
+    # content[0] 이 text 블록이 아니면(thinking 등) KeyError 가 나고, 그 str(e) 는
+    # 따옴표 붙은 'text' 한 단어다 — 화면에 빨간 'text' 만 뜨던 것이 이것이다.
+    # 아래 _call_claude_with_search 는 "응답에 블록이 여러 개 온다"는 걸 이미 알고
+    # 처리하고 있었는데, 이 함수만 첫 블록을 맹신했다.
+    # 마지막 text 블록을 쓰는 이유도 같다 — 앞쪽 블록은 추론 과정일 수 있고,
+    # 최종 JSON 은 늘 마지막 text 블록에 온다.
+    data = resp.json()
+    texts = [b.get("text", "") for b in (data.get("content") or [])
+             if isinstance(b, dict) and b.get("type") == "text"]
+    texts = [t for t in texts if t.strip()]
+    if not texts:
+        kinds = ", ".join(sorted({b.get("type", "?") for b in (data.get("content") or [])
+                                  if isinstance(b, dict)})) or "(빈 응답)"
+        stop = data.get("stop_reason") or "?"
+        raise HTTPException(502, "AI 응답에 본문이 없습니다 — 받은 블록: "
+                                 f"{kinds} / stop_reason: {stop}. 잠시 후 다시 시도해주세요.")
+    return texts[-1]
 
 
 def _call_claude_with_search(api_key: str, model: str, prompt: str,
@@ -5923,8 +5941,13 @@ def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_me
         with _strategy_jobs_lock:
             _strategy_jobs.pop(cache_key, None)
     except Exception as e:
+        # str(e) 만 쓰면 KeyError 가 'text' 처럼 한 단어로 화면에 뜬다(2026-10-11).
+        # 사람이 읽고 조치할 수 있게 예외 종류를 같이 남긴다.
+        detail = getattr(e, 'detail', None) or str(e)
+        if not detail or len(detail) < 24:
+            detail = f"{type(e).__name__}: {detail}" if detail else type(e).__name__
         with _strategy_jobs_lock:
-            _strategy_jobs[cache_key] = {'error': (str(e)[:140] or 'AI 분석 실패')}
+            _strategy_jobs[cache_key] = {'error': (detail[:140] or 'AI 분석 실패')}
 
 @app.get("/api/portfolio/strategy/poll")
 def portfolio_strategy_poll(fp: str, scope: str = 'ALL', cu: dict = Depends(get_current_user)):
