@@ -3,6 +3,8 @@ import { displayNameOf } from '../utils/userName'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'motion/react'
 import { useStore } from '../store'
+import AnalysisAdminCard from '../components/AnalysisAdminCard'
+import AdminApiKeyCard from '../components/AdminApiKeyCard'
 import {
   listUsers, adminApproveUser, adminRejectUser, adminSuspendUser, adminReinstateUser,
   adminToggleAi, adminPromoteUser, adminDeleteUser, adminGetStats, adminGetAuditLog,
@@ -241,6 +243,7 @@ function AdminDashboard() {
         <div className="seg-ctrl" style={{ flex: 'none' }}>
           {[
             ['users', '사용자', pendingCount > 0 ? pendingCount : null],
+            ['ops',   '운영', null],
             ['stats', '사용 현황', null],
             ['audit', '활동 로그', null],
           ].map(([key, lbl, badge]) => (
@@ -262,7 +265,17 @@ function AdminDashboard() {
       </div>
 
       <AnimatePresence mode="wait">
-        {section === 'users' && (
+        {/* 운영 — 2026-10-11 설정 탭에서 옮겨 왔다.
+          API 키와 AI 분석 관리는 '내 설정'이 아니라 앱을 돌리는 손잡이다.
+          설정 탭에 있으면 두 탭 어디서 고쳐야 하는지 매번 헷갈린다. */}
+      {section === 'ops' && (
+        <>
+          <AdminApiKeyCard />
+          <AnalysisAdminCard />
+        </>
+      )}
+
+      {section === 'users' && (
           <motion.div key="users" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             {/* 초대 코드 — 가입 게이트 (봇·낯선 가입 차단) */}
             <InviteCodeCard />

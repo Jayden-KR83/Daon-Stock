@@ -1,14 +1,11 @@
 import React, { useState } from 'react'
 import { usePrivacy } from '../utils/privacy'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPortfolio, saveApiKey, authLogout,
-         updateProfile, listUsers, getBackup, restoreBackup, authMe,
-         getAdminStatus, adminUnlock, adminLock, adminSetPassword,
+import { getPortfolio, authLogout, updateProfile, getBackup, restoreBackup, authMe,
          getAccounts, addAccount, updateAccount, deleteAccount } from '../api'
 import { useStore, THEME_ORDER, THEME_META } from '../store'
 import { useAccounts } from '../utils/accounts'
 import TwoFactorCard from '../components/TwoFactorCard'
-import AnalysisAdminCard from '../components/AnalysisAdminCard'
 import AccountCashCard from '../components/AccountCashCard'
 import PushSetupCard from '../components/PushSetupCard'
 import AppVersionCard from '../components/AppVersionCard'
@@ -34,8 +31,9 @@ export default function ManageTab() {
 
   return (
     <div style={{ paddingTop: 8 }}>
-      {/* 분석 관리 — 구독으로 분석을 채우는 왕복을 앱 안에서 끝낸다 (admin 전용) */}
-      {currentUser?.is_admin && <AnalysisAdminCard />}
+      {/* 2026-10-11: 관리자 기능(분석 관리·API 키·사용자 목록·관리자 모드)은 전부
+          관리자 탭으로 옮겼다. 설정 탭은 '내 설정'만 담는다 — 두 탭에 같은 기능이
+          흩어져 있으면 어디서 고쳐야 하는지 매번 헷갈린다(실측: 겹친 API 호출 3개). */}
 
       {/* 2단계 인증 — 로그인 잠금(무차별 대입 차단)과 짝이 되는 계정 방어선 */}
       {currentUser && <TwoFactorCard />}
@@ -74,11 +72,19 @@ export default function ManageTab() {
       {/* 앱 버전 — "고쳤다는데 내 폰은 그대로" 를 스스로 확인·해결할 수 있게 */}
       <AppVersionCard />
 
-      {/* 관리자 모드 (is_admin인 경우에만 노출) + 잠금 해제된 경우에만 admin 카드들 표시 */}
-      <AdminSection qc={qc} />
-
       {/* 계좌 관리 (모든 사용자) */}
       <AccountsSection />
+
+      {/* 포트폴리오 백업·원복 — 2026-10-11 되살림.
+          이 카드는 **정의만 있고 어디에서도 렌더되지 않았다.** 가이드 탭은
+          "관리 탭에서 한 번의 클릭으로 원복 가능"이라고 안내하는데 실제로는 버튼이 없었다.
+          증권사 파일 일괄 업로드의 안전망이 바로 이것이라 설정 탭에 노출한다
+          (관리자 기능이 아니라 **내 데이터**를 되돌리는 기능이다). */}
+      {currentUser && (
+        <BackupRestoreCard onRestored={async () => {
+          await qc.invalidateQueries({ queryKey: ['portfolio'] })
+        }} />
+      )}
 
     </div>
   )
@@ -163,74 +169,6 @@ function ProfileCard({ user, totalVal = 0, onSaved, onLogout }) {
 /* ──────────────────────────────────────────────────────
    사용자 관리 카드
    ────────────────────────────────────────────────────── */
-function UserListCard() {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['admin-users'],
-    queryFn: listUsers,
-    staleTime: 60_000,
-    retry: 0,
-  })
-
-  if (isLoading) return null
-  if (error) return null
-
-  const users    = data?.users || []
-  const isAdmin  = !!data?.is_admin
-
-  return (
-    <div className="card" style={{ marginBottom: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)' }}>
-          사용자 관리
-          <span style={{ fontSize: 10, color: 'var(--clr-text-muted)', fontWeight: 500, marginLeft: 6 }}>
-            {isAdmin ? `· admin · ${users.length}명` : '· 본인 정보'}
-          </span>
-        </div>
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead>
-            <tr style={{ background: 'var(--clr-bg)', borderBottom: '1px solid var(--clr-border-md)' }}>
-              {['이메일', '닉네임', '보유', '관심', '가입일'].map(h => (
-                <th key={h} style={{ padding: '7px 8px', textAlign: 'left', color: 'var(--clr-text-sub)',
-                  fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(u => (
-              <tr key={u.user_id} style={{ borderBottom: '1px solid var(--clr-border)' }}>
-                <td style={{ padding: '7px 8px', color: 'var(--clr-text-strong)', fontWeight: 600,
-                  maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {u.email}
-                  {u.is_admin && (
-                    <span style={{ fontSize: 9, background: '#F59E0B', color: '#fff',
-                      padding: '1px 5px', borderRadius: 4, marginLeft: 4, fontWeight: 700 }}>
-                      ADMIN
-                    </span>
-                  )}
-                </td>
-                <td style={{ padding: '7px 8px', color: 'var(--clr-text-strong)' }}>
-                  {u.nickname}
-                </td>
-                <td style={{ padding: '7px 8px', color: 'var(--clr-text-sub)', textAlign: 'right' }}>{u.holdings}</td>
-                <td style={{ padding: '7px 8px', color: 'var(--clr-text-sub)', textAlign: 'right' }}>{u.watchlist}</td>
-                <td style={{ padding: '7px 8px', color: 'var(--clr-text-muted)', fontSize: 10, whiteSpace: 'nowrap' }}>
-                  {String(u.created_at || '').slice(0, 10)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!isAdmin && (
-        <div style={{ fontSize: 10, color: 'var(--clr-text-muted)', marginTop: 6 }}>
-          전체 사용자 조회는 관리자 권한이 필요합니다
-        </div>
-      )}
-    </div>
-  )
-}
 
 /* ──────────────────────────────────────────────────────
    백업/원복 카드
@@ -310,183 +248,6 @@ function BackupRestoreCard({ onRestored }) {
   )
 }
 
-/* ══════════════════════════════════════════════════════
-   AdminSection — 관리자 모드 (절대 권한)
-   is_admin 사용자에게만 노출. 암호 해제 전에는 민감 정보 모두 숨김.
-   ══════════════════════════════════════════════════════ */
-function AdminSection({ qc }) {
-  const setHasAnthropicKey = useStore(s => s.setHasAnthropicKey)
-  const hasAnthropicKey    = useStore(s => s.hasAnthropicKey)
-
-  const { data: status, refetch, isLoading } = useQuery({
-    queryKey: ['admin-status'],
-    queryFn: getAdminStatus,
-    staleTime: 30_000,
-    retry: 0,
-  })
-
-  const [pwInput, setPwInput]   = useState('')
-  const [busy,    setBusy]      = useState(false)
-  const [err,     setErr]       = useState('')
-  const [showSetPw,  setShowSetPw]  = useState(false)
-  const [setPwNew,   setSetPwNew]   = useState('')
-  const [setPwCurr,  setSetPwCurr]  = useState('')
-
-  // is_admin이 아닌 일반 사용자 → 아예 렌더링 안 함 (존재 자체를 노출 안 함)
-  if (isLoading) return null
-  if (!status?.is_admin) return null
-
-  const unlocked     = !!status?.unlocked
-  const passwordSet  = !!status?.password_set
-
-  async function doUnlock() {
-    setBusy(true); setErr('')
-    try {
-      await adminUnlock(pwInput)
-      setPwInput('')
-      await refetch()
-      // API Key 존재 여부도 새로 가져와야 함 (admin만 GET 가능)
-      qc.invalidateQueries({ queryKey: ['apikey'] })
-    } catch (e) {
-      setErr(e.response?.data?.detail || '잠금 해제 실패')
-    } finally {
-      setBusy(false)
-    }
-  }
-  async function doLock() {
-    setBusy(true)
-    try { await adminLock(); await refetch() }
-    finally { setBusy(false) }
-  }
-  async function doSetPw() {
-    if (setPwNew.length < 6) { setErr('새 암호는 6자 이상'); return }
-    setBusy(true); setErr('')
-    try {
-      await adminSetPassword(setPwCurr, setPwNew)
-      setSetPwNew(''); setSetPwCurr(''); setShowSetPw(false)
-      await refetch()
-    } catch (e) {
-      setErr(e.response?.data?.detail || '암호 설정 실패')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      {/* ── 관리자 모드 상태 카드 ── */}
-      <div className="card" style={{ marginBottom: 16, border: '1px solid #0EA5E9',
-        background: unlocked ? '#F0F9FF' : '#F8FAFC' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--clr-text-strong)',
-              display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 14 }}>{unlocked ? '🔓' : '🔒'}</span>
-              관리자 모드
-              <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4,
-                background: unlocked ? '#DCFCE7' : '#F1F5F9',
-                color: unlocked ? '#15803D' : '#64748B', fontWeight: 700 }}>
-                {unlocked ? '해제됨' : '잠김'}
-              </span>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--clr-text-sub)', marginTop: 4 }}>
-              API Key · 사용자 목록 등 민감 기능은 관리자 암호를 입력해야 접근할 수 있습니다
-            </div>
-          </div>
-          {unlocked && (
-            <button onClick={doLock} disabled={busy}
-              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--clr-border-md)',
-                background: 'var(--clr-surface)', color: 'var(--clr-text-sub)', fontSize: 11, fontWeight: 700,
-                cursor: 'pointer', fontFamily: 'inherit' }}>
-              잠그기
-            </button>
-          )}
-        </div>
-
-        {/* 암호 미설정 → 설정 유도 */}
-        {!passwordSet && (
-          <div style={{ padding: 10, background: 'var(--clr-warn-bg)', border: '1px solid #FDE68A',
-            borderRadius: 8, marginBottom: 10, fontSize: 12, color: 'var(--clr-warn-dark)', lineHeight: 1.6 }}>
-            관리자 암호가 아직 설정되지 않았습니다. 아래에서 최초 암호를 설정하세요.
-          </div>
-        )}
-
-        {/* 해제 UI */}
-        {passwordSet && !unlocked && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              className="input"
-              type="password"
-              placeholder="관리자 암호"
-              value={pwInput}
-              onChange={e => { setPwInput(e.target.value); setErr('') }}
-              onKeyDown={e => e.key === 'Enter' && doUnlock()}
-              style={{ flex: 1, fontSize: 13 }}
-            />
-            <button className="btn-primary" disabled={busy || !pwInput}
-              onClick={doUnlock}
-              style={{ whiteSpace: 'nowrap', padding: '0 18px', width: 'auto', flexShrink: 0,
-                opacity: busy || !pwInput ? 0.5 : 1 }}>
-              {busy ? '확인 중...' : '잠금 해제'}
-            </button>
-          </div>
-        )}
-
-        {/* 해제 완료 상태 */}
-        {unlocked && (
-          <div style={{ fontSize: 11, color: 'var(--clr-pos-darker)' }}>
-            ✓ 관리자 모드가 해제되어 있습니다 (자동 잠금: 1시간)
-          </div>
-        )}
-
-        {err && (
-          <div style={{ marginTop: 8, padding: 8, background: 'var(--clr-neg-bg-soft)', borderRadius: 6,
-            fontSize: 11, color: 'var(--clr-neg-dark)' }}>⚠ {err}</div>
-        )}
-
-        {/* 암호 설정 토글 */}
-        <div style={{ marginTop: 10, borderTop: '1px solid var(--clr-border-md)', paddingTop: 10 }}>
-          <button onClick={() => { setShowSetPw(v => !v); setErr('') }}
-            style={{ background: 'none', border: 'none', color: 'var(--clr-info)', cursor: 'pointer',
-              fontSize: 11, fontWeight: 700, fontFamily: 'inherit', padding: 0 }}>
-            {showSetPw ? '설정 취소' : (passwordSet ? '암호 변경' : '최초 암호 설정')}
-          </button>
-          {showSetPw && (
-            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {passwordSet && (
-                <input className="input" type="password" placeholder="현재 암호"
-                  value={setPwCurr} onChange={e => setSetPwCurr(e.target.value)}
-                  style={{ fontSize: 12 }} />
-              )}
-              <input className="input" type="password" placeholder="새 암호 (6자 이상)"
-                value={setPwNew} onChange={e => setSetPwNew(e.target.value)}
-                style={{ fontSize: 12 }} />
-              <button className="btn-primary" disabled={busy || setPwNew.length < 6}
-                onClick={doSetPw}
-                style={{ width: '100%', opacity: busy || setPwNew.length < 6 ? 0.5 : 1 }}>
-                {busy ? '저장 중...' : '암호 저장'}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── 암호 해제 상태일 때만 보이는 민감 카드들 ── */}
-      {unlocked && (
-        <>
-          <AdminApiKeyCard
-            hasKey={hasAnthropicKey}
-            onSaved={() => {
-              setHasAnthropicKey(true)
-              qc.invalidateQueries({ queryKey: ['apikey-status'] })
-            }}
-          />
-          <UserListCard />
-        </>
-      )}
-    </>
-  )
-}
 
 /* ──────────────────────────────────────────────────────
    테마 전환 카드 — Light / Dark / Pro 3종
@@ -568,76 +329,6 @@ function ThemeToggleCard() {
           )
         })}
       </div>
-    </div>
-  )
-}
-
-/* ── API Key 카드 (admin 전용) ── */
-function AdminApiKeyCard({ hasKey, onSaved }) {
-  const [keyInput, setKeyInput] = useState('')
-  const [keyVisible, setKeyVisible] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
-  async function save() {
-    if (!keyInput.trim()) return
-    setSaving(true)
-    try {
-      await saveApiKey(keyInput.trim())
-      setKeyInput(''); setKeyVisible(false); setSaved(true)
-      onSaved?.()
-      setTimeout(() => setSaved(false), 3000)
-    } catch (e) {
-      alert(e.response?.data?.detail || 'API Key 저장 실패')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)', marginBottom: 4 }}>
-        ◆ Anthropic API Key
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--clr-text-muted)', marginBottom: 10, lineHeight: 1.6 }}>
-        서버 저장 — 모든 기기에서 공유됩니다. 앱 전체 사용자가 이 키로 AI 분석을 이용합니다.<br />
-        발급: console.anthropic.com → API Keys → Create Key
-      </div>
-      {hasKey && (
-        <div style={{ fontSize: 11, color: 'var(--clr-pos-dark)', marginBottom: 8 }}>
-          ✓ API Key가 서버에 저장되어 있습니다
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <input className="input"
-            type={keyVisible ? 'text' : 'password'}
-            placeholder={hasKey ? '새 키 입력 시 덮어씁니다' : 'sk-ant-api03-...'}
-            value={keyInput}
-            onChange={e => { setKeyInput(e.target.value); setSaved(false) }}
-            style={{ fontSize: 12, width: '100%', paddingRight: 36, boxSizing: 'border-box' }}
-          />
-          <button onClick={() => setKeyVisible(v => !v)}
-            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-              background: 'none', border: 'none', cursor: 'pointer', fontSize: 16,
-              color: 'var(--clr-text-muted)', padding: 0 }}
-            title={keyVisible ? '숨기기' : '보기'}>
-            {keyVisible ? '🙈' : '👁'}
-          </button>
-        </div>
-        <button className="btn-primary"
-          disabled={saving || !keyInput.trim()}
-          onClick={save}
-          style={{ whiteSpace: 'nowrap', padding: '0 20px', width: 'auto',
-            opacity: saving ? 0.6 : 1, flexShrink: 0 }}>
-          {saving ? '저장 중...' : '저장'}
-        </button>
-      </div>
-      {saved && (
-        <div style={{ fontSize: 11, color: 'var(--clr-pos-dark)', marginTop: 6 }}>
-          ✓ 저장 완료 — 모든 기기에서 즉시 적용됩니다
-        </div>
-      )}
     </div>
   )
 }

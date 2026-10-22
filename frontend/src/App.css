@@ -10,6 +10,21 @@
   background: var(--clr-bg);
 }
 .app-mode-app { max-width: 480px; margin: 0 auto; }
+
+/* 폴더블 펼침·태블릿 (768~1179px) — 2026-10-11.
+   손으로 쓰는 기기이므로 앱 레이아웃(하단 네비·큰 터치 영역)을 그대로 쓰되,
+   480px 한 열로 묶으면 좌우가 통째로 빈다. 폭만 넓힌다.
+   데스크톱 레이아웃으로 넘기지 않는 이유: 그러면 viewport 가 width=1180 으로 바뀌어
+   브라우저가 축소 렌더하고, 터치 대상이 손가락보다 작아진다. */
+.app-mode-wide { max-width: 860px; }
+.app-mode-wide .bottom-nav-wrap { max-width: 860px; }
+/* 넓어진 만큼 좌우 여백을 준다 — 글이 화면 끝에 붙으면 읽기 어렵다 */
+.app-mode-wide .app-main { padding-left: 20px; padding-right: 20px; }
+
+/* 가로 슬라이드 전환이 문서 폭을 넘기지 않게. 없으면 전환 순간 가로 스크롤바가 생기고
+   iOS 에서는 화면이 좌우로 흔들린다. */
+.app-root, .web-root { overflow-x: hidden; }
+
 .app-mode-app .bottom-nav-wrap {
   max-width: 480px;
   left: 50%;
@@ -35,6 +50,10 @@
   padding: 6px 10px;
   background: var(--clr-surface);
   border-bottom: 1px solid var(--clr-border);
+  /* 상단 고정 — 스크롤해도 '묻기'·알림이 손 닿는 곳에 남는다.
+     2026-10-11: 아래로 내리면 이 줄이 화면 밖으로 밀려, 고정된 '의견' 버튼만 남아
+     "묻기 버튼이 사라졌다"로 보였다. 비서를 부르는 입구는 늘 같은 자리여야 한다. */
+  position: sticky; top: 0; z-index: 60;
 }
 .app-web-hint,
 .app-theme-hint {
@@ -1055,8 +1074,11 @@ button.chat-send:not(.btn-primary) {
   transition: opacity var(--t-base);
 }
 .app-chat-btn:hover { opacity: .85; }
-/* 앱 모드에서는 떠 있는 버튼을 쓰지 않는다(콘텐츠를 가린다) */
-@media (max-width: 767px) { .chat-fab { display: none; } }
+/* 2026-10-11 제거: 여기 `@media (max-width:767px) { .chat-fab { display:none } }` 가 있었다.
+   주석은 "앱 모드에서는 떠 있는 버튼을 쓰지 않는다"였는데, `.chat-fab` 은 **웹 모드에서만**
+   렌더된다(앱 모드는 상단 `.app-chat-btn` 을 쓴다). 그래서 이 규칙은 앱 모드에 아무 영향이
+   없고, 폰에서 웹 레이아웃을 쓸 때 **채팅 진입점을 통째로 없앴다** — 의도와 정반대였다.
+   폭이 아니라 모드로 갈라야 하는 규칙을 폭으로 적은 것이 원인이다. */
 
 /* 답변이 길이 상한에 걸려 끊겼을 때 — 조용히 넘기지 않는다.
    잘린 줄 모르고 그대로 믿는 것이 가장 나쁜 결과다(2026-09-03 품질 사고). */
@@ -1179,6 +1201,8 @@ button.chat-send:not(.btn-primary) {
   position: fixed; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   z-index: 9990;
   min-height: 34px; padding: 0 12px;
+  /* 아이콘 + 글자를 한 줄로 — 2026-10-11 아이콘 추가 */
+  display: inline-flex; align-items: center; gap: 5px;
   border-radius: 4px;
   border: 1px solid var(--clr-border-md);
   background: var(--clr-surface); color: var(--clr-text-sub);
@@ -1242,3 +1266,89 @@ button.chat-send:not(.btn-primary) {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .fb-count { font-size: 10.5px; color: var(--clr-text-muted); font-variant-numeric: tabular-nums; }
+
+/* ── 좁은 웹 화면(폴더블 펼침·작은 노트북) — 2026-10-11 ──────────────────
+   웹 모드는 viewport 를 width=1180 으로 고정한다. 그 폭에서 사이드바 256 + 우패널 300
+   = 556px 을 좌우가 먹어 **가운데 본문이 568px** 밖에 남지 않았다. 폴드를 펼쳐
+   웹으로 보면 그 1180 이 다시 840 물리폭으로 축소되므로 본문은 더 좁게 느껴진다.
+   오너 지적: "좌측 메뉴 여백을 대폭 줄이고 가운데를 더 보여줘."
+   데스크톱(>1280)은 균형이 맞다고 했으므로 건드리지 않는다 — 좁을 때만 줄인다. */
+@media (max-width: 1280px) {
+  :root { --sidebar-w: 168px; --panel-w: 236px; }
+  .web-main-col { padding: 16px 16px 40px; }
+  .side-nav-label-box { display: none; }   /* 설명 박스는 좁을 때 가장 먼저 포기한다 */
+}
+/* 더 좁으면 우측 패널까지 접는다 — 본문이 먼저다 */
+@media (max-width: 1040px) {
+  :root { --sidebar-w: 150px; }
+  .right-panel { display: none; }
+}
+
+/* ── 투자 원칙 패널 (챗 안) ──────────────────────────────────────
+   design.md: R1 플랫(좌측 색띠 금지) · 컬러 이모지 금지 → SVG 1.5px 라인 아이콘.
+   평소엔 접어 둔다 — 대화가 주인공이고 원칙은 "무엇을 전제로 말하나"가
+   궁금할 때 펼쳐 보는 것이다. */
+.chat-principles { border-bottom: 1px solid var(--clr-border); flex: 0 0 auto; }
+.chat-principles-toggle {
+  width: 100%; display: flex; align-items: center; gap: 7px;
+  padding: 9px 14px; background: transparent; border: none;
+  font-family: inherit; font-size: 12px; font-weight: 700;
+  color: var(--clr-text-sub); cursor: pointer;
+}
+.chat-principles-toggle:hover { background: var(--clr-bg); }
+.cp-ico { display: inline-flex; color: var(--clr-accent, #0EA5E9); flex-shrink: 0; }
+.cp-count {
+  min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+  background: var(--clr-accent, #0EA5E9); color: #fff;
+  font-size: 10px; font-weight: 800; line-height: 17px; text-align: center;
+}
+.cp-caret { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--clr-text-muted); }
+
+.chat-principles-body { padding: 0 14px 12px; }
+.cp-lead, .cp-empty, .cp-msg {
+  font-size: 10.5px; line-height: 1.65; color: var(--clr-text-muted); padding: 2px 0 8px;
+}
+.cp-empty { padding: 8px 0; }
+.cp-msg { color: var(--clr-accent, #0EA5E9); font-weight: 700; }
+
+.cp-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 0; border-top: 1px solid var(--clr-border);
+}
+.cp-item-main { flex: 1; min-width: 0; }
+.cp-item-text { font-size: 12px; line-height: 1.6; color: var(--clr-text-strong); }
+.cp-item-src {
+  font-size: 10px; color: var(--clr-text-muted); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cp-tag {
+  flex-shrink: 0; font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 3px;
+  color: var(--clr-text-muted); border: 1px solid var(--clr-border-md);
+}
+.cp-tag.is-own { color: var(--clr-accent, #0EA5E9); border-color: currentColor; }
+.cp-del {
+  flex-shrink: 0; background: none; border: none; cursor: pointer; padding: 2px;
+  color: var(--clr-text-muted); display: inline-flex;
+}
+.cp-del:hover { color: var(--clr-neg-dark, #DC2626); }
+
+.cp-add { display: flex; gap: 6px; margin-top: 10px; }
+.cp-add input {
+  flex: 1; min-width: 0; font-family: inherit; font-size: 12px;
+  padding: 7px 9px; border-radius: 4px;
+  border: 1px solid var(--clr-border-md); background: var(--clr-surface);
+  color: var(--clr-text-strong);
+}
+/* R4 단일 위계 — 보조 동작은 테두리만, 강조색 버튼을 늘리지 않는다 */
+.cp-btn, .cp-distill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  font-family: inherit; font-size: 11.5px; font-weight: 700;
+  padding: 7px 11px; border-radius: 4px; cursor: pointer;
+  background: transparent; border: 1px solid var(--clr-border-md);
+  color: var(--clr-text-sub); flex-shrink: 0;
+}
+.cp-distill { width: 100%; margin-top: 8px; }
+.cp-btn:disabled, .cp-distill:disabled { opacity: .5; cursor: default; }
+.cp-btn:not(:disabled):hover, .cp-distill:not(:disabled):hover {
+  border-color: var(--clr-accent, #0EA5E9); color: var(--clr-accent, #0EA5E9);
+}

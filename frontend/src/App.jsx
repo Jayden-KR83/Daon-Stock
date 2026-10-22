@@ -73,15 +73,35 @@ export default function App() {
     }
   }, [authToken])
 
-  // 모바일 뷰포트 감지 — 768px 미만이면 웹 모드 설정과 무관하게 앱 레이아웃으로 강제 전환
-  const [isMobile, setIsMobile] = React.useState(
-    typeof window !== 'undefined' && window.innerWidth < 768
+  /* 뷰포트 3단계 — 2026-10-11: 2단계(폰/데스크톱)로는 폴더블을 담지 못했다.
+     갤럭시 Z Fold 를 펼치면 폭이 약 840px 이라 isMobile 이 false 가 되고,
+     웹 모드 + viewport width=1180 으로 넘어가 **축소 렌더**된다. 손가락으로 쓰는
+     기기인데 데스크톱 취급을 받는다.
+       phone   < 768   앱 레이아웃(한 열 480)
+       tablet  768~1179 앱 레이아웃이되 폭을 넓힌다(폴더블 펼침·태블릿)
+       desktop >= 1180 웹 레이아웃
+     펼치고 접을 때마다 resize 가 오므로 등급이 즉시 따라간다. */
+  /* 폭만으로는 '폴더블 펼침'과 '데스크톱의 작은 창'을 구분할 수 없다.
+     1024px 창을 쓰는 PC 사용자까지 앱 레이아웃으로 끌고 오면 안 되므로
+     **포인터 종류**를 같이 본다 — 손가락(coarse)이면 태블릿, 마우스면 데스크톱. */
+  const coarsePointer = () => {
+    try { return window.matchMedia('(pointer: coarse)').matches } catch { return false }
+  }
+  const tierOf = (w) =>
+    w < 768 ? 'phone' : (w < 1180 && coarsePointer()) ? 'tablet' : 'desktop'
+  const [tier, setTier] = React.useState(
+    typeof window !== 'undefined' ? tierOf(window.innerWidth) : 'phone'
   )
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < 768)
+    const onResize = () => setTier(tierOf(window.innerWidth))
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    window.addEventListener('orientationchange', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('orientationchange', onResize)
+    }
   }, [])
+  const isMobile = tier !== 'desktop'
 
   useEffect(() => {
     const el = document.getElementById('loading')
@@ -285,17 +305,27 @@ export default function App() {
 
   const TabComponent = TABS[activeTab] || HoldingsTab
 
-  /* 탭 전환 시 페이드+슬라이드 모션. mode="wait"로 이전 탭 exit 후 새 탭 enter.
-     ErrorBoundary로 한 탭 crash 시 흰화면 대신 명확한 안내 표시.
-     Suspense로 lazy 청크 로딩 가림 (첫 진입만 짧은 LOADING) */
+  /* 탭 전환 모션 — 2026-10-11 가로·방향 전환으로 교체.
+     예전에는 y: 8 → 0 → -4 세로 페이드였다. 좌우로 넘겼는데 화면은 아래에서 올라왔다가
+     위로 빠지니 "움직였다가 제자리로 돌아온다"로 보였다(오너 지적).
+     이제 **가는 방향**으로 민다: 오른쪽 탭이면 오른쪽에서 들어오고 왼쪽으로 빠진다.
+     탭을 눌러도, 스와이프해도 같은 규칙이라 손끝의 방향과 화면의 방향이 일치한다. */
+  const prevTabRef = useRef(activeTab)
+  const slideDir = React.useMemo(() => {
+    const from = swipeOrder.indexOf(prevTabRef.current)
+    const to   = swipeOrder.indexOf(activeTab)
+    return (from >= 0 && to >= 0 && to < from) ? -1 : 1
+  }, [activeTab, swipeOrder])
+  useEffect(() => { prevTabRef.current = activeTab }, [activeTab])
+
   const tabBody = (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key={activeTab}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -4 }}
-        transition={{ duration: 0.22, ease: [0.22, 0.61, 0.36, 1] }}
+        initial={{ opacity: 0, x: slideDir * 36 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: slideDir * -36 }}
+        transition={{ duration: 0.2, ease: [0.22, 0.61, 0.36, 1] }}
         style={{ minHeight: '100%' }}
       >
         <ErrorBoundary name={`Tab#${activeTab}`} key={`eb-${activeTab}`}>
@@ -337,7 +367,7 @@ export default function App() {
 
   /* ── 앱 모드 ── */
   return (
-    <div className="app-root app-mode-app">
+    <div className={`app-root app-mode-app${tier === 'tablet' ? ' app-mode-wide' : ''}`}>
       <div className="app-top-controls">
         <PrivacyQuickToggle />
         <ChatTopButton />
@@ -413,13 +443,14 @@ function ChatTopButton() {
   const chatOpen = useStore(s => s.chatOpen)
   return (
     <button className="app-chat-btn" onClick={() => openChat('general')}
-      title="다온에게 묻기" aria-label="다온에게 묻기"
+      title="다온에게 말 걸기" aria-label="다온에게 말 걸기"
       aria-expanded={chatOpen}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-        strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
+        strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+        <path d="M20 11.5a7.8 7.8 0 0 1-8 7.7 8.6 8.6 0 0 1-3.2-.6L4 20l1.4-4.3A7.6 7.6 0 0 1 4 11.5a7.8 7.8 0 0 1 8-7.7 7.8 7.8 0 0 1 8 7.7z"/>
+        <path d="M12 8.2v6.6M8.9 11.5h6.2"/>
       </svg>
-      묻기
+      다온에게
     </button>
   )
 }
@@ -433,12 +464,13 @@ function ChatFab() {
   if (chatOpen) return null
   return (
     <button className="chat-fab" onClick={() => openChat('general')}
-      aria-label="다온에게 묻기">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      aria-label="다온에게 말 걸기">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
         strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+        <path d="M20 11.5a7.8 7.8 0 0 1-8 7.7 8.6 8.6 0 0 1-3.2-.6L4 20l1.4-4.3A7.6 7.6 0 0 1 4 11.5a7.8 7.8 0 0 1 8-7.7 7.8 7.8 0 0 1 8 7.7z"/>
+        <path d="M12 8.2v6.6M8.9 11.5h6.2"/>
       </svg>
-      묻기
+      다온에게
     </button>
   )
 }

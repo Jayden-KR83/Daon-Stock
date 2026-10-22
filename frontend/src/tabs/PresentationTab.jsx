@@ -1,7 +1,10 @@
 import React, { useState } from 'react'
+import BlueprintSection from '../components/BlueprintSection'
 
 /* ─── 데이터 ─── */
-const SECTIONS = ['개요', 'UI 변천사', '통계', '마일스톤', '앱 비교', '로드맵']
+/* '설계도'를 개요 바로 뒤에 둔다(2026-10-11) — 나머지는 '어떻게 왔나'의 기록이고,
+   설계도만 '지금 어떻게 생겼고 어디로 가나'를 답한다. 다음에 뭘 할지 정할 때 여는 장이다. */
+const SECTIONS = ['개요', '설계도', 'UI 변천사', '통계', '마일스톤', '앱 비교', '로드맵']
 
 const FIRST_PROMPT = `"나는 미국·한국 주식을 동시에 보유하고 있는 개인 투자자야.
 키움, 토스증권 앱을 쓰는데 내 포트폴리오 전체를 한눈에 보는 앱이 없어.
@@ -288,8 +291,8 @@ const ROADMAP = [
   { title: '실적발표 전날 푸시', priority: 'Medium',
     desc: '보유 종목의 실적발표 하루 전에 푸시를 보낸다. 급등락(±5%) 푸시와 같은 경로·같은 중복 방지 방식을 쓴다.',
     cost: '추가 비용 0 — yfinance 실적일(한·미 모두 미래 날짜 제공 실측) + 기존 _send_push', devTime: '반나절~1일(추정)',
-    considerations: '2026-09-16 레이더(09-09 이월 1순위): earnings_calendar 안의 _fetch 를 cron 에서 부를 수 있게 꺼내야 한다. 배당락일 푸시는 뺐다 — yfinance 가 한국 종목·ETF 는 지난 날짜나 빈 값을 줘서 믿을 소스가 없다(OpenDART 가 후보). 삼성전자처럼 월초 잠정실적을 따로 내는 종목은 yfinance 날짜가 놓칠 수 있다(미검증). 가격 알림이 수익률을 낮췄다는 연구(SSRN "Alert for Alerts", 원문 미확인)가 있어 빈도는 보유 종목·하루 1회로 묶는다.',
-    verdict: '검토 예정', verdictReason: '착수는 오너 결정.' },
+    considerations: '2026-09-16 레이더(09-09 이월 1순위): earnings_calendar 안의 _fetch 를 cron 에서 부를 수 있게 꺼내야 한다. 배당락일 푸시는 뺐다 — yfinance 가 한국 종목·ETF 는 지난 날짜나 빈 값을 줘서 믿을 소스가 없다(OpenDART 가 후보). 삼성전자처럼 월초 잠정실적을 따로 내는 종목은 yfinance 날짜가 놓칠 수 있다(미검증). 가격 알림이 수익률을 낮췄다는 연구(SSRN "Alert for Alerts", 원문 미확인)가 있어 빈도는 보유 종목·하루 1회로 묶는다. 2026-10-08 구현: `_fetch_earnings_all`(창 필터 분리) · `_earnings_due_date`(순수 함수) · `/api/cron/earnings_alerts` · `earnings_alert_state` 중복 방지 · 서버 cron 08:00 KST. 상한 50명/200종목.',
+    verdict: '완료', verdictReason: '2026-10-08 구현·배포. 알림은 보유·관심 + 푸시 구독자에게 하루 1회, 발표 전날에만.' },
   { title: '급등락 푸시에 관련 뉴스 1줄', priority: 'Low',
     desc: '±5% 급등락 푸시 본문에 그 종목의 최신 헤드라인 1줄을 붙인다. 알림 목록에도 같이 남는다.',
     cost: '추가 비용 0 — 기존 _stock_news(국내=네이버·해외=Yahoo), 알림이 뜬 종목만 호출', devTime: '작음(1~2시간)',
@@ -525,7 +528,9 @@ export default function PresentationTab() {
       )}
 
       {/* ══════════ UI 변천사 ══════════ */}
-      {sec === 1 && (
+      {sec === 1 && <BlueprintSection />}
+
+      {sec === 2 && (
         <div className="mono-card">
           <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>
             UI/UX 변천사 — 단계별 비교
@@ -662,7 +667,7 @@ export default function PresentationTab() {
       )}
 
       {/* ══════════ 통계 ══════════ */}
-      {sec === 2 && (
+      {sec === 3 && (
         <>
           {/* 무채색 2-컬럼 stat grid (큰 숫자 위계 줄임) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)',
@@ -724,7 +729,7 @@ export default function PresentationTab() {
       )}
 
       {/* ══════════ 마일스톤 ══════════ */}
-      {sec === 3 && (
+      {sec === 4 && (
         <div className="mono-card">
           <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>
             개발 마일스톤
@@ -777,7 +782,7 @@ export default function PresentationTab() {
       )}
 
       {/* ══════════ 앱 비교 ══════════ */}
-      {sec === 4 && (
+      {sec === 5 && (
         <div className="mono-card">
           <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>
             시중 주식앱 기능 비교
@@ -859,7 +864,7 @@ export default function PresentationTab() {
       )}
 
       {/* ══════════ 로드맵 ══════════ */}
-      {sec === 5 && (
+      {sec === 6 && (
         <>
           <div className="mono-card" style={{ marginBottom: 12 }}>
             <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>

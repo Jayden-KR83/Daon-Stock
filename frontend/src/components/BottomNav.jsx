@@ -114,24 +114,16 @@ export default function BottomNav() {
   const [moreOpen, setMoreOpen] = useState(false)
   const stripRef = useRef(null)
 
-  /* ── 하단바를 누른 채 좌우로 끌어 메뉴 이동 (2026-09-14 요청) ──────────
-     본문 스와이프는 이미 있었지만 하단바는 가로 스크롤 때문에 제외돼 있었다.
-     여기서는 스크롤 대신 **손가락 밑의 메뉴를 그대로 고른다** — 끌면 선택이
-     따라오고 손을 떼면 그 자리에 머문다. 슬라이더처럼 쓰인다.
+  /* ── 하단바 끌기 = **메뉴 줄을 민다** (2026-10-11 수정) ────────────────
+     2026-09-14 에는 반대로 동작했다 — 끌면 손가락 밑의 메뉴가 그대로 선택돼
+     슬라이더처럼 탭이 계속 바뀌었다. 오너 지적: "누른 채로 움직이면 해당 탭은
+     그대로 있고 네비게이션 바들이 움직여야지."
+     맞는 말이다. 끌기는 **보는 범위를 옮기는 동작**이지 고르는 동작이 아니다.
+     목록을 끌 때마다 선택이 바뀌는 UI 는 어디에도 없다.
 
-     ⚠ 탭이 실제로 바뀌는 것은 끌기 임계값(8px)을 넘은 뒤부터다.
-       그러지 않으면 그냥 누른 것도 미세한 손떨림에 옆 탭으로 튄다.
-     ⚠ 가로 스크롤은 touch-action 으로 막는다. 화면 밖 메뉴는 '전체' 버튼으로
-       가면 되므로 접근이 막히지 않는다. */
+     이제 끌기는 `.nav-strip` 의 네이티브 가로 스크롤에 맡긴다(CSS overflow-x:auto).
+     JS 는 **끌었는지만 기억**해, 끌고 손을 뗄 때 클릭으로 탭이 바뀌지 않게 막는다. */
   const dragRef = useRef({ on: false, moved: false, x0: 0 })
-
-  function tabAtPoint(clientX, clientY) {
-    const el = document.elementFromPoint(clientX, clientY)
-    const btn = el && el.closest ? el.closest('.nav-btn') : null
-    if (!btn || !stripRef.current?.contains(btn)) return null
-    const idx = Object.entries(btnRefs.current).find(([, node]) => node === btn)?.[0]
-    return idx == null ? null : Number(idx)
-  }
 
   function onNavPointerDown(e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -140,10 +132,9 @@ export default function BottomNav() {
   function onNavPointerMove(e) {
     const d = dragRef.current
     if (!d.on) return
-    if (!d.moved && Math.abs(e.clientX - d.x0) < 8) return
-    d.moved = true
-    const idx = tabAtPoint(e.clientX, e.clientY)
-    if (idx != null && idx !== activeTab) setActiveTab(idx)
+    // 8px 을 넘으면 '끈 것'으로 본다 — 이후의 click 은 선택으로 치지 않는다.
+    // 미세한 손떨림까지 끌기로 보면 그냥 누른 것도 먹히지 않는다.
+    if (Math.abs(e.clientX - d.x0) >= 8) d.moved = true
   }
   function onNavPointerUp() { dragRef.current.on = false }
   const btnRefs  = useRef({})
@@ -184,7 +175,14 @@ export default function BottomNav() {
             onPointerUp={onNavPointerUp}
             onPointerCancel={onNavPointerUp}
             onPointerLeave={onNavPointerUp}
-            style={{ touchAction: 'pan-y' }}>
+            /* touch-action: pan-x — 가로로 끌면 **브라우저가** 스트립을 민다.
+               2026-10-12: 여기가 'pan-y' 였다. 드래그 스크럽(끌면 탭이 바뀜) 시절에
+               가로 스크롤을 일부러 막으려고 넣은 값인데, 10-11 에 스크럽을 걷어내면서
+               이 한 줄을 같이 지우지 않았다. 그래서 JS 는 더 이상 가로채지 않는데
+               브라우저도 가로 제스처를 처리하지 않아 **아무도 스크롤하지 않는** 상태가 됐다.
+               (실측: 숨은 폭 276px, 드래그해도 scrollLeft 0 고정)
+               pan-y 도 같이 허용해 세로 스크롤은 그대로 통과시킨다. */
+            style={{ touchAction: 'pan-x pan-y' }}>
             {visible.map(tab => {
               const active = activeTab === tab.idx
               return (

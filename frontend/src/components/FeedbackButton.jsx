@@ -64,9 +64,16 @@ export default function FeedbackButton() {
 
   return (
     <>
+      {/* '의견'은 서류 같아서 아무도 누르지 않는다. 말을 건네는 쪽으로 바꾼다.
+          design.md: 컬러 이모지 금지 → SVG 1.5px 라인 아이콘. */}
       <button className="fb-fab" onClick={() => setOpen(true)}
-        title="불편한 점 보내기" aria-label="불편한 점 보내기">
-        의견
+        title="쓰면서 불편한 점 알려주기" aria-label="쓰면서 불편한 점 알려주기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
+          strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
+          <path d="M12 20h7"/>
+          <path d="M16.1 3.9a2 2 0 0 1 2.8 2.8L8.4 17.3 4.5 18.4l1.1-3.9z"/>
+        </svg>
+        <span>한마디</span>
       </button>
 
       {open && (

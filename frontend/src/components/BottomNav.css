@@ -25,7 +25,10 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
   overscroll-behavior-x: contain;
-  scroll-snap-type: x proximity;
+  /* 스냅을 뺀다 — 손끝을 따라 '물 흐르듯' 움직여야 하는데, proximity 스냅이
+     드래그를 놓는 순간 가까운 칸으로 끌어당겨 멈칫거린다(2026-10-12 오너 지적).
+     활성 탭 가운데 정렬은 JS 가 scrollTo 로 따로 한다. */
+  -webkit-overflow-scrolling: touch;
 }
 .nav-strip::-webkit-scrollbar { display: none; }
 

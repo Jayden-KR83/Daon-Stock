@@ -496,16 +496,21 @@ export default function AllocationTab() {
         <PortfolioSummaryBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
       )}
 
-      {/* ━━ Ⅰ. 지금 내 상태 ━━
+      {/* ━━ Ⅰ. 내 보유종목 상태 ━━
           현황만 담는다. 문제 제기(Ⅱ)·실행(Ⅲ)과 섞지 않는다. */}
-      <ChapterHeader id="ch-1" n="Ⅰ" title="지금 내 상태" sub="자산 추이 · 비중 구성" />
+      <ChapterHeader id="ch-1" n="Ⅰ" title="내 보유종목 상태" sub="자산 추이 · 비중 구성" />
 
       {/* Net Worth 추이 */}
       <NetWorthChart />
 
-      {/* (이어서 비중 — 계좌·섹터·종목 분해)
-          배당은 Ⅲ장으로 옮겼다. '과거 배당 이력'과 '목표 배당 시뮬'이 서로 다른
-          장에 떨어져 있으면 "지금 얼마 → 목표 얼마 → 그러려면 이렇게"가 이어지지 않는다. */}
+      {/* 배당 이력 — 2026-10-11 Ⅲ장에서 되돌림.
+          한때 "지금 얼마 → 목표 얼마 → 그러려면 이렇게"를 한 흐름으로 붙이려고 이력과
+          시뮬을 둘 다 Ⅲ장에 뒀었다. 그런데 **이력은 제안이 아니라 현황이다** — 제안 장을
+          열었는데 과거 수령액이 먼저 나오면 뜬금없다(오너 지적). 지금은 역할대로 나눈다:
+          이력은 여기(Ⅰ 현황), 목표 시뮬은 Ⅲ장 목표 포트폴리오 바로 아래. */}
+      {allHoldings.length > 0 && (
+        <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
+      )}
 
 
       {/* View toggle */}
@@ -737,69 +742,9 @@ export default function AllocationTab() {
         </>
       )}
 
-      {/* ━━ Ⅱ. 무엇이 문제인가 ━━
-          결정론(룰 엔진) 경고를 먼저, AI 진단을 그다음에.
-          백테스트는 삭제했다 — 지금 보유한 종목은 이미 살아남은 종목이라 과거 성과가
-          구조적으로 과대평가되고(생존 편향), '내 실제 성과'는 Ⅰ장 자산 추이가 이미 보여준다. */}
-      {allHoldings.length > 0 && (
-        <>
-          <ChapterHeader id="ch-2" n="Ⅱ" title="무엇이 문제인가"
-            sub="리밸런싱 경고 · 건강도 · AI 리스크 진단" />
-
-          {/* 진단 범위 — 계좌 단위로 좁혀 볼 수 있다 */}
-          <div className="seg-ctrl" style={{ marginBottom: 8 }}>
-            {['ALL', ...ACCOUNTS].map(acc => (
-              <button key={acc} className={`seg-btn ${diagAcc === acc ? 'active' : ''}`}
-                onClick={() => setDiagAcc(acc)}>
-                {acc === 'ALL' ? '전체' : (ACC_LABELS[acc] || acc)}
-              </button>
-            ))}
-          </div>
-          {diagAcc !== 'ALL' && (
-            <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
-              lineHeight: 1.6, marginBottom: 10 }}>
-              <div>이 진단은 <strong>{ACC_LABELS[diagAcc] || diagAcc}</strong> 계좌만 기준입니다.</div>
-              <div>계좌 하나만 보면 분산이 실제보다 나빠 보일 수 있습니다 — 전체 기준도 함께 확인하세요.</div>
-            </div>
-          )}
-
-          {diagHoldings.length === 0 ? (
-            <div className="mono-card ko-keep" style={{ marginBottom: 12, fontSize: 12,
-              color: 'var(--m-text-tertiary)' }}>
-              이 계좌에는 보유 종목이 없습니다.
-            </div>
-          ) : (
-            <>
-              {/* 건강도 = 한 줄 배지. 점수 자체는 행동을 지시하지 못하므로 축약하고,
-                  실제 행동은 바로 아래 경고에서 나온다. */}
-              <HealthScoreCard key={`h-${diagAcc}`} compact
-                allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
-              <AlertsCard key={`a-${diagAcc}`}
-                allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
-            </>
-          )}
-
-          {/* AI 리스크 진단 — 생성 버튼은 Ⅲ장에 있다.
-              결과가 이 위치(Ⅱ장)에 붙으므로, 리포트가 없을 때는 어디서 만드는지 알려준다.
-              안내가 없으면 Ⅱ장이 그냥 빈 채로 끝나 사용자가 기능의 존재를 모른다. */}
-          {strategyReport ? (
-            <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} part="diagnosis" />
-          ) : (
-            <div className="mono-card ko-keep" style={{ marginBottom: 12, fontSize: 11.5,
-              color: 'var(--m-text-tertiary)', lineHeight: 1.6 }}>
-              <div>AI 리스크 진단은 아직 없습니다.</div>
-              <div>아래 Ⅲ장의 <strong>Portfolio Strategy Report</strong>를 실행하면 여기에 표시됩니다.</div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ━━ Ⅲ. 그래서 무엇을 할까 ━━ */}
-      <ChapterHeader id="ch-3" n="Ⅲ" title="그래서 무엇을 할까"
-        sub="목표 · 자산배분 · 배당 · 추천 액션" />
-      <GoalsCard />
-
-      {/* 다온 AI 전략 리포트 — Portfolio Strategy Report 스타일 */}
+      {/* ━━ 분석 실행 ━━ Ⅰ장(입력)과 Ⅱ장(결과) 사이의 경계.
+          한 번 누르면 Ⅱ장 진단과 Ⅲ장 제안이 **동시에** 갱신된다 —
+          둘은 같은 리포트 객체(strategyReport)를 나눠 쓰기 때문이다. */}
       {allHoldings.length > 0 && (
         <>
           <div className="tt-ai-widget" style={{ marginBottom: 12 }}>
@@ -928,7 +873,85 @@ export default function AllocationTab() {
               {strategyErr}
             </div>
           )}
+        </>
+      )}
 
+      {/* ━━ Ⅱ. 진단 ━━
+          결정론(룰 엔진) 경고를 먼저, AI 진단을 그다음에.
+          백테스트는 삭제했다 — 지금 보유한 종목은 이미 살아남은 종목이라 과거 성과가
+          구조적으로 과대평가되고(생존 편향), '내 실제 성과'는 Ⅰ장 자산 추이가 이미 보여준다. */}
+      {allHoldings.length > 0 && (
+        <>
+          <ChapterHeader id="ch-2" n="Ⅱ" title="진단"
+            sub="종합 진단 · 위험 요소 · 리밸런싱 경고" />
+
+          {/* 진단 범위 — 계좌 단위로 좁혀 볼 수 있다 */}
+          <div className="seg-ctrl" style={{ marginBottom: 8 }}>
+            {['ALL', ...ACCOUNTS].map(acc => (
+              <button key={acc} className={`seg-btn ${diagAcc === acc ? 'active' : ''}`}
+                onClick={() => setDiagAcc(acc)}>
+                {acc === 'ALL' ? '전체' : (ACC_LABELS[acc] || acc)}
+              </button>
+            ))}
+          </div>
+          {diagAcc !== 'ALL' && (
+            <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
+              lineHeight: 1.6, marginBottom: 10 }}>
+              <div>이 진단은 <strong>{ACC_LABELS[diagAcc] || diagAcc}</strong> 계좌만 기준입니다.</div>
+              <div>계좌 하나만 보면 분산이 실제보다 나빠 보일 수 있습니다 — 전체 기준도 함께 확인하세요.</div>
+            </div>
+          )}
+
+          {/* 순서: 종합 진단 → 주요 위험 요소 → 자동 리밸런싱 경고 (2026-10-11 뒤집음).
+              예전엔 룰 엔진 경고가 맨 위였다. 경고는 "무엇이 걸렸나"만 알 뿐 **왜 문제인지**를
+              모른다 — 그걸 먼저 읽어야 아래 경고가 해석된다. 사람이 진단서를 읽는 순서와도 같다:
+              소견 → 위험 인자 → 조치 항목.
+              AI 리포트 생성 버튼은 Ⅰ장 끝에 있다(입력 → 실행 → 결과 Ⅱ·Ⅲ). */}
+          {strategyReport ? (
+            <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} part="diagnosis" />
+          ) : (
+            <div className="mono-card ko-keep" style={{ marginBottom: 12, fontSize: 11.5,
+              color: 'var(--m-text-tertiary)', lineHeight: 1.6 }}>
+              <div>AI 리스크 진단은 아직 없습니다.</div>
+              <div>위 Ⅰ장 끝의 <strong>AI 전략 분석</strong>을 실행하면 여기에 표시됩니다.</div>
+            </div>
+          )}
+
+          {diagHoldings.length === 0 ? (
+            <div className="mono-card ko-keep" style={{ marginBottom: 12, fontSize: 12,
+              color: 'var(--m-text-tertiary)' }}>
+              이 계좌에는 보유 종목이 없습니다.
+            </div>
+          ) : (
+            <>
+              {/* 건강도 = 한 줄 배지. 점수 자체는 행동을 지시하지 못하므로 축약하고,
+                  실제 행동은 바로 아래 경고에서 나온다. */}
+              <HealthScoreCard key={`h-${diagAcc}`} compact
+                allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
+              <AlertsCard key={`a-${diagAcc}`}
+                allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
+            </>
+          )}
+        </>
+      )}
+
+      {/* ━━ Ⅲ. 제안 ━━ */}
+      <ChapterHeader id="ch-3" n="Ⅲ" title="제안"
+        sub="목표 · 자산배분 · 배당 · 추천 액션" />
+      <GoalsCard />
+
+      {/* 목표 배당 시뮬 — 목표 기반 포트폴리오 바로 아래. 둘 다 "목표를 넣으면 이렇게"라
+          같은 질문의 두 얼굴이다(자산 목표 / 현금흐름 목표). 현황은 Ⅰ장 배당 이력에 있다. */}
+      {allHoldings.length > 0 && strategyReport && (
+        <DaonAIReport data={strategyReport} part="dividend" />
+      )}
+
+
+      {/* AI 전략 리포트의 자산배분 — 실행 버튼은 Ⅰ장 끝에 있다.
+          결과가 Ⅱ·Ⅲ 두 곳에 나뉘어 붙으므로, 버튼을 둘 중 하나에 두면
+          "왜 저기서 눌렀는데 여기가 바뀌지"가 된다(2026-10-11 오너 지적). */}
+      {allHoldings.length > 0 && (
+        <>
           {strategyReport && (
             <motion.div
               initial={{ opacity: 0, y: 14 }}
@@ -939,17 +962,6 @@ export default function AllocationTab() {
               {/* ① 5년 단위 자산배분 */}
               <DaonAIReport data={strategyReport} part="alloc" />
             </motion.div>
-          )}
-        </>
-      )}
-
-      {/* ② 배당 — "지금 얼마 받고 있나 → 목표를 넣으면 → 이렇게 배분하면 된다"
-          한 흐름으로 붙인다. 예전에는 이력이 Ⅰ장, 시뮬이 Ⅲ장에 떨어져 있었다. */}
-      {allHoldings.length > 0 && (
-        <>
-          <DividendsCard allHoldings={allHoldings} usdKrw={usdKrw} />
-          {strategyReport && (
-            <DaonAIReport data={strategyReport} part="dividend" />
           )}
         </>
       )}
@@ -974,7 +986,7 @@ export default function AllocationTab() {
 
       {/* ━━ 부록 ━━ 자주 쓰지 않는 도구는 맨 아래로 */}
       {allHoldings.length > 0 && (
-        <ChapterHeader id="ch-x" n="부록" title="내보내기" sub="다른 LLM에 교차검증을 맡길 때" />
+        <ChapterHeader id="ch-x" n="부록" title="3자 검증 (원할 시)" sub="다른 LLM에 교차검증을 맡길 때" />
       )}
       {allHoldings.length > 0 && (
         <div style={{ display: 'flex', justifyContent: 'flex-end',
