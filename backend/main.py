@@ -765,26 +765,17 @@ KOSPI_SECTOR_ETFS = {
     'IT·반도체':('091160.KS',25),'2차전지':('305720.KS',15),
     '금융·은행':('091220.KS',12),'자동차':('091180.KS',10),
     '화학·에너지':('117460.KS',8),'헬스케어':('143860.KS',7),
-    '방산·우주':('310080.KS',6),'통신':('098560.KS',5),
+    '방산·우주':('310080.KS',6),
     '건설':('117700.KS',5),'철강·소재':('102960.KS',4),'유통·소비':('091170.KS',3),
+    # '통신':('098560.KS',5) — 2026-10-11 제거. 상장폐지된 코드다(네이버 실시간 API 가
+    # datas:[] 를 준다). 죽은 줄 모르고 남아 있던 탓에 섹터 조회가 매번 이 하나 때문에
+    # 폴백 경로로 떨어져 4.4초를 더 썼다. 대체 ETF 는 오너가 고를 일이라 비워 둔다 —
+    # 코드를 추측해 넣으면 틀린 섹터 등락을 화면에 띄우게 된다.
 }
-KR_ETF_SECTOR = {
-    '305720':'2차전지','364980':'2차전지','371460':'2차전지',
-    '091160':'IT·반도체','091170':'IT·반도체','266370':'IT·반도체',
-    '143860':'헬스케어','326030':'헬스케어',
-    '310080':'방산·우주','272210':'방산·우주',
-    '069500':'S&P500/코스피','278540':'미국주식','360750':'미국주식',
-    '148020':'채권','136340':'채권',
-}
-US_ETF_SECTOR = {
-    'TLT':'채권','BND':'채권','IEF':'채권','SHY':'채권','AGG':'채권',
-    'GLD':'금·귀금속','IAU':'금·귀금속','SLV':'은·귀금속',
-    'QQQ':'AI·기술','XLK':'AI·기술','SOXX':'AI·반도체','SMH':'AI·반도체',
-    'XLV':'헬스케어','IBB':'헬스케어바이오',
-    'XLE':'에너지','XLF':'금융','XLI':'산업재','XLU':'유틸리티','XLRE':'부동산',
-    'ITA':'방산','SPY':'S&P500 ETF','IVV':'S&P500 ETF','VOO':'S&P500 ETF',
-    'IBIT':'BTC ETF','FBTC':'BTC ETF',
-}
+# 섹터 분류 정본은 backend/sectors.py 한 곳이다 — 라벨·대분류·ETF 표가 모두 거기 있다.
+# 여기서 다시 적지 않는 이유: 표가 두 벌이 되는 순간 반드시 어긋난다(2026-10-10 실제 발생).
+from sectors import (KR_ETF_SECTOR, US_ETF_SECTOR, SECTOR_GROUPS,
+                     LABEL_TO_GROUP, sector_group, labels_by_group, unknown_labels)
 
 # ─── TTL Cache ────────────────────────────────────────────────────────
 _cache: Dict[str, Any] = {}
@@ -3149,6 +3140,65 @@ _KR_FRESH_TTL = 300             # 5분 — 정상 응답을 캐시
 _KR_STALE_TTL = 1800            # 30분 — Naver/yfinance 모두 실패 시 마지막 정상값 반환
 _KR_NEG_TTL   = 1800            # 30분 — 실패 코드 재시도 억제(아래 주석 참조)
 
+def _kr_price_batch(codes: list) -> dict:
+    """KR 종목 현재가를 **한 번의 요청으로** 여러 개 가져온다. {code: {...}}
+
+    네이버 실시간 폴링 엔드포인트는 쉼표로 코드를 이어 붙이면 한 번에 답한다
+    (실측: 3종목 0.01초). ETF·개별주 모두 된다.
+    예전 구현은 종목마다 HTML 페이지를 하나씩 긁었다 — 섹터 11개면 요청 11번이었고,
+    2026-10-11 에 네이버가 그 페이지를 SPA 로 바꾸면서 전부 파싱 실패했다.
+
+    반환 단위를 dict 로 둔 이유: 호출부가 종목 수와 무관하게 같은 코드를 쓰게 하려고.
+    한 개짜리 호출도 이 함수를 지나간다(= 경로가 하나뿐이라 한쪽만 썩지 않는다).
+    """
+    codes = [str(c).strip() for c in codes if str(c).strip()]
+    if not codes:
+        return {}
+    out: dict = {}
+    # 한 번에 너무 많이 보내면 거절당한다. 50개씩 끊는다.
+    for i in range(0, len(codes), 50):
+        chunk = codes[i:i + 50]
+        try:
+            r = _session.get(
+                'https://polling.finance.naver.com/api/realtime/domestic/stock/'
+                + ','.join(chunk),
+                headers={'User-Agent': 'Mozilla/5.0',
+                         'Referer': 'https://finance.naver.com/'},
+                timeout=6)
+            if r.status_code != 200:
+                continue
+            for d in (r.json().get('datas') or []):
+                code = str(d.get('itemCode') or '').strip()
+                try:
+                    cur = float(str(d.get('closePriceRaw')
+                                    or str(d.get('closePrice', '')).replace(',', '')))
+                except (TypeError, ValueError):
+                    continue
+                if cur <= 0:
+                    continue
+                try:
+                    pct = float(d.get('fluctuationsRatio'))
+                except (TypeError, ValueError):
+                    pct = 0.0
+                # 등락 '폭'은 부호가 빠져 오기도 한다 — 비율의 부호를 따른다
+                try:
+                    chg = abs(float(str(d.get('compareToPreviousClosePrice', '0'))
+                                    .replace(',', '')))
+                except (TypeError, ValueError):
+                    chg = 0.0
+                if pct < 0:
+                    chg = -chg
+                out[code] = {
+                    'current_price': round(cur), 'change': round(chg),
+                    'change_pct': round(pct, 4),
+                    'name': str(d.get('stockName') or '').strip(),
+                    '_source': 'naver-realtime',
+                }
+        except Exception:
+            continue
+    return out
+
+
 def _kr_price(ticker: str) -> dict | None:
     """KR 종목 현재가 — Naver 1차 → yfinance 2차 → stale 3차.
     HTML 구조 변경/네트워크 오류 시에도 마지막 정상값(30분 내) 반환해 한국 종목 전체 0 표시를 방지."""
@@ -3174,25 +3224,16 @@ def _kr_price(ticker: str) -> dict | None:
     code = kr_code(ticker)
     fetched = None
 
-    # 2-1) 1차 — Naver Finance 스크래핑
-    try:
-        r = _session.get(f'https://finance.naver.com/item/main.nhn?code={code}',
-                         headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            el = soup.select_one('.no_today .blind')
-            if el:
-                cur = int(el.text.replace(',', '').strip())
-                cel = soup.select_one('.no_exday .blind')
-                chg = int(cel.text.replace(',', '').strip()) if cel else 0
-                prev = cur - chg
-                fetched = {
-                    'current_price': cur, 'change': chg,
-                    'change_pct': round(chg / prev * 100, 4) if prev > 0 else 0.0,
-                    '_source': 'naver',
-                }
-    except Exception:
-        pass
+    # 2-1) 1차 — Naver 실시간 JSON API
+    #
+    # 2026-10-11: 여기가 `finance.naver.com/item/main.nhn` HTML 스크래핑이었다.
+    # 네이버가 그 주소를 **302 로 stock.naver.com SPA 에 넘기기** 시작했다. 응답은 200 이라
+    # 코드가 성공으로 보지만, 본문은 JS 셸이라 `.no_today .blind` 가 없어 파싱이 늘 실패했다
+    # (실측: 11개 종목 전부 PARSE-FAIL, 본문 크기까지 133036 로 동일 = 같은 셸).
+    # 그래서 매 호출이 2차 yfinance 로 떨어졌는데 그쪽은 **429**였다 — 한국 종목 전부가 멈췄다.
+    # HTML 을 긁지 않는다. 같은 데이터를 JSON 으로 주는 공개 폴링 엔드포인트를 쓴다.
+    batch = _kr_price_batch([code])
+    fetched = batch.get(code)
 
     # 2-2) 2차 — yfinance fallback (.KS / .KQ)
     # 변경점: Naver가 200 응답이지만 element 못 찾는 경우(HTML 구조 변경)에도 fallback 시도
@@ -3446,21 +3487,31 @@ def _sector_us() -> list:
 
 @ttl_cache(1800)
 def _sector_kr() -> list:
-    def _fetch(name_etf_weight):
-        name, (etf, weight) = name_etf_weight
-        tkr = etf.replace('.KS','').replace('.KQ','')
-        d = _kr_price(tkr)
-        if d:
-            return {'sector': name, 'pct': round(d['change_pct'], 2), 'weight': weight}
-        return None
+    """코스피 섹터 등락 — 요청 **한 번**으로 11개를 전부 받는다.
+
+    2026-10-11 이전: 스레드 11개가 각자 네이버 HTML 페이지를 긁었다. 네이버가 그 페이지를
+    SPA 로 바꾼 뒤로는 11개가 전부 파싱 실패 → yfinance 폴백(429) → 20초 타임아웃까지
+    기다렸다가 빈 목록을 돌려줬다. "하세월"의 정체가 이것이다.
+    지금은 폴링 API 한 번으로 끝난다 — 스레드풀이 필요 없다.
+    """
+    codes = [etf.replace('.KS', '').replace('.KQ', '')
+             for etf, _w in KOSPI_SECTOR_ETFS.values()]
+    prices = _kr_price_batch(codes)
+
+    # 배치에 없는 코드는 **개별 재시도하지 않는다.** 폴백은 죽은 코드 하나당 4초를 먹고,
+    # 섹터 표는 하루에 바뀌지 않는 고정 목록이라 빠진 건 일시 장애가 아니라 상장폐지다.
+    # 조용히 빼지 말고 로그로 남긴다 — 그래야 표를 고쳐야 한다는 걸 안다.
+    missing = [etf for etf, _w in KOSPI_SECTOR_ETFS.values()
+               if etf.replace('.KS', '').replace('.KQ', '') not in prices]
+    if missing:
+        print(f"[sector_kr] 시세를 못 받은 섹터 ETF: {missing} — 상장폐지 여부 확인 필요")
+
     results = []
-    with _cf.ThreadPoolExecutor(max_workers=11) as ex:
-        futs = [ex.submit(_fetch, item) for item in KOSPI_SECTOR_ETFS.items()]
-        for fut in _as_completed_safe(futs, timeout=20):
-            try:
-                r = fut.result(timeout=0)
-                if r: results.append(r)
-            except Exception: pass
+    for name, (etf, weight) in KOSPI_SECTOR_ETFS.items():
+        d = prices.get(etf.replace('.KS', '').replace('.KQ', ''))
+        if d:
+            results.append({'sector': name, 'pct': round(d['change_pct'], 2),
+                            'weight': weight})
     return sorted(results, key=lambda x: -x['weight'])
 
 @ttl_cache(3600)
