@@ -23,7 +23,7 @@ export async function getPushState() {
   if (!pushSupported()) return 'unsupported'
   if (Notification.permission === 'denied') return 'denied'
   try {
-    const reg = await navigator.serviceWorker.ready
+    const reg = await swRegistration(6000)
     const sub = await reg.pushManager.getSubscription()
     return sub ? 'on' : 'off'
   } catch {
@@ -43,6 +43,42 @@ function withTimeout(promise, ms, code) {
   ])
 }
 
+/* 서비스워커 등록을 가져온다 — `.ready` 를 쓰지 않는다.
+ *
+ * 2026-10-11: 홈 화면 앱에서 권한이 granted 인데도 진단이 '서비스워커 응답 없음(5초)',
+ * '구독 확인 불가' 로 멎었다. 원인은 기다리는 대상이 틀렸다는 것:
+ *   `.ready` 는 서비스워커가 **이 페이지를 제어(control)** 할 때까지 기다린다.
+ *   그런데 `pushManager.subscribe()` 에 필요한 건 제어가 아니라 **활성화(active)** 다.
+ *   새로 설치했거나 SW 가 갱신된 직후의 첫 화면은 아직 제어되지 않아 — 등록은 멀쩡한데
+ *   `.ready` 만 영영 안 풀린다.
+ * 그래서 getRegistration() 으로 먼저 집고, 없으면 직접 등록하고, active 가 될 때까지만 기다린다.
+ */
+async function swRegistration(ms = 8000) {
+  if (!('serviceWorker' in navigator)) throw new Error('unsupported')
+
+  let reg = await withTimeout(
+    navigator.serviceWorker.getRegistration('/'), ms, 'sw_timeout'
+  ).catch(() => null)
+
+  // 등록이 아예 없으면 한 번 직접 등록해 본다(자동 등록이 실패했을 수 있다)
+  if (!reg) {
+    try { reg = await withTimeout(navigator.serviceWorker.register('/sw.js', { scope: '/' }), ms, 'sw_timeout') }
+    catch { throw new Error('sw_register_failed') }
+  }
+  if (!reg) throw new Error('sw_none')
+  if (reg.active) return reg
+
+  // installing/waiting 상태면 활성화될 때까지만 기다린다
+  const worker = reg.installing || reg.waiting
+  if (!worker) throw new Error('sw_inactive')
+  await withTimeout(new Promise(res => {
+    const onChange = () => { if (worker.state === 'activated') { worker.removeEventListener('statechange', onChange); res() } }
+    worker.addEventListener('statechange', onChange)
+    if (worker.state === 'activated') res()
+  }), ms, 'sw_timeout')
+  return reg
+}
+
 /* 지금 기기의 상태를 그대로 돌려준다. 화면에 띄워 원인을 눈으로 보게 하려는 것 —
    "안 된다"는 제보만으로는 원격에서 원인을 좁힐 수 없다. */
 export async function pushDiagnostics() {
@@ -55,8 +91,8 @@ export async function pushDiagnostics() {
     구독: '확인 중',
   }
   try {
-    const reg = await withTimeout(navigator.serviceWorker.ready, 5000, 'sw_timeout')
-    d.서비스워커 = reg ? '등록됨' : '없음'
+    const reg = await swRegistration(6000)
+    d.서비스워커 = reg?.active ? '활성' : (reg ? '등록됨(비활성)' : '없음')
     const sub = await reg.pushManager.getSubscription()
     d.구독 = sub ? '있음' : '없음'
   } catch (e) {
@@ -73,7 +109,7 @@ export async function enablePush() {
   const perm = await Notification.requestPermission()
   if (perm === 'denied') throw new Error('denied')
   if (perm !== 'granted') throw new Error('dismissed')   // 사용자가 팝업을 닫음
-  const reg = await withTimeout(navigator.serviceWorker.ready, 8000, 'sw_timeout')
+  const reg = await swRegistration(10000)
   let sub = await reg.pushManager.getSubscription()
   if (!sub) {
     let key
@@ -119,7 +155,7 @@ export function syncAppBadge(count) {
 
 export async function disablePush() {
   if (!pushSupported()) return 'unsupported'
-  const reg = await navigator.serviceWorker.ready
+  const reg = await swRegistration(8000)
   const sub = await reg.pushManager.getSubscription()
   if (sub) {
     try { await unsubscribePush(sub.endpoint) } catch {}

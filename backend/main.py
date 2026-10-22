@@ -279,6 +279,13 @@ def _init_db():
             fired_at  REAL NOT NULL,
             PRIMARY KEY(user_id, ticker)
         );
+        CREATE TABLE IF NOT EXISTS earnings_alert_state (
+            user_id    TEXT NOT NULL,
+            ticker     TEXT NOT NULL,
+            earn_date  TEXT NOT NULL,          -- 'YYYY-MM-DD' 발표일
+            fired_at   REAL NOT NULL,
+            PRIMARY KEY(user_id, ticker, earn_date)
+        );
         CREATE TABLE IF NOT EXISTS notifications (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id       TEXT NOT NULL,
@@ -4684,6 +4691,87 @@ def root():
         return FileResponse(idx, headers=_NO_CACHE)
     return {"status": "ok", "app": "다온 API v2"}
 
+@app.get("/index.html", include_in_schema=False)
+def root_index():
+    """`/` 와 같은 파일. 2026-10-11: 이 라우트가 없어 **서비스워커 설치가 매번 실패**했다.
+
+    워크박스 프리캐시 목록에는 `index.html` 이 들어 있고, 설치 중 그 URL 들을 전부 받는다.
+    하나라도 200이 아니면 install 이 실패하고 워커는 redundant 가 된다 —
+    그러면 `reg.active` 가 영영 생기지 않아 푸시 구독을 할 수 없다.
+    `/` 만 있고 `/index.html` 이 없으면 사람 눈엔 멀쩡한데 PWA 만 조용히 죽는다.
+    """
+    return root()
+
+
+@app.get("/api/reset", include_in_schema=False)
+def pwa_reset():
+    """앱이 백지일 때 쓰는 **탈출구**. 서비스워커·캐시를 전부 지우고 다시 받는다.
+
+    2026-10-12: 홈 화면 앱이 통째로 뜨지 않는 일이 있었다. 서버·번들·SW 는 전부 정상이었고
+    (운영에서 로그인 후 10개 탭 순회까지 무오류 확인), 문제는 **기기에 박힌 옛 서비스워커**였다.
+    프리캐시가 404 로 깨지던 기간에 설치가 반복 실패하면서 남은 잔재다.
+
+    왜 하필 `/api/reset` 인가 — 서비스워커의 navigateFallbackDenylist 가
+    예나 지금이나 `/^\\/api\\//` 다. 즉 **지금까지 배포된 모든 버전의 SW 가 이 경로만은
+    가로채지 않는다.** 앱 안의 '업데이트 확인' 버튼은 앱이 떠야 누를 수 있으므로,
+    백지 상태에서는 쓸 수 없다. 탈출구는 앱 밖에 있어야 한다.
+    """
+    html = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>다온 복구</title><style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+background:#0B1120;color:#E2E8F0;margin:0;display:flex;min-height:100vh;align-items:center;
+justify-content:center;padding:24px}
+.c{max-width:420px;width:100%}h1{font-size:18px;margin:0 0 8px}
+p{font-size:13px;line-height:1.75;color:#94A3B8;margin:0 0 14px}
+#log{font-size:12px;line-height:1.9;background:#111827;border:1px solid #1F2937;
+border-radius:6px;padding:12px;margin:14px 0;white-space:pre-wrap}
+a,button{display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;
+padding:13px;border-radius:6px;font-size:14px;font-weight:700;font-family:inherit;
+background:#0EA5E9;color:#fff;border:none;cursor:pointer}
+</style></head><body><div class="c">
+<h1>다온 복구</h1>
+<p>앱이 열리지 않을 때 쓰는 화면입니다.<br>기기에 남은 옛 캐시와 서비스워커를 지웁니다.<br>
+로그인 정보는 지우지 않습니다.</p>
+<div id="log">준비 중…</div>
+<a id="go" href="/">다온 열기</a>
+</div><script>
+var log = document.getElementById('log'), lines = [];
+function say(t){ lines.push(t); log.textContent = lines.join('\\n'); }
+(async function(){
+  try {
+    var regs = ('serviceWorker' in navigator) ? await navigator.serviceWorker.getRegistrations() : [];
+    say('서비스워커 ' + regs.length + '개 발견');
+    for (var i=0;i<regs.length;i++){ await regs[i].unregister(); }
+    say(regs.length ? '서비스워커 해제 완료' : '해제할 서비스워커 없음');
+  } catch(e){ say('서비스워커 해제 실패: ' + e); }
+  try {
+    var keys = ('caches' in window) ? await caches.keys() : [];
+    say('캐시 ' + keys.length + '개 발견');
+    for (var j=0;j<keys.length;j++){ await caches.delete(keys[j]); }
+    say(keys.length ? '캐시 삭제 완료' : '삭제할 캐시 없음');
+  } catch(e){ say('캐시 삭제 실패: ' + e); }
+  say('');
+  say('완료 — 아래 버튼으로 다시 여세요.');
+  say('홈 화면 앱이라면 앱을 완전히 종료한 뒤 다시 열어주세요.');
+})();
+</script></body></html>"""
+    return _FResponse(content=html, media_type="text/html; charset=utf-8",
+                      headers=_NO_CACHE)
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+def apple_touch_icon():
+    """iOS 홈 화면 아이콘. 없으면 위와 같은 이유로 프리캐시가 깨진다.
+    파일이 없으면 512 아이콘으로 대신한다 — 404 를 내보내지 않는 것이 핵심이다."""
+    for name in ("apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png"):
+        p = os.path.join(STATIC_DIR, name)
+        if os.path.exists(p):
+            return FileResponse(p, media_type="image/png")
+    raise HTTPException(404)
+
+
 @app.get("/presentation.html", include_in_schema=False)
 def serve_presentation():
     f = os.path.join(STATIC_DIR, "presentation.html")
@@ -7642,6 +7730,57 @@ class EarningsReq(BaseModel):
     tickers: list = []
     days_ahead: int = 90
 
+
+def _fetch_earnings_all(tkr: str) -> list:
+    """티커 1개의 실적 발표일 전부. **조회 창으로 거르지 않는다.**
+
+    캐시 키는 티커 하나뿐인데 예전에는 창(win_lo~cutoff)으로 거른 결과를 담았다.
+    같은 종목을 다른 창으로 물으면 앞서 캐시된(좁은) 결과가 그대로 나온다.
+    창 필터는 호출부가 한다 — 그래야 엔드포인트와 cron 이 같은 캐시를 나눠 쓸 수 있다.
+    """
+    import yfinance as yf
+    tkr = str(tkr).upper()
+    kr_flag = is_kr(tkr)
+    nowt = time()
+    c = _earnings_cache.get(tkr)
+    if c and nowt - c[0] < _EARNINGS_TTL:
+        return c[1]
+    out = []
+    try:
+        ed = None
+        if kr_flag:
+            # KR: .KS(KOSPI) → .KQ(KOSDAQ) 순으로 시도 (있는 종목만)
+            code = tkr.lstrip('A')
+            for _sfx in ('.KS', '.KQ'):
+                try:
+                    _cand = yf.Ticker(code + _sfx).earnings_dates
+                    if _cand is not None and not _cand.empty:
+                        ed = _cand; break
+                except Exception:
+                    continue
+        else:
+            ed = yf.Ticker(tkr).earnings_dates   # DataFrame, index=date
+        if ed is not None and not ed.empty:
+            for ts_idx in ed.index:
+                try:
+                    ts = ts_idx.to_pydatetime().replace(tzinfo=None)
+                except Exception:
+                    continue
+                row = ed.loc[ts_idx]
+                nm = _KOSPI_NAMES.get(tkr.lstrip('A')) if kr_flag else tkr
+                out.append({
+                    'ticker': tkr,
+                    'name':   nm,            # KR은 한글명(유니버스), US는 티커
+                    'date':   ts.strftime('%Y-%m-%d'),
+                    'eps_estimate': float(row.get('EPS Estimate')) if row.get('EPS Estimate') == row.get('EPS Estimate') else None,
+                    'eps_actual':   float(row.get('Reported EPS')) if row.get('Reported EPS') == row.get('Reported EPS') else None,
+                })
+    except Exception:
+        pass
+    _earnings_cache[tkr] = (nowt, out)
+    _trim_ts_dict(_earnings_cache, 1000)
+    return out
+
 @app.post("/api/earnings/calendar")
 def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
     """보유·관심 + 참고 유니버스(나스닥30·S&P500 30·KOSPI30)의 실적 발표일 일괄 조회.
@@ -7655,48 +7794,9 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
     win_lo = now - _td(days=45)   # 이번 달 '과거' 발표일도 표시 (예: 지난주 NVDA 발표)
 
     def _fetch(tkr):
-        tkr = str(tkr).upper()
-        kr_flag = is_kr(tkr)
-        nowt = time()
-        c = _earnings_cache.get(tkr)
-        if c and nowt - c[0] < _EARNINGS_TTL:
-            return c[1]
-        out = []
-        try:
-            if kr_flag:
-                # KR: .KS(KOSPI) → .KQ(KOSDAQ) 순으로 earnings 시도 (있는 종목만 표시)
-                code = tkr.lstrip('A')
-                ed = None
-                for _sfx in ('.KS', '.KQ'):
-                    try:
-                        _cand = yf.Ticker(code + _sfx).earnings_dates
-                        if _cand is not None and not _cand.empty:
-                            ed = _cand; break
-                    except Exception:
-                        continue
-            else:
-                ed = yf.Ticker(tkr).earnings_dates   # DataFrame, index=date
-            if ed is not None and not ed.empty:
-                for ts_idx in ed.index:
-                    try:
-                        ts = ts_idx.to_pydatetime().replace(tzinfo=None)
-                    except Exception:
-                        continue
-                    if win_lo <= ts <= cutoff:
-                        row = ed.loc[ts_idx]
-                        nm = _KOSPI_NAMES.get(tkr.lstrip('A')) if kr_flag else tkr
-                        out.append({
-                            'ticker': tkr,
-                            'name':   nm,            # KR은 한글명(유니버스), US는 티커
-                            'date':   ts.strftime('%Y-%m-%d'),
-                            'eps_estimate': float(row.get('EPS Estimate')) if row.get('EPS Estimate') == row.get('EPS Estimate') else None,
-                            'eps_actual':   float(row.get('Reported EPS')) if row.get('Reported EPS') == row.get('Reported EPS') else None,
-                        })
-        except Exception:
-            pass
-        _earnings_cache[tkr] = (nowt, out)
-        _trim_ts_dict(_earnings_cache, 1000)
-        return out
+        # 창 필터는 여기서 — 캐시(_fetch_earnings_all)는 티커 단위로 전부 들고 있다.
+        return [e for e in _fetch_earnings_all(tkr)
+                if win_lo <= datetime.strptime(e['date'], '%Y-%m-%d') <= cutoff]
 
     # 보유·관심 + 참고 유니버스(S&P500·Nasdaq100 상위) 병합
     held = {str(t).upper() for t in req.tickers}
@@ -8886,6 +8986,143 @@ def _run_move_scan(now: float, quotes: dict) -> dict:
         return out
     except Exception as e:
         return {'error': str(e)[:200]}
+
+
+# ─── 실적발표 전날 알림 (cron, 하루 1회) ───────────────────────────
+# 왜 '전날'인가 — 발표 당일 아침에 알려주면 이미 시간외로 움직인 뒤인 경우가 많고,
+# 일주일 전에 알려주면 잊는다. 하루 전이 "확인하고 결정할 수 있는" 유일한 창이다.
+# 왜 보유·관심만인가 — 알림이 늘수록 쓸모가 준다. 전 종목을 알리면 끄게 된다.
+EARNINGS_SCAN_MAX_USERS   = 50     # 서버 cron 상한 — 사용자가 늘면 이 줄이 비용을 정한다
+EARNINGS_SCAN_MAX_TICKERS = 200
+
+
+def _earnings_due_date(events: list, today: str) -> str | None:
+    """events 중 '내일' 발표가 있으면 그 날짜를 돌려준다. 없으면 None.
+
+    today 는 KST 'YYYY-MM-DD'. 순수 함수라 테스트가 날짜를 고정할 수 있다.
+    yfinance 는 과거 발표일도 함께 주므로 미래만 본다.
+    """
+    from datetime import timedelta as _td
+    try:
+        tomorrow = (datetime.strptime(today, '%Y-%m-%d') + _td(days=1)).strftime('%Y-%m-%d')
+    except Exception:
+        return None
+    for e in events or []:
+        if str(e.get('date') or '')[:10] == tomorrow:
+            return tomorrow
+    return None
+
+
+def _run_earnings_scan(now: float) -> dict:
+    """보유·관심 종목 중 내일 실적을 발표하는 것이 있으면 알림 + 푸시. 하루 1회.
+
+    중복 방지는 earnings_alert_state(user_id, ticker, earn_date) — 같은 발표일로
+    두 번 보내지 않는다. 실패해도 다른 cron 에 영향이 없도록 전체를 격리한다.
+    """
+    try:
+        today = _kst_today_str()
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='earnings_scan_day'").fetchone()
+            if row and row['value'] == today:
+                return {'skipped': 'already_ran_today'}
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)",
+                ('earnings_scan_day', today))
+
+            # 푸시 구독이 있는 승인 사용자만 — 받을 수 없는 사람 몫까지 조회하지 않는다.
+            users = [r['user_id'] for r in conn.execute(
+                "SELECT DISTINCT u.user_id FROM users u "
+                "JOIN push_subscriptions p ON p.user_id = u.user_id "
+                "WHERE u.status='approved' LIMIT ?",
+                (EARNINGS_SCAN_MAX_USERS,)).fetchall()]
+            watch: dict = {}         # user_id -> {대표티커: 이름}
+            for uid in users:
+                items: dict = {}
+                for r in conn.execute(
+                    "SELECT ticker, name FROM portfolios "
+                    "WHERE user_id=? AND quantity>0", (uid,)).fetchall():
+                    items[r['ticker']] = r['name'] or r['ticker']
+                for r in conn.execute(
+                    "SELECT ticker, name FROM watchlist WHERE user_id=?",
+                    (uid,)).fetchall():
+                    items.setdefault(r['ticker'], r['name'] or r['ticker'])
+                if items:
+                    watch[uid] = items
+
+        if not watch:
+            return {'users': 0, 'sent': 0}
+
+        universe = sorted({t for items in watch.values() for t in items})
+        truncated = max(0, len(universe) - EARNINGS_SCAN_MAX_TICKERS)
+        universe = universe[:EARNINGS_SCAN_MAX_TICKERS]
+
+        due: dict = {}               # ticker -> 발표일
+        ex = _cf.ThreadPoolExecutor(max_workers=min(len(universe), 16))
+        try:
+            futs = {ex.submit(_fetch_earnings_all, t): t for t in universe}
+            for fut in _as_completed_safe(futs, timeout=60):
+                t = futs[fut]
+                try:
+                    d = _earnings_due_date(fut.result(timeout=0), today)
+                except Exception:
+                    d = None
+                if d:
+                    due[t] = d
+        except Exception:
+            pass
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
+
+        if not due:
+            return {'users': len(watch), 'tickers': len(universe), 'sent': 0}
+
+        pushed = []
+        with _db() as conn:
+            for uid, items in watch.items():
+                for tkr, nm in items.items():
+                    d = due.get(tkr)
+                    if not d:
+                        continue
+                    already = conn.execute(
+                        "SELECT 1 FROM earnings_alert_state "
+                        "WHERE user_id=? AND ticker=? AND earn_date=?",
+                        (uid, tkr, d)).fetchone()
+                    if already:
+                        continue
+                    msg = f"{nm} 실적 발표가 내일({d[5:]})입니다"
+                    conn.execute(
+                        "INSERT INTO notifications (user_id, ticker, name, kind, "
+                        "       message, created_at) VALUES (?,?,?,?,?,?)",
+                        (uid, tkr, nm, 'earnings', msg, now))
+                    conn.execute(
+                        "INSERT OR REPLACE INTO earnings_alert_state "
+                        "(user_id, ticker, earn_date, fired_at) VALUES (?,?,?,?)",
+                        (uid, tkr, d, now))
+                    pushed.append((uid, tkr, msg))
+
+        for uid, tkr, msg in pushed:
+            _send_push(uid, '다온 실적 알림', msg, '/', tag=f'earnings-{tkr}')
+
+        out = {'users': len(watch), 'tickers': len(universe), 'sent': len(pushed)}
+        if truncated:
+            out['truncated'] = truncated
+        return out
+    except Exception as e:
+        return {'error': str(e)[:200]}
+
+
+@app.post("/api/cron/earnings_alerts")
+def cron_earnings_alerts(req: TriggerReq):
+    """서버 cron 이 하루 1회 호출(KST 08:00 권장). cron_secret 은 settings 에서 검증."""
+    secret = ''
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='cron_secret'").fetchone()
+        if row: secret = row['value']
+    if not secret or req.cron_secret != secret:
+        raise HTTPException(403, "invalid cron secret")
+    return _run_earnings_scan(time())
 
 
 # ─── AI 주간 리밸런싱 리포트 (cron, 주 1회) ────────────────────────

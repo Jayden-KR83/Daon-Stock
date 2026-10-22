@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { pushSupported, getPushState, enablePush, disablePush, pushDiagnostics } from '../pushClient'
-import { sendTestPush, getMovePrefs, saveMovePrefs } from '../api'
+import { sendTestPush, getMovePrefs, saveMovePrefs, listNotifications } from '../api'
 import { useInstall, isStandalone as pwaStandalone } from '../utils/installPrompt'
 
 /* ══════════════════════════════════════════════════════════════
@@ -100,6 +100,30 @@ export default function PushSetupCard() {
 
   useEffect(() => { getPushState().then(setState).catch(() => setState('off')) }, [])
 
+  /* 꺼져 있을 때 '얼마나 놓치고 있나'를 숫자로 보여준다.
+     2026-10-11 실측: 서버는 알림 1,319건을 만들어 뒀는데 구독한 기기가 0대였다.
+     알림 생성·임계치(5%)·cron(5분)·VAPID 키까지 전부 멀쩡했고, 빠진 고리는 **기기 구독 하나**였다.
+     "켤 수 있습니다"라는 안내만으로는 켜지지 않는다 — 안 켜서 무엇을 놓쳤는지 보여야 한다. */
+  const [missed, setMissed] = useState(null)
+  /* 꺼져 있으면 진단을 **자동으로** 돌린다. 버튼을 눌러야 보이는 진단은
+     "왜 안 되지"를 겪는 사람에게 닿지 않는다 — 안 될 때 이미 떠 있어야 한다.
+     2026-10-11: OS 알림 권한은 '허용됨'인데 서버 구독이 0건인 상태가 실제로 있었다.
+     이 둘은 다른 단계다. 권한 허용은 '받을 준비', 구독은 '보낼 주소 등록'이다. */
+  useEffect(() => {
+    if (state === 'off') pushDiagnostics().then(setDiag).catch(() => setDiag(null))
+  }, [state])
+
+  useEffect(() => {
+    if (state !== 'off') { setMissed(null); return }
+    listNotifications(false, 100)
+      .then(d => {
+        const list = d?.notifications || d?.items || []
+        const weekAgo = Date.now() / 1000 - 7 * 86400
+        setMissed(list.filter(n => (n.created_at || 0) >= weekAgo).length)
+      })
+      .catch(() => setMissed(null))
+  }, [state])
+
   const installed  = pwaStandalone()
   const iosBlocked = isIos() && !installed
 
@@ -169,8 +193,49 @@ export default function PushSetupCard() {
       </div>
       <div className="ko-keep" style={{ fontSize: 11, color: 'var(--clr-text-muted)',
         marginBottom: 12, lineHeight: 1.7, whiteSpace: 'pre-line' }}>
-        {'앱을 열지 않아도 잠금화면으로 알림이 옵니다.\n기기마다 따로 켜야 합니다 — 휴대폰에서 켜면 휴대폰으로 옵니다.'}
+        {'앱을 열지 않아도 잠금화면으로 알림이 옵니다.\n기기마다 따로 켜야 합니다 — 휴대폰에서 켜면 휴대폰으로, PC에서 켜면 PC로 옵니다.'}
       </div>
+
+      {/* 권한은 있는데 구독이 없는 상태 — 가장 헷갈리는 자리라 따로 짚는다 */}
+      {diag && diag.권한 === 'granted' && diag.구독 === '없음' && (
+        <div className="ko-keep" style={{
+          border: '1px solid var(--clr-warn, #D97706)', borderRadius: 4,
+          padding: '9px 11px', marginBottom: 12, fontSize: 11.5, lineHeight: 1.7,
+          color: 'var(--clr-text-sub)' }}>
+          <div style={{ fontWeight: 800, color: 'var(--clr-warn, #D97706)' }}>
+            권한은 허용됐지만 이 기기가 아직 등록되지 않았습니다
+          </div>
+          <div>휴대폰 설정의 “알림 허용”은 <strong>받을 준비</strong>까지입니다.</div>
+          <div>서버가 보낼 <strong>주소</strong>는 아래 버튼을 눌러야 등록됩니다.</div>
+          <div>등록 전에는 OS 알림 목록에도 다온이 나타나지 않습니다 — 보낸 적이 없기 때문입니다.</div>
+        </div>
+      )}
+
+      {diag && (
+        <div style={{ display: 'grid', gridTemplateColumns: '68px 1fr', gap: '2px 8px',
+          fontSize: 11, marginBottom: 12, color: 'var(--clr-text-muted)' }}>
+          {Object.entries(diag).map(([k, v]) => (
+            <React.Fragment key={k}>
+              <span style={{ fontWeight: 700 }}>{k}</span>
+              <span style={{ color: (v === '없음' || v === 'default' || String(v).startsWith('아니오'))
+                ? 'var(--clr-warn, #D97706)' : 'var(--clr-text-sub)' }}>{v}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+
+      {missed > 0 && (
+        <div className="ko-keep" style={{
+          border: '1px solid var(--clr-warn, #D97706)', borderRadius: 4,
+          padding: '9px 11px', marginBottom: 12, fontSize: 11.5, lineHeight: 1.7,
+          color: 'var(--clr-text-sub)' }}>
+          <div style={{ fontWeight: 800, color: 'var(--clr-warn, #D97706)' }}>
+            지난 7일 알림 {missed}건이 이 기기로 오지 않았습니다
+          </div>
+          <div>서버는 조건이 맞을 때마다 알림을 만들고 있습니다.</div>
+          <div>다만 이 기기가 구독되어 있지 않아 앱 화면 안에만 쌓입니다.</div>
+        </div>
+      )}
 
       {/* 무엇이 오는가 — 켜기 전에 알아야 결정할 수 있다 */}
       <div style={{ background: 'var(--clr-bg)', border: '1px solid var(--clr-border-md)',

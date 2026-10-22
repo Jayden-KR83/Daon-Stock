@@ -361,7 +361,8 @@ const KIND_META = {
   low:    { label: '손절가', cls: 'sev-label is-high' },
   surge:  { label: '급등',   cls: 'sev-label is-critical' },
   plunge: { label: '급락',   cls: 'sev-label is-high' },
-  info:   { label: '안내',   cls: 'sev-label is-med' },
+  info:     { label: '안내', cls: 'sev-label is-med' },
+  earnings: { label: '실적', cls: 'sev-label is-med' },   // 실적발표 전날 cron
 }
 
 const SCOPE_LABELS = [
