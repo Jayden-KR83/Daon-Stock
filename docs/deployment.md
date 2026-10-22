@@ -24,11 +24,34 @@ scp -r -i $env:ORACLE_KEY "..\backend\static\assets" ubuntu@168.107.13.20:~/port
 # 서비스 재기동 없이도 정적 자산이라 즉시 반영됨
 ```
 
-### 백엔드 (main.py 변경)
+### 백엔드 — **손으로 하지 말고 `scripts\deploy.ps1` 을 쓴다** (2026-10-11)
+
 ```powershell
+cd C:\Users\user\AgentDev\daon
+.\scripts\deploy.ps1          # 빌드 확인 → 업로드 → 재시작 → 운영 URL 스모크
+```
+
+아래 수동 절차는 **참고용 기록이다. 그대로 쓰면 사고가 난다.**
+
+```powershell
+# ⚠ main.py 만 올린다 — backend 에 .py 가 하나라도 더 있으면 ImportError 로 앱이 죽는다
 scp -i $env:ORACLE_KEY "backend\main.py" ubuntu@168.107.13.20:~/portfolio/backend/
 ssh -i $env:ORACLE_KEY ubuntu@168.107.13.20 "sudo systemctl restart portfolio && sleep 4 && systemctl is-active portfolio"
 ```
+
+**왜 스크립트를 써야 하나 — 2026-10-11 에 실제로 걸린 두 가지**
+
+1. `backend/` 에 `sectors.py` 가 생겼는데 위 명령은 `main.py` 만 올린다. 그대로 배포했으면
+   `ImportError` → systemd 재시작 반복 → **앱 전체 다운**이었다(배포 직전에 발견).
+   `deploy.ps1` 은 `backend/*.py` 를 **자동 수집**한다. 목록을 손으로 적지 않는다.
+2. `systemctl is-active` 는 **확인이 아니다.** 프로세스가 떴다는 뜻일 뿐, 앱이 응답하는지는
+   말해 주지 않는다. `deploy.ps1` 5단계가 운영 URL(`https://daonwealth.com` 의 `/` 와
+   `/api/sectors`)을 직접 때려 보고 200 이 아니면 **배포를 실패로 끝낸다**
+   (재시도 6회 × 5초 — uvicorn 준비에 약 6초가 걸려 `sleep 3` 뒤에 때리면 502 를 본다).
+
+**스모크를 `168.107.13.20:8501` 로 겨누지 말 것.** 아래 §5 공개 경로대로 8501 은
+`127.0.0.1` 바인딩이라 외부에서 안 닿는다 — 늘 실패하는 검사가 되고, 그러면 다음 사람이
+검사를 지운다. 사용자가 실제로 쓰는 주소로 확인한다.
 
 ### DB 마이그레이션
 ```bash
@@ -80,6 +103,9 @@ WantedBy=multi-user.target
 # 주의: 월요일 09:00 UTC 리밸런싱과 시간 분리 — 두 무거운 작업 동시 실행 시 1GB VM OOM 위험
 0 22 * * * /usr/local/bin/daon-discover-scan.sh
 0 21 * * 0 /usr/local/bin/daon-weekly-refresh.sh   # 월 06:00 KST — 전략 리포트 + 종목 분석 주간 갱신
+# 일별 KST 08:00(UTC 23:00) — 실적발표 '내일' 종목 알림 + 푸시 (AI 미사용·비용 0)
+#   상한은 코드에 있다: EARNINGS_SCAN_MAX_USERS=50 / EARNINGS_SCAN_MAX_TICKERS=200
+0 23 * * * /usr/local/bin/daon-earnings-alerts.sh
 ```
 
 > **보유 종목 AI 분석 갱신은 서버 cron 이 아니다 (2026-08-20 변경).**
