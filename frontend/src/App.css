@@ -1332,6 +1332,39 @@ button.chat-send:not(.btn-primary) {
 }
 .cp-del:hover { color: var(--clr-neg-dark, #DC2626); }
 
+/* ── 원칙 제안(미승인) — 2026-10-23 ──────────────────────────────
+   승인 전 제안은 확정된 원칙과 **눈으로 구분돼야** 한다. 섞여 보이면
+   비서가 이미 그 기준으로 말하고 있다고 오해한다(실제로는 안 쓴다).
+   그래서 테두리와 바탕을 경고 톤으로 두되, 빨강은 쓰지 않는다 —
+   잘못된 것이 아니라 **아직 보지 않은 것**이다. */
+.cp-pending {
+  border: 1px solid var(--clr-warn-border);
+  background: var(--clr-warn-bg);
+  border-radius: 4px; padding: 8px; margin-bottom: 10px;
+}
+.cp-pending-head { font-size: 12px; font-weight: 700; color: var(--clr-warn); }
+.cp-pending-lead { font-size: 11px; color: var(--clr-text-sub); margin: 2px 0 6px; }
+.cp-item.is-pending { background: var(--clr-surface); border-radius: 4px; }
+.cp-approve {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--clr-pos-border); background: var(--clr-pos-bg);
+  color: var(--clr-pos); border-radius: 4px;
+  padding: 3px 8px; font-size: 11px; font-weight: 700; cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+}
+.cp-approve:disabled { opacity: .5; cursor: default; }
+
+/* '정리할 때가 됐다'는 신호. 접힌 상태에서도 보이는 유일한 표시라 작게 둔다. */
+.cp-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--clr-warn); flex-shrink: 0;
+}
+.cp-due {
+  font-size: 11px; color: var(--clr-text-sub);
+  border: 1px dashed var(--clr-border-md); border-radius: 4px;
+  padding: 6px 8px; margin-bottom: 8px;
+}
+
 .cp-add { display: flex; gap: 6px; margin-top: 10px; }
 .cp-add input {
   flex: 1; min-width: 0; font-family: inherit; font-size: 12px;

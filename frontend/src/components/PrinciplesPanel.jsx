@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { listPrinciples, addPrinciple, deletePrinciple, distillPrinciples } from '../api'
+import { listPrinciples, addPrinciple, deletePrinciple, distillPrinciples,
+         approvePrinciple } from '../api'
 
 /**
  * 투자 원칙 — 대화에서 나온 것이므로 대화와 같은 자리에 둔다(2026-10-11 오너 결정).
@@ -23,6 +24,7 @@ const IconCompass = <Ico d={<><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5
 const IconSpark   = <Ico d={<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />} />
 const IconPlus    = <Ico d={<><path d="M12 5v14M5 12h14" /></>} />
 const IconTrash   = <Ico d={<><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></>} size={12} />
+const IconCheck   = <Ico d={<path d="m4 12 5 5L20 6" />} size={12} />
 
 export default function PrinciplesPanel() {
   const qc = useQueryClient()
@@ -31,11 +33,14 @@ export default function PrinciplesPanel() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
+  /* 접혀 있어도 조회한다 — 펼쳐야만 알 수 있는 알림은 알림이 아니다.
+     DB 읽기뿐이라 가볍고, 유료 호출(distill)은 오너가 누를 때만 일어난다. */
   const { data } = useQuery({
-    queryKey: ['principles'], queryFn: listPrinciples,
-    enabled: open, staleTime: 60_000,
+    queryKey: ['principles'], queryFn: listPrinciples, staleTime: 5 * 60_000,
   })
-  const list = data?.principles || []
+  const list    = data?.principles || []
+  const pending = data?.pending || []
+  const due     = !!data?.due
   const reload = () => qc.invalidateQueries({ queryKey: ['principles'] })
 
   async function run(fn, done) {
@@ -52,6 +57,11 @@ export default function PrinciplesPanel() {
         <span className="cp-ico">{IconCompass}</span>
         <span>내 투자 원칙</span>
         {list.length > 0 && <span className="cp-count">{list.length}</span>}
+        {/* 확인할 것이 있을 때만 점을 띄운다. 늘 떠 있는 표시는 곧 안 보이게 된다. */}
+        {(pending.length > 0 || due) && (
+          <span className="cp-dot" title={pending.length ? '확인할 제안이 있습니다'
+                                                         : '원칙을 정리할 때가 됐습니다'} />
+        )}
         <span className="cp-caret">{open ? '접기' : '펼치기'}</span>
       </button>
 
@@ -61,7 +71,38 @@ export default function PrinciplesPanel() {
             비서가 이 기준을 깔고 말합니다. 어긋나는 제안을 할 땐 이유를 먼저 밝힙니다.
           </div>
 
-          {list.length === 0 && (
+          {pending.length > 0 && (
+            <div className="cp-pending">
+              <div className="cp-pending-head">
+                확인해 주세요 — 대화에서 뽑은 제안 {pending.length}건
+              </div>
+              <div className="cp-pending-lead">
+                승인하기 전까지는 비서가 이 문장을 쓰지 않습니다.
+              </div>
+              {pending.map(p => (
+                <div key={p.id} className="cp-item is-pending">
+                  <div className="cp-item-main">
+                    <div className="cp-item-text">{p.text}</div>
+                    {p.evidence && <div className="cp-item-src">{p.evidence}</div>}
+                  </div>
+                  <button className="cp-approve" disabled={busy} title="원칙으로 승인"
+                    onClick={() => run(() => approvePrinciple(p.id))}>
+                    {IconCheck}<span>승인</span>
+                  </button>
+                  <button className="cp-del" title="버리기" aria-label="제안 버리기"
+                    onClick={() => run(() => deletePrinciple(p.id))}>{IconTrash}</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {due && pending.length === 0 && (
+            <div className="cp-due">
+              지난 정리 이후 대화가 {data?.new_turns}턴 쌓였습니다 — 아래에서 다시 뽑아볼 때입니다.
+            </div>
+          )}
+
+          {list.length === 0 && pending.length === 0 && (
             <div className="cp-empty">
               아직 없습니다. 직접 적거나, 대화가 쌓인 뒤 아래에서 뽑아낼 수 있습니다.
             </div>
@@ -98,8 +139,9 @@ export default function PrinciplesPanel() {
 
           <button className="cp-distill" disabled={busy}
             onClick={() => run(distillPrinciples, (r) => {
-              if (r?.ok) setMsg(r.added?.length ? `${r.added.length}개를 새로 찾았습니다`
-                                                : '새로 뽑을 만한 것이 없었습니다')
+              if (r?.ok) setMsg(r.added?.length
+                ? `${r.added.length}개를 제안했습니다 — 확인하고 승인하세요`
+                : '새로 뽑을 만한 것이 없었습니다')
               else if (r?.reason === 'not_enough') setMsg(`대화가 ${r.need}턴은 쌓여야 뽑을 수 있습니다`)
               else setMsg('지금은 뽑지 못했습니다')
             })}>

@@ -319,3 +319,6 @@ export const addPrinciple     = (text, pinned = true) =>
 export const deletePrinciple  = (id)    => api.delete(`/principles/${id}`).then(r => r.data)
 export const distillPrinciples = ()     =>
   api.post('/principles/distill', {}, { timeout: 90_000 }).then(r => r.data)
+/* 제안 승인 — 이때부터 비서의 모든 답변이 이 원칙을 전제로 깐다.
+   거절 버튼은 따로 없다. deletePrinciple 이 곧 거절이다. */
+export const approvePrinciple = (id) => api.post(`/principles/${id}/approve`).then(r => r.data)

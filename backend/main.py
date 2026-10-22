@@ -9793,6 +9793,10 @@ class ChatReq(BaseModel):
 #     틀린 원칙이 조용히 모든 답변을 오염시키는 것이 최악이다.
 PRINCIPLES_MAX      = 12      # 이보다 많아지면 더는 '원칙'이 아니라 메모다
 PRINCIPLES_MIN_TURN = 6       # 이만큼 대화가 쌓여야 뽑을 거리가 생긴다
+# 월 1회. 더 자주 묻으면 "또 그 얘기"가 되고, 더 뜸하면 원칙이 현실을 못 따라간다.
+PRINCIPLES_DUE_DAYS = 30
+# 지난번 정리 이후 이만큼 새 대화가 쌓여야 다시 권한다 — 대화가 없으면 뽑을 것도 없다.
+PRINCIPLES_DUE_TURNS = 10
 
 
 def _ensure_principles_table():
@@ -9815,8 +9819,12 @@ def _principles_text(user_id: str) -> str:
     """프롬프트에 끼울 원칙 블록. 없으면 빈 문자열 — 없는 걸 지어내지 않는다."""
     try:
         with _db() as conn:
+            # source='suggested' 는 **아직 오너가 승인하지 않은 제안**이다.
+            # 승인 전에 프롬프트로 새어 들어가면, 비서가 지어낸 원칙을 근거로 다음
+            # 답을 하고 그 답이 또 다음 제안의 재료가 된다 — 내 오류를 내가 굳힌다.
             rows = conn.execute(
                 "SELECT text FROM investment_principles WHERE user_id=? "
+                "AND source != 'suggested' "
                 "ORDER BY pinned DESC, created_at DESC LIMIT ?",
                 (user_id, PRINCIPLES_MAX)).fetchall()
     except Exception:
@@ -9835,7 +9843,50 @@ def list_principles(cu: dict = Depends(require_approved)):
         rows = conn.execute(
             "SELECT id, text, source, evidence, created_at, pinned FROM investment_principles "
             "WHERE user_id=? ORDER BY pinned DESC, created_at DESC", (cu['user_id'],)).fetchall()
-    return {'principles': [dict(r) for r in rows], 'max': PRINCIPLES_MAX}
+    items   = [dict(r) for r in rows]
+    pending = [p for p in items if p['source'] == 'suggested']
+    return {'principles': [p for p in items if p['source'] != 'suggested'],
+            'pending':    pending,
+            'max':        PRINCIPLES_MAX,
+            **_principles_due(cu['user_id'])}
+
+
+def _principles_last_run(user_id: str) -> float:
+    with _db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key=?",
+                           (f'principles_distilled:{user_id}',)).fetchone()
+    try:
+        return float(row['value']) if row else 0.0
+    except Exception:
+        return 0.0
+
+
+def _principles_due(user_id: str) -> dict:
+    """"원칙을 정리할 때가 됐는가" 판정.
+
+    왜 cron 으로 자동 실행하지 않는가 — distill 은 서버의 **API 지갑**을 쓴다.
+    2026-10-18 에 중복 cron 하나가 월 $8 을 쓰고 있던 것을 끈 참이다. 월 1회는
+    푼돈이지만, '자동으로 도는 유료 호출'을 다시 늘리는 방향 자체가 틀렸다.
+    그래서 서버는 **때가 됐다는 사실만** 알리고, 호출은 오너가 누를 때 한 번 한다.
+    누르는 행위가 곧 승인 절차의 시작이기도 하다.
+
+    두 조건을 **모두** 채워야 권한다:
+      · 마지막 정리로부터 30일 — 더 자주 묻으면 "또 그 얘기"가 된다
+      · 그 이후 새 대화 10턴 — 대화가 없으면 뽑을 것이 없다. 날짜만 보고 권하면
+        빈 대화로 호출해 돈만 쓰고 '뽑을 것 없음'을 받는다.
+    """
+    last = _principles_last_run(user_id)
+    with _db() as conn:
+        new_turns = conn.execute(
+            "SELECT COUNT(*) AS n FROM chat_messages WHERE user_id=? AND created_at > ?",
+            (user_id, last)).fetchone()['n']
+    aged = (time() - last) >= PRINCIPLES_DUE_DAYS * 86400 if last else True
+    return {
+        'due':         bool(aged and new_turns >= PRINCIPLES_DUE_TURNS),
+        'last_run':    last or None,
+        'new_turns':   new_turns,
+        'need_turns':  PRINCIPLES_DUE_TURNS,
+    }
 
 
 class PrincipleReq(BaseModel):
@@ -9912,17 +9963,45 @@ def distill_principles(cu: dict = Depends(require_approved)):
             t = str(p.get('text') or '').strip()[:300]
             if not t or t in have:
                 continue
+            # 'suggested' — 승인 전까지 프롬프트에 들어가지 않는다.
+            # 뽑아낸 것을 곧바로 원칙으로 쓰면, 비서가 자기 추측을 근거로 다음 답을
+            # 하고 그 답이 또 다음 추출의 재료가 된다. 사람이 한 번 보는 칸을 둔다.
             conn.execute(
                 "INSERT INTO investment_principles(user_id, text, source, evidence, created_at) "
                 "VALUES(?,?,?,?,?)",
-                (uid, t, 'ai', str(p.get('evidence') or '')[:400], time()))
+                (uid, t, 'suggested', str(p.get('evidence') or '')[:400], time()))
             added.append(t)
-        # 상한을 넘으면 오래된 AI 원칙부터 정리한다(오너가 고정한 것은 남긴다)
+        # 상한을 넘으면 오래된 AI 원칙부터 정리한다(오너가 고정한 것은 남긴다).
+        # 미승인 제안은 상한 계산에서 뺀다 — 보기도 전에 밀려 사라지면 안 된다.
         conn.execute(
             "DELETE FROM investment_principles WHERE id IN ("
             "  SELECT id FROM investment_principles WHERE user_id=? AND pinned=0 "
+            "  AND source != 'suggested' "
             "  ORDER BY created_at DESC LIMIT -1 OFFSET ?)", (uid, PRINCIPLES_MAX))
-    return {'ok': True, 'added': added, 'turns_read': len(turns)}
+        # 때가 됐는지는 이 시각으로 센다. 뽑은 게 0개여도 '물어보긴 했다' —
+        # 기록하지 않으면 대화가 없는 달에 매번 다시 권하고 매번 돈을 쓴다.
+        conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)",
+                     (f'principles_distilled:{uid}', str(time())))
+    return {'ok': True, 'added': added, 'suggested': added, 'turns_read': len(turns)}
+
+
+@app.post("/api/principles/{pid}/approve")
+def approve_principle(pid: int, cu: dict = Depends(require_approved)):
+    """제안을 원칙으로 승인한다 — 이때부터 비서의 모든 답변이 이걸 전제로 깐다.
+
+    거절은 따로 두지 않는다. 기존 DELETE /api/principles/{id} 가 곧 거절이다 —
+    버튼이 둘이면 '거절'과 '삭제'가 어떻게 다른지 설명해야 한다.
+    """
+    _ensure_principles_table()
+    with _db() as conn:
+        cur = conn.execute(
+            "UPDATE investment_principles SET source='ai', created_at=? "
+            "WHERE id=? AND user_id=? AND source='suggested'",
+            (time(), pid, cu['user_id']))
+        n = cur.rowcount
+    if not n:
+        raise HTTPException(404, "승인할 제안이 없습니다")
+    return {'ok': True, 'id': pid}
 
 
 # ─── 능동 브리핑 ────────────────────────────────────────────────────
