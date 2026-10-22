@@ -19,9 +19,20 @@ def collect(db_uri=DB_URI):
     c = sqlite3.connect(db_uri, uri=True)
     c.row_factory = sqlite3.Row
 
+    # 분석이 **원리적으로 불가능한** 보유분은 대상에서 뺀다.
+    # 2026-10-17: 공모펀드(404610 TDF)가 대상에 섞여 있었다. 거래소에 없으니 웹에
+    # 실적·목표주가·애널리스트 의견이 있을 수 없고, 프롬프트는 "출처 없으면 넣지 말라"고
+    # 지시하므로 그 종목은 항상 비어서 나온다. 그런데 검증기는 요청한 종목이 전부
+    # 채워져야 통과하므로 **한 종목 때문에 나머지 5종목까지 버려졌다.**
+    # (실측: 35회 실행 중 주입 성공 2회 = 5.7%)
+    SKIP = ('투자신탁', 'tdf', '펀드', 'mmf', '예수금', '현금성자산', '발행어음')
+
     held = {}
     for r in c.execute('SELECT ticker,name,sector,quantity,avg_price FROM portfolios'):
         t = str(r['ticker']).upper()
+        nm = str(r['name'] or '').replace(' ', '').lower()
+        if any(k in nm for k in SKIP):
+            continue
         if t not in held:
             held[t] = {'ticker': t, 'name': r['name'] or '', 'sector': r['sector'] or '',
                        'cost': 0.0}

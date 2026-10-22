@@ -25,6 +25,18 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# 2026-10-10: 작업스케줄러 실행이 "잘못된 개체가 전달되었습니다. ':' 또는 '}'가 필요합니다"
+# 로 죽었다. 원인은 분석이나 인증이 아니라 **콘솔 코드페이지**다.
+#   스케줄러는 시스템 ANSI(한글 Windows = CP949)로 뜨고, PowerShell 은 네이티브 명령
+#   (ssh)의 stdout 바이트를 그 코드페이지로 디코딩한다. 서버는 UTF-8 JSON 을 주므로
+#   한글이 깨지고, 'LG에너지솔루션' 처럼 특정 바이트열은 **닫는 따옴표까지 먹어** JSON 을
+#   깨뜨린다 → ConvertFrom-Json 폭사. 대화형 셸은 CP65001 이라 멀쩡해서 재현이 안 됐다.
+#   이 종목이 10-08 임포트로 분석 대상에 들어오면서 드러났다.
+# 네이티브 출력을 UTF-8 로 못 박는다. 터미널 출력이 아니라 **파싱 정확성** 문제다.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding           = [System.Text.Encoding]::UTF8
+
 $APP_DIR = Split-Path -Parent $PSScriptRoot
 $KEY     = "C:\Users\user\Downloads\oracle-key.key"
 $SERVER  = "ubuntu@168.107.13.20"
@@ -68,12 +80,17 @@ function Invoke-Native([string]$What, [scriptblock]$Block, [int]$Tries = 3, [int
 }
 
 # 네트워크가 올라올 때까지 기다린다 — 깨어난 직후 실행되는 경우 때문이다.
+# ⚠ ICMP(ping)로 재지 말 것. 서버가 핑을 막아 두어 늘 False 가 나오고, 멀쩡한 서버를
+#   영원히 기다린다(2026-10-08 실제로 밟았다). **실제로 쓰는 포트(ssh 22)** 로 확인한다.
 function Wait-Server([int]$Tries = 10, [int]$WaitSec = 30) {
     for ($i = 1; $i -le $Tries; $i++) {
-        if (Test-Connection -ComputerName '168.107.13.20' -Count 1 -Quiet -ErrorAction SilentlyContinue) {
-            return $true
-        }
-        Log "서버에 닿지 않음 — 네트워크 대기 $i/$Tries"
+        try {
+            $c = New-Object System.Net.Sockets.TcpClient
+            $ok = $c.ConnectAsync('168.107.13.20', 22).Wait(5000)
+            $c.Close()
+            if ($ok) { return $true }
+        } catch { }
+        Log "서버 22번 포트에 닿지 않음 — 네트워크 대기 $i/$Tries"
         Start-Sleep -Seconds $WaitSec
     }
     return $false
@@ -94,7 +111,17 @@ $null = Invoke-Native "검사기 전송(scp)" { scp @SSH "$APP_DIR\scripts\analy
 $targetsJson = Invoke-Native "대상 조회(ssh)" { ssh @SSH $SERVER "python3 /tmp/analysis_gap.py --json --limit $Count --min-age $MinAge" }
 if (-not $targetsJson) { Log "대상 조회 실패 — 종료"; exit 1 }
 
-$targets = $targetsJson | ConvertFrom-Json
+# 파싱 실패를 try 로 감싸는 이유: 위 인코딩 고정이 뚫리거나 서버 출력 형식이 바뀌면
+# ConvertFrom-Json 이 $ErrorActionPreference='Stop' 때문에 스크립트를 통째로 죽인다.
+# 그러면 "예기치 못한 오류" 한 줄만 남아 무엇이 왔는지 알 수 없다 — 받은 문자열을 남긴다.
+try {
+    $targets = $targetsJson | ConvertFrom-Json
+} catch {
+    Log "대상 JSON 파싱 실패 — 종료. 받은 문자열 앞 300자:"
+    Log ("  " + ($targetsJson -join ' ').Substring(0, [Math]::Min(300, ($targetsJson -join ' ').Length)))
+    Log "  한글이 깨져 보이면 콘솔 코드페이지 문제다(이 스크립트 상단 OutputEncoding 참고)."
+    exit 1
+}
 if ($targets.Count -eq 0) {
     Log "갱신할 종목 없음 — 전부 최신입니다. 종료."
     exit 0
@@ -157,7 +184,10 @@ for ($try = 1; $try -le $maxTry; $try++) {
 
     # 검증기는 UTF-8 파일로 분리해 둔다 — here-string 에 한글을 심으면 리터럴이 깨져
     # 정상 payload 를 불합격 처리한다(2026-08-18 실제 발생).
-    $vr = & python (Join-Path $PSScriptRoot "validate_analysis_payload.py") $outFile 2>&1
+    # --prune: 통과한 종목만 남기고 나머지는 이름을 불러 제외한다.
+    # 2026-10-17 이전에는 하나라도 어긋나면 전체를 버렸다. 공모펀드처럼 웹에 자료가
+    # 없는 종목이 섞이면 멀쩡한 5종목까지 함께 버려져, 35회 실행 중 2회만 주입됐다.
+    $vr = & python (Join-Path $PSScriptRoot "validate_analysis_payload.py") $outFile --prune 2>&1
     Log ($vr -join "`n")
     if ($LASTEXITCODE -eq 0) { $ok = $true; break }
     Log "  검증 실패 (시도 $try/$maxTry)"
@@ -172,6 +202,28 @@ $null = Invoke-Native "payload 전송(scp)" { scp @SSH $outFile "${SERVER}:/tmp/
 $injectOut = Invoke-Native "주입(ssh)" { ssh @SSH $SERVER "cp ~/portfolio/daon.db ~/portfolio/backup/daon-preinject-`$(date +%Y%m%d).db && python3 /tmp/inject.py /tmp/payload.json" }
 if (-not $injectOut) { Log "주입 실패 — 서버에 반영되지 않았다"; exit 1 }
 Log ($injectOut -join "`n")
+
+# ── 6. 신선도 점검 ────────────────────────────────────────────────
+# 2026-10-18 'A안' 이후 **이 작업이 종목분석의 유일한 경로**다.
+# 서버 주간 cron(daon-weekly-refresh.sh)을 껐으므로, 여기가 멈추면
+# 분석이 통째로 늙는데 아무도 모른다. 그래서 돌 때마다 가장 오래된 분석을 보고한다.
+# (조용히 멈추는 것이 가장 나쁘다 — 집현전 정지 감지에서 이미 겪은 유형이다)
+$stale = Invoke-Native "신선도 점검(ssh)" {
+    ssh @SSH $SERVER "cd ~/portfolio && python3 /tmp/analysis_gap.py --json --limit 3 --min-age 0"
+} -Tries 1
+if ($stale) {
+    try {
+        $worst = ($stale | ConvertFrom-Json)[0]
+        if ($worst.age_days -eq $null) {
+            Log "⚠ 신선도: 분석이 한 번도 없는 종목이 있다 ($($worst.ticker))"
+        } elseif ($worst.age_days -gt 21) {
+            Log "⚠ 신선도: 가장 오래된 분석이 $($worst.age_days)일 — 이 작업이 며칠 멈춘 것으로 보인다"
+        } else {
+            Log "신선도 OK — 가장 오래된 분석 $($worst.age_days)일 ($($worst.ticker))"
+        }
+    } catch { Log "신선도 점검 결과를 읽지 못했다" }
+}
+
 Log "=== 완료 ==="
 
 # ============================================================
