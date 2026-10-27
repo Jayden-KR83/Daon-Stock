@@ -6028,6 +6028,34 @@ def portfolio_metrics(req: MetricsReq, cu: dict = Depends(get_current_user)):
 class StrategyReq(BaseModel):
     holdings: list = []
     prices:   dict = {}
+    # 2026-10-27: 이 필드가 **없어서** 프런트가 보낸 실시간 환율이 Pydantic 단계에서
+    # 조용히 버려졌다. 아래 전략 계산은 1380 상수를 썼고, 같은 리포트의 1~4번 항목
+    # (health·alerts·dividends 모델에는 이 필드가 있다)과 미국 자산이 3%대로 어긋났다.
+    # 외부 LLM 교차검증은 이것을 'AI 환각'으로 지목했지만, LLM 은 주어진 값을
+    # 그대로 썼을 뿐이다. 에러도 경고도 없이 값만 틀어지는 종류의 고장이다.
+    usd_krw:  float | None = None
+
+
+def _effective_usd_krw(req_rate) -> float:
+    """전략 계산에 쓸 환율 — 화면의 표와 같은 값이어야 한다.
+
+    순서: 프런트가 보낸 실시간 환율 → 서버 조회 → 상수.
+    상수를 맨 앞에 두면(예전 코드) 같은 리포트 안에서 1번 표와 5번 수치가 갈린다.
+    상수가 **마지막**에 있는 것이 핵심이다 — 폴백이지 기본값이 아니다.
+    """
+    try:
+        r = float(req_rate or 0)
+        if r > 0:
+            return r
+    except (TypeError, ValueError):
+        pass
+    try:
+        r = float(_usd_krw() or 0)
+        if r > 0:
+            return r
+    except Exception:
+        pass
+    return 1380.0
     scope:    str  = 'ALL'        # 어떤 계좌 필터로 분석했는지 (캐시 저장용)
     force_refresh: bool = False   # True면 캐시 무시하고 새로 분석
     years_to_retirement: int | None = None   # 은퇴까지 남은 햇수 (Life Timeline)
@@ -6101,6 +6129,10 @@ def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_me
         result = _parse_claude_json(text)
         result['_metrics_summary'] = summary_meta
         result['verified_facts'] = verified_facts
+        # 어느 모델이 쓴 리포트인지 같이 남긴다. 내보내기 문서가 모델명을 손으로
+        # 적어 두었다가 **틀린 채 굳었고**(claude-sonnet-5 를 'Claude Haiku' 로),
+        # 외부 검증이 그 라벨을 근거로 잘못된 진단을 내놓았다(2026-10-27).
+        result['model'] = MODEL_ANALYSIS
         if discovery_horizon:
             result['discovery_horizon'] = discovery_horizon
         _set_ai_cache(cache_key, result)
@@ -6184,7 +6216,7 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
             "데모 체험용 AI 분석 일일 한도에 도달했습니다 — 잠시 후 다시 시도하거나, "
             "회원가입 후 본인 포트폴리오로 무제한 이용해보세요.")
 
-    usd_krw = 1380.0
+    usd_krw = _effective_usd_krw(req.usd_krw)
     enriched = []
     total_krw = 0.0
 
@@ -6293,6 +6325,10 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
         ) or '    (없음)'
 
     verified_facts = {
+        # 무엇으로 계산했는지를 수치와 함께 남긴다. 이게 없으면 나중에 총액이
+        # 달라 보일 때 '환율 때문인지 시점 때문인지'를 가릴 수 없다.
+        'usd_krw':     round(usd_krw, 2),
+        'computed_at': round(time()),
         'total_krw':   round(total_krw),
         'holdings':    vf_holdings,
         'sectors':     vf_sectors,

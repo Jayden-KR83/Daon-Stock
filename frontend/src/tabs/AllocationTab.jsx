@@ -98,7 +98,7 @@ function _strategyToMd(s) {
   }
   return out.join('\n') || '_(전략 내용 없음)_'
 }
-function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKrw = 0 }) {
+function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKrw = 0, strategyAt = 0 }) {
   const totalVal = rows.reduce((s, r) => s + r.value, 0)
   const acc = {}, sec = {}
   for (const r of rows) { acc[r.account] = (acc[r.account] || 0) + r.value; sec[r.sector] = (sec[r.sector] || 0) + r.value }
@@ -140,7 +140,25 @@ function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKr
     if (div.annual_estimate_krw) L.push(`- 연간 예상 배당: ${_won(div.annual_estimate_krw)}`)
     if (div.ttm_received_krw) L.push(`- 최근 12개월 수령: ${_won(div.ttm_received_krw)}`)
   }
-  L.push(``, `## 5. AI 전략 리포트 (Claude Haiku)`, _strategyToMd(strategy))
+  /* 모델명을 손으로 적어 두었더니 **틀린 채로 남았다** — 실제로는 claude-sonnet-5 를
+     쓰는데 'Claude Haiku' 라고 적혀 있었고, 외부 검증 LLM 이 그 라벨을 근거로
+     "Haiku 는 복잡한 맥락에 취약하니 모델을 올리라"는 진단을 내놓았다(2026-10-27).
+     이제 서버가 준 값을 쓴다. 모르면 적지 않는다 — 틀린 라벨보다 공백이 낫다. */
+  const _model = strategy?.model || strategy?._model || ''
+  L.push(``, `## 5. AI 전략 리포트${_model ? ` (${_model})` : ''}`)
+  /* 5번은 **캐시된 과거 리포트일 수 있다.** 1번 표는 지금 시세인데 5번은 생성 시점
+     기준이라, 같은 문서 안에서 총액이 다를 수 있다. 예전에는 이 시각을 통째로
+     버려서(skip 목록) 읽는 쪽이 시점 차이를 알 방법이 없었다. */
+  const _at = strategyAt || strategy?.computed_at || strategy?._computed_at
+  if (_at) {
+    const d = new Date((_at > 1e12 ? _at : _at * 1000))
+    L.push(`- 이 리포트 생성 시각: **${d.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' })}**`)
+    L.push(`- ⚠️ 위 1~4번은 **내보내는 지금** 시세 기준이고, 5번은 **생성 시점** 기준입니다.`)
+    L.push(`  둘의 총액·비중이 다르면 시점 차이일 수 있으니 먼저 이 시각을 확인하세요.`)
+  }
+  if (strategy?.verified_facts?.usd_krw)
+    L.push(`- 5번 계산에 쓴 환율: **₩${strategy.verified_facts.usd_krw}/USD**`)
+  L.push(``, _strategyToMd(strategy))
   L.push(``, `## 6. 교차검증 요청 (다른 LLM에게)`, `아래 관점에서 검토해 주세요:`)
   L.push(`1. **수치 정합성** — 비중 합계·평가액·손익 계산 오류`)
   L.push(`2. **진단 타당성** — Health Score·집중도 경고가 보유 구성과 부합하는지`)
@@ -319,6 +337,7 @@ export default function AllocationTab() {
         alerts: aR.status === 'fulfilled' ? aR.value : null,
         div:    dR.status === 'fulfilled' ? dR.value : null,
         strategy: strategyReport,
+        strategyAt: strategyComputedAt,
         cashKrw: Object.values(cashByAccount).reduce((sum, v) => sum + v, 0),
       })
       const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
@@ -381,6 +400,9 @@ export default function AllocationTab() {
       const res = await getPortfolioStrategy({
         holdings: targets.map(h => ({ ...h })),
         prices,
+        /* 2026-10-27: 이 한 줄이 없어서 서버가 1380 상수로 계산했고,
+           같은 리포트 안에서 1번 표와 5번 verified_facts 의 미국 자산이 어긋났다. */
+        usd_krw: usdKrw,
         scope: strategyAcc,
         force_refresh: forceRefresh,
         years_to_retirement: Number(localStorage.getItem('daon_retire_years')) || null,
