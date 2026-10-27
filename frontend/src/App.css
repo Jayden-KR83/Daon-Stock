@@ -1332,6 +1332,36 @@ button.chat-send:not(.btn-primary) {
 }
 .cp-del:hover { color: var(--clr-neg-dark, #DC2626); }
 
+/* ── 켜짐/꺼짐 토글 — 2026-10-27 ─────────────────────────────────
+   '켜기' 버튼은 지금 상태인지 누르면 할 일인지 구분되지 않았다(오너 지적).
+   손잡이 위치가 상태를 말하고, 옆 글자가 같은 말을 한 번 더 한다 —
+   위치만으로는 색각·저시력 사용자에게 전달되지 않기 때문이다. */
+.sw-wrap { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.sw-state {
+  font-size: 11px; font-weight: 800; letter-spacing: -.2px;
+  color: var(--clr-text-muted); min-width: 24px; text-align: right;
+}
+.sw-state.is-on { color: var(--clr-text-strong); }
+.sw-track {
+  position: relative; width: 40px; height: 23px; flex-shrink: 0;
+  border-radius: 999px; border: 1px solid var(--clr-border-md);
+  background: var(--clr-bg); cursor: pointer; padding: 0;
+  transition: background .16s ease, border-color .16s ease;
+}
+.sw-track.is-on { background: var(--clr-text-strong); border-color: var(--clr-text-strong); }
+.sw-track:disabled { opacity: .5; cursor: default; }
+.sw-track:focus-visible { outline: 2px solid var(--clr-accent, #0EA5E9); outline-offset: 2px; }
+.sw-knob {
+  position: absolute; top: 2px; left: 2px; width: 17px; height: 17px;
+  border-radius: 50%; background: var(--clr-surface);
+  border: 1px solid var(--clr-border-md);
+  transition: transform .16s ease;
+}
+.sw-track.is-on .sw-knob {
+  transform: translateX(17px);
+  background: var(--clr-surface); border-color: transparent;
+}
+
 /* ── 원칙 제안(미승인) — 2026-10-23 ──────────────────────────────
    승인 전 제안은 확정된 원칙과 **눈으로 구분돼야** 한다. 섞여 보이면
    비서가 이미 그 기준으로 말하고 있다고 오해한다(실제로는 안 쓴다).

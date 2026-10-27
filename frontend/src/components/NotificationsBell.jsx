@@ -11,6 +11,7 @@ import {
 } from '../pushClient'
 import { sendTestPush } from '../api'
 import { useStore } from '../store'
+import ToggleSwitch from './ToggleSwitch'
 
 /* 시트 / 오버레이를 body 직속으로 portal — 부모 transform/overflow/z-index에 영향받지 않음 */
 function BodyPortal({ children }) {
@@ -215,16 +216,11 @@ export default function NotificationsBell() {
                     opacity: pushBusy ? 0.5 : 1, fontFamily: 'inherit',
                   }}>테스트</button>
                 )}
+                {/* 2026-10-27: '켜기' 버튼이 상태인지 동작인지 구분되지 않았다(오너 지적).
+                    검은 강조 바탕이라 오히려 "켜져 있음"으로 읽혔다. */}
                 {(push === 'on' || push === 'off') && (
-                  <button onClick={onTogglePush} disabled={pushBusy} style={{
-                    flexShrink: 0, padding: '5px 12px', borderRadius: 2,
-                    background: push === 'on' ? 'transparent' : 'var(--m-text)',
-                    border: `1px solid ${push === 'on' ? 'var(--m-outline-variant)' : 'var(--m-text)'}`,
-                    color: push === 'on' ? 'var(--m-text-secondary)' : 'var(--m-surface)',
-                    fontSize: 11, fontWeight: 800,
-                    cursor: pushBusy ? 'default' : 'pointer',
-                    opacity: pushBusy ? 0.5 : 1, fontFamily: 'inherit',
-                  }}>{pushBusy ? '...' : push === 'on' ? '끄기' : '켜기'}</button>
+                  <ToggleSwitch checked={push === 'on'} busy={pushBusy}
+                    label="푸시 알림" onChange={() => onTogglePush()} />
                 )}
               </div>
 

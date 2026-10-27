@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { pushSupported, getPushState, enablePush, disablePush, pushDiagnostics } from '../pushClient'
 import { sendTestPush, getMovePrefs, saveMovePrefs, listNotifications } from '../api'
 import { useInstall, isStandalone as pwaStandalone } from '../utils/installPrompt'
+import ToggleSwitch from './ToggleSwitch'
 
 /* ══════════════════════════════════════════════════════════════
    휴대폰 알림 설정 — 설정 탭의 독립 카드
@@ -188,8 +189,17 @@ export default function PushSetupCard() {
         <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)' }}>
           휴대폰 알림
         </div>
-        <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4,
-          color: badge.c, border: `1px solid ${badge.c}` }}>{badge.t}</span>
+        {/* 배지는 토글로 표현할 수 없는 상태(차단·미지원)일 때만. on/off 를 배지와
+            토글이 둘 다 말하면 같은 사실이 두 번 보여 오히려 어수선하다. */}
+        {(state !== 'on' && state !== 'off') && (
+          <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4,
+            color: badge.c, border: `1px solid ${badge.c}` }}>{badge.t}</span>
+        )}
+        <span style={{ flex: 1 }} />
+        {(state === 'on' || state === 'off') && (
+          <ToggleSwitch checked={state === 'on'} busy={busy}
+            label="휴대폰 알림" onChange={() => toggle()} />
+        )}
       </div>
       <div className="ko-keep" style={{ fontSize: 11, color: 'var(--clr-text-muted)',
         marginBottom: 12, lineHeight: 1.7, whiteSpace: 'pre-line' }}>
@@ -298,17 +308,7 @@ export default function PushSetupCard() {
             버튼이 죽어 '눌러도 아무 일이 없는' 상태가 됐다(2026-09-03 제보).
             → 막지 말고 눌러보게 하고, 실패하면 진짜 이유를 말해준다.
             판정으로 기능을 막는 것보다, 시도하고 사실대로 알려주는 편이 낫다. */}
-        {(state === 'on' || state === 'off') && (
-          <button className={state === 'on' ? '' : 'btn-primary'} onClick={toggle} disabled={busy}
-            style={state === 'on'
-              ? { padding: '9px 16px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer',
-                  background: 'transparent', border: '1px solid var(--clr-border-md)',
-                  borderRadius: 4, color: 'var(--clr-text-sub)', opacity: busy ? 0.5 : 1 }
-              : { padding: '9px 18px', fontSize: 13, width: 'auto',
-                  opacity: busy ? 0.5 : 1 }}>
-            {state === 'on' ? '알림 끄기' : '휴대폰 알림 켜기'}
-          </button>
-        )}
+        {/* 켜기/끄기는 카드 제목 옆 토글로 옮겼다(2026-10-27). */}
         {state === 'on' && (
           <button onClick={test} disabled={busy}
             style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'inherit',
