@@ -116,6 +116,41 @@ function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKr
     L.push(`- 예수금(KRW 환산): **${_won(cashKrw)}** · **총자산 ${_won(totalAssets)}** ` +
            `(현금 비중 ${_pct(cashKrw, totalAssets).toFixed(1)}%)`)
   }
+  /* **분모를 글로 적는다.** 2026-10-27 외부 검증: "비중의 분모가 주식 평가액인지
+     총자산인지 계좌 내 비중인지 명확히 해야 한다 — 이 넷은 모두 다른 지표다."
+     맞는 말이고 그동안 어디에도 적혀 있지 않았다. 같은 24%가 세 가지 뜻일 수 있었다. */
+  L.push(`- **이 문서의 모든 비중은 \`주식 평가액\`(예수금 제외)을 분모로 합니다.**`)
+  if (cashKrw) {
+    const totalAssets = totalVal + cashKrw
+    L.push(`  총자산 기준으로 환산하려면 \`× ${(totalVal / totalAssets).toFixed(4)}\` 하세요.`)
+  }
+
+  /* 집중도 — "종목 수"만으로는 분산을 말할 수 없다는 것을 한 숫자로 보여준다.
+     20종을 들고 있어도 하나가 25%면 유효 종목 수는 10 아래로 떨어진다.
+     순수 계산이라 LLM 없이 여기서 바로 구한다. */
+  {
+    const tot = rows.reduce((t, r) => t + r.value, 0)
+    if (tot > 0 && rows.length) {
+      const ws  = rows.map(r => r.value / tot).sort((a, b) => b - a)
+      const hhi = ws.reduce((t, w) => t + w * w, 0)
+      const top5 = ws.slice(0, 5).reduce((t, w) => t + w, 0)
+      L.push(`- 집중도: **HHI ${hhi.toFixed(4)}** · 유효 종목 수 **${(1 / hhi).toFixed(1)}종** ` +
+             `(실제 ${rows.length}종) · 최대 종목 ${(ws[0] * 100).toFixed(1)}% · ` +
+             `상위 5종 ${(top5 * 100).toFixed(1)}%`)
+    }
+  }
+
+  /* 실질 환노출 — **계좌가 아니라 기초자산** 기준. 퇴직연금의 미국 추종 ETF 는
+     원화로 사지만 환율이 그대로 반영된다. 판정 정본은 backend/sectors.py 에 있으므로
+     여기서 다시 정의하지 않고 서버가 준 값만 옮긴다(목록이 두 벌이 되면 어긋난다). */
+  {
+    const fx = strategy?.verified_facts?.currency_exposure
+    if (fx && fx.usd_pct != null) {
+      L.push(`- 실질 환노출(기초자산 기준): **USD ${fx.usd_pct}%** · KRW ${fx.krw_pct}%` +
+             (fx.hidden_usd_pct ? ` — 이 중 ${fx.hidden_usd_pct}%p 는 **국내 상장 해외 ETF**(계좌로 세면 빠지는 부분)` : ''))
+      if (fx.note) L.push(`  - ${fx.note}`)
+    }
+  }
   L.push(``)
   L.push(`### 계좌별`, `| 계좌 | 평가액 | 비중 |`, `|---|--:|--:|`)
   for (const [k, v] of Object.entries(acc).sort((a, b) => b[1] - a[1])) L.push(`| ${k} | ${_won(v)} | ${_pct(v, totalVal).toFixed(1)}% |`)
@@ -125,6 +160,19 @@ function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKr
   for (const r of [...rows].sort((a, b) => b.value - a.value))
     L.push(`| ${r.name} | ${r.ticker} | ${r.account} | ${r.sector} | ${r.qty} | ${_won(r.value)} | ${_pct(r.value, totalVal).toFixed(1)}% | ${r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(1)}% |`)
   L.push(``, `## 2. Portfolio Health Score`)
+  /* 지표의 산출 조건을 **값과 함께** 적는다. 2026-10-27 외부 검증:
+     "평균 샤프 0.19가 비효율적이라는데 계산 기간·무위험수익률·벤치마크가 없으면 판단 불가".
+     조건은 코드에 있었지만 리포트에 없었다 — 그러면 읽는 쪽은 믿거나 버리거나 둘뿐이다. */
+  {
+    const mb = strategy?.verified_facts?.metrics_basis
+    if (mb) {
+      L.push(`- 지표 산출 조건: ${mb.period} ${mb.interval} · 무위험수익률 ` +
+             `${(mb.risk_free_rate * 100).toFixed(1)}% · 연율화 ${mb.annualization}일`)
+      L.push(`  - 수익률 기준: ${mb.return_basis}`)
+      L.push(`  - MDD 기준: ${mb.mdd_basis}`)
+      L.push(`  - 벤치마크: ${mb.benchmark || '**없음** — 절대 샤프만 제시합니다. 상대 평가는 불가합니다.'}`)
+    }
+  }
   if (health) {
     L.push(`- 종합: **${health.overall}/100 (${health.grade}등급)**`)
     if (health.sub_scores) L.push(`- 하위지표: ` + Object.entries(health.sub_scores).map(([k, v]) => `${k} ${v}`).join(' · '))

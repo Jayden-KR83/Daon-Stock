@@ -782,8 +782,8 @@ KOSPI_SECTOR_ETFS = {
 # 섹터 분류 정본은 backend/sectors.py 한 곳이다 — 라벨·대분류·ETF 표가 모두 거기 있다.
 # 여기서 다시 적지 않는 이유: 표가 두 벌이 되는 순간 반드시 어긋난다(2026-10-10 실제 발생).
 from sectors import (KR_ETF_SECTOR, US_ETF_SECTOR, SECTOR_GROUPS,
-                     LABEL_TO_GROUP, LEGACY_ALIASES,
-                     sector_group, labels_by_group, unknown_labels)
+                     LABEL_TO_GROUP, LEGACY_ALIASES, USD_EXPOSED_KR_ETF,
+                     sector_group, labels_by_group, unknown_labels, currency_of)
 
 # ─── TTL Cache ────────────────────────────────────────────────────────
 _cache: Dict[str, Any] = {}
@@ -6036,6 +6036,68 @@ class StrategyReq(BaseModel):
     usd_krw:  float | None = None
 
 
+# 지표를 어떤 조건으로 뽑았는지. 리포트에 **같이** 실어야 한다 —
+# 2026-10-27 외부 검증: "평균 샤프 0.19가 비효율적이라는데, 계산 기간·무위험수익률·
+# 벤치마크가 없으면 판단 불가". 조건은 코드에 있었지만 리포트에 없었다.
+# 값만 주고 조건을 숨기면, 읽는 쪽은 검증할 수 없고 그래서 믿거나 버리거나 둘뿐이다.
+METRICS_BASIS = {
+    'period':         '1년',
+    'interval':       '일봉',
+    'risk_free_rate': 0.04,
+    'annualization':  252,
+    'return_basis':   '평균단가 대비 (시장 벤치마크 대비가 아님)',
+    'mdd_basis':      '최근 1년 구간 내 최고점 대비 최대 낙폭',
+    'benchmark':      None,     # 없다. 없는 것을 있다고 적지 않는다.
+}
+
+
+def _concentration(values: list) -> dict:
+    """집중도 — 비중 목록만으로 계산되는 결정론적 지표.
+
+    HHI = Σwᵢ². 유효 종목 수 = 1/HHI — "실질적으로 몇 종목에 분산돼 있나"다.
+    20종목을 들고 있어도 하나가 25%면 유효 종목 수는 10 아래로 떨어진다.
+    '종목 수'만으로 분산을 말할 수 없다는 것을 한 숫자로 보여준다.
+    """
+    tot = sum(v for v in values if v > 0)
+    if tot <= 0:
+        return {'hhi': None, 'effective_n': None, 'top1_pct': None, 'top5_pct': None}
+    ws = sorted((v / tot for v in values if v > 0), reverse=True)
+    hhi = sum(w * w for w in ws)
+    return {
+        'hhi':         round(hhi, 4),
+        'effective_n': round(1 / hhi, 1) if hhi > 0 else None,
+        'top1_pct':    round(ws[0] * 100, 1),
+        'top5_pct':    round(sum(ws[:5]) * 100, 1),
+    }
+
+
+def _currency_exposure(enriched: list) -> dict:
+    """실질 환노출 — **계좌가 아니라 기초자산** 기준.
+
+    계좌로 세면 틀린다: 퇴직연금의 TIGER 미국나스닥100 은 원화로 사지만
+    환율이 그대로 반영된다. 2026-10-27 외부 검증 2곳이 공통으로 지적했다.
+
+    판정은 `sectors.currency_of()` 정본이 한다. 모르는 국내 ETF 는 KRW 로 세므로
+    **과소 계상될 수 있다** — 그래서 아래 note 로 그 한계를 함께 내보낸다.
+    없는 환노출을 지어내는 것보다 모른다고 말하는 편이 낫다.
+    """
+    tot = sum(e['value_krw'] for e in enriched) or 0
+    if tot <= 0:
+        return {'usd_pct': None, 'krw_pct': None}
+    usd = sum(e['value_krw'] for e in enriched
+              if currency_of(e['ticker'], e['is_us']) == 'USD')
+    # 원화 상장인데 달러 자산인 것 — 계좌 기준으로 세면 통째로 빠지는 부분
+    hidden = sum(e['value_krw'] for e in enriched
+                 if (not e['is_us']) and currency_of(e['ticker'], False) == 'USD')
+    return {
+        'usd_pct':        round(usd / tot * 100, 1),
+        'krw_pct':        round((tot - usd) / tot * 100, 1),
+        'hidden_usd_pct': round(hidden / tot * 100, 1),
+        'note': ('계좌가 아니라 기초자산 기준. 국내 상장 해외 ETF 가 USD 쪽에 포함된다. '
+                 '정본에 등록되지 않은 국내 ETF 는 KRW 로 세므로 USD 가 과소 계상될 수 있다.'),
+    }
+
+
 def _effective_usd_krw(req_rate) -> float:
     """전략 계산에 쓸 환율 — 화면의 표와 같은 값이어야 한다.
 
@@ -6330,6 +6392,13 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
         'usd_krw':     round(usd_krw, 2),
         'computed_at': round(time()),
         'total_krw':   round(total_krw),
+        # **분모를 글로 적는다.** 2026-10-27 외부 검증: "비중의 분모가 주식 평가액인지
+        # 총자산인지 계좌 내 비중인지 명확히 해야 한다 — 이 넷은 모두 다른 지표다."
+        # 맞는 말이고, 그동안 어디에도 적혀 있지 않았다. 같은 24%가 세 가지 뜻일 수 있었다.
+        'weight_basis':  '주식 평가액 합계 (예수금·현금 제외, KRW 환산)',
+        'metrics_basis': METRICS_BASIS,
+        'concentration': _concentration([e['value_krw'] for e in enriched]),
+        'currency_exposure': _currency_exposure(enriched),
         'holdings':    vf_holdings,
         'sectors':     vf_sectors,
         'top_gainer':  (max(_ranked, key=lambda e: e['pnl_pct'])['ticker'] if _ranked else None),
@@ -7328,6 +7397,13 @@ class AlertsReq(BaseModel):
     target_max_loss_pct:   float = -20.0  # 단일 종목 손실 임계 (예: -20%)
 
 
+# 손실 경고 등급 임계값 — 단위는 **%p**(포트폴리오 전체 대비 손실 기여).
+# 1.0%p = 전체 자산의 1% 를 이 종목 하나가 깎아먹었다는 뜻이다.
+# 손실률이 아니라 영향도로 등급을 매기는 이유는 아래 2-3) 주석에 있다.
+LOSS_IMPACT_CRITICAL = 1.0
+LOSS_IMPACT_HIGH     = 0.3
+
+
 def _compute_rebalance_alerts(holdings: list, prices: dict, usd_krw: float,
                               max_ticker: float, max_sector: float, max_loss: float) -> list:
     """룰 기반 경고 리스트 반환. AI 호출 없음."""
@@ -7396,17 +7472,39 @@ def _compute_rebalance_alerts(holdings: list, prices: dict, usd_krw: float,
             })
 
     # 2-3) 큰 손실 종목 (-X% 이하)
+    #
+    # 2026-10-27: 예전에는 **손실률만** 보고 등급을 매겼다. 그래서 비중 0.1% 종목의
+    # -64% 가 비중 24% 종목의 -20% 와 같은 critical 이 됐다(외부 검증 2곳이 공통 지적).
+    # 포트폴리오에 주는 타격이 700배 차이인데 같은 등급이면, 등급이 정보를 잃는다.
+    #
+    # 영향도(%p) = 비중% × 손실률% / 100 — "이 종목 때문에 전체가 몇 %p 깎였나".
+    # 다만 **목록에서 빼지는 않는다.** 비중이 작아도 -69% 는 판단이 틀렸다는 신호이고,
+    # 숨기면 같은 실수를 반복한다. 등급만 낮추고 영향도를 함께 적는다.
     for e in enriched:
         if e['pnl_pct'] <= max_loss:
-            severity = 'critical' if e['pnl_pct'] <= max_loss * 1.5 else 'med'
+            pct    = e['val'] / total * 100
+            impact = pct * abs(e['pnl_pct']) / 100
+            if impact >= LOSS_IMPACT_CRITICAL:
+                severity = 'critical'
+            elif impact >= LOSS_IMPACT_HIGH:
+                severity = 'high'
+            else:
+                severity = 'low' if impact < LOSS_IMPACT_HIGH / 3 else 'med'
             alerts.append({
                 'rule':     'large_loss',
                 'severity': severity,
                 'title':    f"{e['name']} {e['pnl_pct']:.1f}% — 큰 손실",
-                'detail':   f"평균단가 대비 {abs(e['pnl_pct']):.1f}% 손실. "
-                           f"손절/추가매수/관망 중 전략 점검이 필요합니다.",
+                # 손실률과 영향도를 **나눠서** 보여준다. 둘은 다른 이야기다.
+                # 그리고 행동을 지시하지 않는다 — 손실이 크다는 것과 그 기업의
+                # 투자 가치가 낮다는 것은 서로 다른 사실이다(2026-10-27 외부 검증).
+                'detail':   (f"평균단가 대비 {abs(e['pnl_pct']):.1f}% 손실 · "
+                             f"비중 {pct:.1f}% · 포트폴리오 영향도 {impact:.2f}%p. "
+                             f"손실률이 크다는 것과 그 기업의 투자 가치가 낮다는 것은 "
+                             f"다른 문제입니다 — 영향도와 함께 보세요."),
                 'ticker':   e['ticker'],
                 'value':    round(e['pnl_pct'], 1),
+                'weight_pct': round(pct, 1),
+                'impact_pp':  round(impact, 2),
                 'threshold': max_loss,
             })
 
