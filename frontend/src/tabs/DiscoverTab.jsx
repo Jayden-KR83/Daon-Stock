@@ -204,6 +204,92 @@ function agoLabel(epoch) {
   const h = Math.max(0, (Date.now() / 1000 - epoch) / 3600)
   return h < 1 ? '방금 갱신' : h < 24 ? `${Math.round(h)}시간 전` : `${Math.round(h / 24)}일 전`
 }
+
+const _n = (v, d = 1) => (v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(d))
+const _QT = { stock: '개별종목', etf: 'ETF', innov: '저점발굴(고위험 혁신주)' }
+const _GR = { reco: '추천만 (종합 ≥60)', pass: '기준 통과', all: '전체 (미달 포함)' }
+
+/* 발굴 결과를 교차검증용 Markdown 으로.
+ *
+ * 2026-10-27 포트폴리오 리포트 교차검증에서 배운 것을 그대로 적용한다:
+ * **값만 주고 산출 조건을 숨기면 읽는 쪽은 믿거나 버리거나 둘뿐이다.**
+ * 그때 외부 LLM 세 곳이 "계산 기간·무위험수익률·벤치마크가 없으면 판단 불가"라고
+ * 했고 맞는 말이었다. 그래서 여기서는 **0장에 점수 읽는 법을 먼저** 싣는다 —
+ * 가중치·재정규화·게이트·모집단·기준 시각까지. 목록은 그 다음이다.
+ */
+function _buildDiscoverMd({ rows, computedAt, qtype, market, grade, total, sortKey }) {
+  const L = []
+  const now = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' })
+  L.push(`# 다온 종목 발굴 리포트`, ``)
+  L.push(`- **생성일**: ${now}`)
+  L.push(`- **데이터 기준 시각**: ${computedAt ? new Date(computedAt * 1000).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }) : '알 수 없음'}`)
+  L.push(`- **필터**: ${_QT[qtype] || qtype} · 시장 ${market} · ${_GR[grade] || grade} · 정렬 ${sortKey}`)
+  L.push(`- **이 문서에 담긴 종목**: ${rows.length}종 (해당 조건 전체 ${total}종 중)`)
+  L.push(`- **출처**: 다온(daonwealth.com) 발굴 탭 내보내기`)
+  L.push(`- ⚠️ 참고용이며 투자 자문이 아닙니다. 관심 종목이 드러나므로 공유 시 주의.`, ``)
+
+  L.push(`## 0. 이 점수를 읽는 법 — 먼저 읽어 주세요`, ``)
+  L.push(`**종합 점수는 절대 평가가 아니라 \`같은 시장 내 상대 백분위\`입니다.**`)
+  L.push(`US 종목은 US 모집단 안에서, KR 종목은 KR 모집단 안에서 줄을 세운 값입니다.`)
+  L.push(`따라서 **US 80점과 KR 80점은 같은 뜻이 아닙니다.**`, ``)
+  L.push(`### 가중치 (시장별로 다릅니다)`)
+  L.push(`| 축 | US | KR |`, `|---|--:|--:|`)
+  L.push(`| 가치 Value | 0.30 | 0.35 |`)
+  L.push(`| 성장 Growth | 0.25 | 0.25 |`)
+  L.push(`| 체력 Quality | 0.20 | 0.25 |`)
+  L.push(`| 모멘텀 Momentum | 0.15 | **0.05** |`)
+  L.push(`| 심리 Sentiment | 0.10 | 0.10 |`)
+  L.push(``)
+  L.push(`KR 모멘텀을 낮춘 근거: 국내 개별주의 중기 모멘텀은 reversal(역전)이 지배적입니다.`)
+  L.push(`낮춘 가중은 펀더멘털(가치·체력)로 재배분했습니다.`, ``)
+  L.push(`### ⚠️ 가용 축만 재정규화합니다 — 점수를 볼 때 반드시 \`축수\`를 함께 보세요`)
+  L.push(`데이터가 없는 축은 **가짜값을 채우지 않고 빼버립니다.** 5축 중 3축만 있으면`)
+  L.push(`그 3축의 가중치를 100%로 다시 나눠 점수를 만듭니다.`)
+  L.push(`→ **축수가 적은 종목은 점수가 부풀어 보일 수 있습니다.** 3축짜리 80점과`)
+  L.push(`5축짜리 80점은 신뢰도가 다릅니다. 표의 \`축수\` 열이 그 신뢰도입니다.`, ``)
+  L.push(`### 게이트 (목록에 오르기 전 탈락 조건)`)
+  L.push(`- 현재가 없음 (상장폐지·죽은 티커)`)
+  L.push(`- 가용 축이 3개 미만 (데이터 부족)`)
+  L.push(`- GARP 기준 미달 — 탈락 사유는 아래 표의 \`비고\` 열에 그대로 적습니다`, ``)
+  L.push(`### 이 리포트가 답하지 못하는 것`)
+  L.push(`- 지표는 **공시 시점 기준**이라 최신 뉴스가 반영되기까지 시차가 있습니다`)
+  L.push(`- 백분위는 **스캔 시점의 모집단** 기준입니다 (기준 시각은 위 머리말 참조)`)
+  L.push(`- 밸류에이션의 적정성·사업 내용·경영진은 이 점수에 **들어 있지 않습니다**`, ``)
+
+  L.push(`## 1. 목록`, ``)
+  L.push(`| 티커 | 이름 | 시장 | 섹터 | 종합 | 축수 | 가치 | 성장 | 체력 | 모멘텀 | 심리 | PEG | ROE% | 상승여력% | 비고 |`)
+  L.push(`|---|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|`)
+  for (const r of rows) {
+    L.push(`| ${r.ticker} | ${r.name || ''} | ${r.market || ''} | ${r.sector || ''} | ` +
+      `${_n(r.composite_score)} | ${r.data_completeness ?? '—'}/5 | ` +
+      `${_n(r.pct_value, 0)} | ${_n(r.pct_growth, 0)} | ${_n(r.pct_quality, 0)} | ` +
+      `${_n(r.pct_momentum, 0)} | ${_n(r.pct_sentiment, 0)} | ` +
+      `${_n(r.peg, 2)} | ${_n(r.roe)} | ${_n(r.analyst_upside)} | ` +
+      `${r.gate_pass ? '통과' : (r.gate_fail_reason || '미달')} |`)
+  }
+  L.push(``)
+
+  L.push(`## 2. 교차검증 요청 (다른 LLM에게)`, ``)
+  L.push(`아래 관점에서 검토해 주세요. **각 지적에 근거가 되는 행·열을 함께 적어 주세요.**`, ``)
+  L.push(`1. **점수 체계의 타당성** — 가중치 배분과 KR 모멘텀 축소가 합리적입니까?`)
+  L.push(`   반대 근거가 있다면 어떤 연구·데이터입니까?`)
+  L.push(`2. **재정규화의 위험** — 축수가 적은 종목의 점수를 그대로 비교해도 됩니까?`)
+  L.push(`   보정이 필요하다면 구체적인 식을 제안해 주세요.`)
+  L.push(`3. **누락된 축** — 이 5축으로 설명되지 않는 위험은 무엇입니까?`)
+  L.push(`   (예: 유동성, 지배구조, 회계 품질, 섹터 사이클 위치)`)
+  L.push(`4. **게이트 조건** — 탈락 기준이 너무 느슨하거나 빡빡한 곳이 있습니까?`)
+  L.push(`5. **상위 종목의 실질** — 점수가 높은데 실제로는 위험한 종목이 보입니까?`)
+  L.push(`   그렇다면 어떤 열의 어떤 값이 그 신호입니까?`, ``)
+  L.push(`### 검증하실 때 부탁드리는 것`, ``)
+  L.push(`수치가 어긋나 보이면 **AI 환각을 의심하기 전에 위 0장의 산출 조건을 먼저 확인해 주세요.**`)
+  L.push(`2026-10-27 포트폴리오 리포트 검증에서, 외부 LLM 세 곳이 모두 수치 불일치를`)
+  L.push(`"AI 환각"으로 지목했지만 실제 원인은 **요청 모델에 환율 필드가 선언되지 않아`)
+  L.push(`값이 조용히 버려진 것**이었습니다. LLM 은 주어진 값을 정확히 인용했습니다.`)
+  L.push(`원인을 어디로 돌리느냐가 처방을 바꾸므로, 가능하면 **검증 가능한 가설**로`)
+  L.push(`적어 주시면 저희가 코드에서 확인하겠습니다.`, ``)
+  L.push(`> 이 점수는 **후보를 좁히는 도구**이지 매수 신호가 아닙니다.`)
+  return L.join('\n')
+}
 function valNote(row) {
   const p = []
   if (row.peg != null) p.push(row.peg < 1 ? '성장 대비 저평가(PEG<1)' : row.peg <= 1.5 ? '성장 대비 적정(PEG≤1.5)' : '성장 대비 비쌈')
@@ -557,6 +643,27 @@ export default function DiscoverTab() {
     } catch (e) { setRescanMsg(e.response?.data?.detail || '갱신 실패') }
   }
 
+  /* 화면에 보이는 것(필터 적용 결과)을 그대로 내보낸다 — 내가 보고 있는 것을
+     검증받아야 의미가 있다. 전체를 내보내면 수백 종이 되어 읽히지도 않는다. */
+  function onExportMd() {
+    try {
+      const md = _buildDiscoverMd({
+        rows: view, computedAt: data?.computed_at, qtype, market, grade,
+        total: data?.total ?? view.length, sortKey,
+      })
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const d = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+      a.href = url; a.download = `daon-discover-${qtype}-${d}.md`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+      setRescanMsg(`${view.length}종을 MD 로 내보냈습니다.`)
+    } catch (e) {
+      setRescanMsg('내보내기에 실패했습니다.')
+    }
+  }
+
   return (
     <div style={{ paddingTop: 8 }}>
       <div className="disc-sticky">
@@ -627,6 +734,13 @@ export default function DiscoverTab() {
           </details>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)', fontWeight: 600 }}>{ago ? `${ago} · 매일 자동` : '매일 자동'}</span>
+            {/* 교차검증용 내보내기 — 점수 산출 조건을 함께 실어 보낸다(2026-10-28).
+                값만 주면 읽는 쪽은 믿거나 버리거나 둘뿐이다. */}
+            <button onClick={onExportMd} disabled={!view.length} className="btn-secondary"
+              style={{ fontSize: 11, padding: '4px 9px' }}
+              title="화면에 보이는 목록을 교차검증용 Markdown 으로 내려받습니다">
+              검증용 MD
+            </button>
             {isAdmin && <button onClick={onRescan} className="btn-secondary" style={{ fontSize: 11, padding: '4px 9px' }}>지금 갱신</button>}
           </span>
         </div>
