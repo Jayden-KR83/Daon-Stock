@@ -8598,6 +8598,26 @@ def push_subscribe(req: PushSubReq, cu: dict = Depends(require_approved)):
 class PushUnsubReq(BaseModel):
     endpoint: str
 
+@app.get("/api/push/status")
+def push_status(cu: dict = Depends(require_approved)):
+    """이 사용자 앞으로 **서버에 등록된** 기기 수.
+
+    왜 필요한가 (2026-10-28): 브라우저에 구독 객체가 있다는 것과 서버가 보낼 주소를
+    가지고 있다는 것은 **다른 사실**이다. 그런데 진단 화면은 앞의 것만 보고
+    '구독: 있음'이라 적고 있었다. 실제로 오너 폰이 그 상태였다 —
+    브라우저는 구독 있음, 서버는 0대, 알림 100건이 앱 안에만 쌓였다.
+
+    서버가 구독을 지우는 경로가 있다: 푸시 서비스가 404/410 을 주면 죽은 구독으로
+    보고 삭제한다(_push_send). 그때 **브라우저 쪽 구독은 그대로 남는다.**
+    클라이언트가 자기 구독만 보고 '켜짐'이라 믿으면 재등록을 하지 않으므로,
+    이 어긋남은 **스스로 낫지 않는다.**
+    """
+    with _db() as conn:
+        n = conn.execute("SELECT COUNT(*) c FROM push_subscriptions WHERE user_id=?",
+                         (cu['user_id'],)).fetchone()['c']
+    return {'devices': n}
+
+
 @app.post("/api/push/unsubscribe")
 def push_unsubscribe(req: PushUnsubReq, cu: dict = Depends(require_approved)):
     with _db() as conn:

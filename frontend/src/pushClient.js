@@ -1,6 +1,6 @@
 /* Web Push 구독 클라이언트 — 권한 요청 + pushManager 구독/해지 + 백엔드 동기화.
    상태: 'unsupported' | 'denied' | 'on' | 'off' */
-import { getVapidPublicKey, subscribePush, unsubscribePush } from './api'
+import { getVapidPublicKey, subscribePush, unsubscribePush, getPushStatus } from './api'
 
 export function pushSupported() {
   return typeof window !== 'undefined'
@@ -25,9 +25,33 @@ export async function getPushState() {
   try {
     const reg = await swRegistration(6000)
     const sub = await reg.pushManager.getSubscription()
-    return sub ? 'on' : 'off'
+    if (!sub) return 'off'
+    /* 2026-10-28: 여기서 `return sub ? 'on' : 'off'` 로 끝냈던 것이 버그였다.
+       **브라우저에 구독이 있다는 것과 서버가 보낼 주소를 가졌다는 것은 다른 사실이다.**
+       서버는 푸시 서비스가 404/410 을 주면 죽은 구독으로 보고 지운다(_push_send).
+       그때 브라우저 쪽 구독은 그대로 남으므로, 자기 구독만 보면 '켜짐'으로 보인다.
+       그리고 켜져 있다고 믿으면 재등록을 하지 않으므로 **스스로 낫지 않는다.**
+       실제로 오너 폰이 그 상태였다 — 진단은 '구독 있음', 테스트는 '보낼 기기 없음',
+       알림 100건이 앱 안에만 쌓였다.
+       그래서 이제 서버에도 묻고, 어긋나 있으면 조용히 다시 등록한다. */
+    syncSubscription(sub)
+    return 'on'
   } catch {
     return 'off'
+  }
+}
+
+/* 브라우저 구독과 서버 등록을 맞춘다. 실패해도 조용히 넘어간다 —
+   상태 조회를 막아서는 안 되고, 다음 호출에서 다시 시도하면 된다.
+   서버의 저장은 INSERT OR REPLACE 라 몇 번을 보내도 안전하다. */
+export async function syncSubscription(sub) {
+  try {
+    const st = await getPushStatus()
+    if ((st?.devices ?? 0) > 0) return 'ok'
+    await subscribePush(sub.toJSON())
+    return 'repaired'
+  } catch {
+    return 'failed'
   }
 }
 
@@ -88,16 +112,28 @@ export async function pushDiagnostics() {
     홈화면앱: (window.matchMedia?.('(display-mode: standalone)')?.matches
               || window.navigator.standalone === true) ? '예' : '아니오(브라우저)',
     서비스워커: '확인 중',
-    구독: '확인 중',
+    '구독(이 기기)': '확인 중',
+    '서버 등록': '확인 중',
   }
   try {
     const reg = await swRegistration(6000)
     d.서비스워커 = reg?.active ? '활성' : (reg ? '등록됨(비활성)' : '없음')
     const sub = await reg.pushManager.getSubscription()
-    d.구독 = sub ? '있음' : '없음'
+    d['구독(이 기기)'] = sub ? '있음' : '없음'
   } catch (e) {
     d.서비스워커 = String(e?.message) === 'sw_timeout' ? '응답 없음(5초)' : '오류'
-    d.구독 = '확인 불가'
+    d['구독(이 기기)'] = '확인 불가'
+  }
+  /* 2026-10-28 추가. 이 줄이 없어서 반쪽만 보고 있었다 —
+     브라우저에 구독이 있어도 서버에 주소가 없으면 알림은 오지 않는다.
+     진단이 그 둘을 하나로 뭉뚱그리면, 멀쩡해 보이는데 아무것도 안 오는
+     상태를 설명할 수 없다. */
+  try {
+    const st = await getPushStatus()
+    const n = st?.devices ?? 0
+    d['서버 등록'] = n > 0 ? `${n}대` : '0대 — 서버가 보낼 주소가 없습니다'
+  } catch {
+    d['서버 등록'] = '확인 불가(로그인 상태를 확인하세요)'
   }
   return d
 }

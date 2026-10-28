@@ -196,6 +196,9 @@ export const markAllNotificationsRead = () =>
 export const getVapidPublicKey = () => api.get('/push/public_key').then(r => r.data)
 export const subscribePush     = (sub) => api.post('/push/subscribe', sub).then(r => r.data)
 export const unsubscribePush   = (endpoint) => api.post('/push/unsubscribe', { endpoint }).then(r => r.data)
+/* 서버에 등록된 기기 수 — 브라우저 구독이 있다는 것과 **서버가 보낼 주소를 가졌다는
+   것은 다른 사실**이다. 이 둘이 어긋나면 알림은 조용히 안 온다. */
+export const getPushStatus     = () => api.get('/push/status').then(r => r.data)
 export const sendTestPush      = () => api.post('/push/test').then(r => r.data)
 
 // 목표 기반 포트폴리오 (Goal-Based Investing)

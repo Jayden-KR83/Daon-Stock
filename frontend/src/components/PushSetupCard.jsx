@@ -206,8 +206,28 @@ export default function PushSetupCard() {
         {'앱을 열지 않아도 잠금화면으로 알림이 옵니다.\n기기마다 따로 켜야 합니다 — 휴대폰에서 켜면 휴대폰으로, PC에서 켜면 PC로 옵니다.'}
       </div>
 
+      {/* 브라우저엔 구독이 있는데 **서버엔 없는** 상태 — 2026-10-28 오너 폰이 이랬다.
+          토글은 켜짐, 진단은 '구독 있음', 그런데 알림은 한 건도 안 왔다.
+          서버가 404/410 을 받고 구독을 지웠는데 브라우저 구독은 남아 있던 것이다.
+          이제 getPushState 가 자동으로 다시 등록하지만, 그래도 실패할 수 있으므로
+          **눈에 보이게** 짚는다. 조용한 고장은 설명되지 않으면 또 조용해진다. */}
+      {diag && diag['구독(이 기기)'] === '있음'
+            && String(diag['서버 등록'] || '').startsWith('0대') && (
+        <div className="ko-keep" style={{
+          border: '1px solid var(--clr-neg-border)', background: 'var(--clr-neg-bg-soft)',
+          borderRadius: 4, padding: '9px 11px', marginBottom: 12, fontSize: 11.5,
+          lineHeight: 1.7, color: 'var(--clr-text-sub)' }}>
+          <div style={{ fontWeight: 800, color: 'var(--clr-neg-dark)' }}>
+            이 기기는 구독돼 있는데 서버에는 주소가 없습니다
+          </div>
+          <div>그래서 알림이 <strong>만들어지기만 하고 오지 않습니다.</strong></div>
+          <div>자동으로 다시 등록을 시도했습니다 — 이 화면을 닫았다 다시 열어 보세요.</div>
+          <div>그래도 0대면 아래 토글을 <strong>껐다가 다시 켜 주세요.</strong></div>
+        </div>
+      )}
+
       {/* 권한은 있는데 구독이 없는 상태 — 가장 헷갈리는 자리라 따로 짚는다 */}
-      {diag && diag.권한 === 'granted' && diag.구독 === '없음' && (
+      {diag && diag.권한 === 'granted' && diag['구독(이 기기)'] === '없음' && (
         <div className="ko-keep" style={{
           border: '1px solid var(--clr-warn, #D97706)', borderRadius: 4,
           padding: '9px 11px', marginBottom: 12, fontSize: 11.5, lineHeight: 1.7,
