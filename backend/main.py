@@ -8513,6 +8513,30 @@ def get_discover(market: str = 'ALL', min_score: float = 0, sort: str = 'score',
 # VAPID 키는 최초 호출 시 1회 생성해 settings에 저장(cron_secret 패턴과 동일).
 PUSH_VAPID_SUB = 'mailto:rising.yu@gmail.com'   # VAPID claims sub (연락처)
 
+def _vapid_private_for_webpush(priv_pem: str) -> str:
+    """PEM 개인키 → **raw base64url(32바이트)**.
+
+    2026-10-28, 실측으로 확정한 것:
+    pywebpush 는 `vapid_private_key` 가 문자열이면 `py_vapid.Vapid.from_string()` 에
+    넘긴다. 그런데 from_string 은 PEM 을 **DER 로 착각해 base64 디코딩**을 시도하고
+    `ValueError: Could not deserialize key data ... ASN.1 parsing error` 로 죽는다.
+
+        from_string(PEM)            → FAIL
+        from_string(raw b64url 32B) → OK      ← 이것을 쓴다
+        from_string(DER b64url)     → OK
+        from_pem(PEM)               → OK      (pywebpush 가 부르지 않는 경로)
+
+    **키 자체는 멀쩡하다.** 넘기는 형식만 틀렸다. 그래서 키를 다시 만들 필요도,
+    기기가 재구독할 필요도 없다 — 공개키가 그대로이므로 기존 구독이 그대로 유효하다.
+    DB 에는 PEM 을 그대로 둔다(다른 코드가 읽을 수 있으므로). 변환은 보낼 때만 한다.
+    """
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    pk = serialization.load_pem_private_key(priv_pem.encode(), password=None)
+    raw = pk.private_numbers().private_value.to_bytes(32, 'big')
+    return base64.urlsafe_b64encode(raw).rstrip(b'=').decode()
+
+
 def _vapid_usable(priv: str) -> bool:
     """이 개인키를 **실제로 로드해 본다.**
 
@@ -8597,6 +8621,8 @@ def _send_push(user_id: str, title: str, body: str, url: str = '/',
         return 0
     try:
         priv, _ = _get_vapid()
+        # PEM 을 그대로 넘기면 py_vapid 가 DER 로 착각해 깨진다(위 함수 주석 참조).
+        priv = _vapid_private_for_webpush(priv)
     except Exception as e:
         _err(f'VAPID 키를 읽지 못했습니다 — {type(e).__name__}: {e}')
         return 0
