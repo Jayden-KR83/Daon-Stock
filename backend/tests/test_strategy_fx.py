@@ -13,6 +13,40 @@ import main
 from main import StrategyReq
 
 
+class TestRequestModelShape:
+    """요청 모델의 **필드 집합**을 통째로 고정한다 (2026-10-28).
+
+    왜 필요한가: 2026-10-27 에 `usd_krw` 를 넣으면서 그 뒤에 함수 정의를 삽입했고,
+    그 바람에 `scope`·`force_refresh`·`years_to_retirement`·`monthly_inflow` 네 개가
+    **함수의 `return` 뒤 죽은 코드로 밀려났다.** 도달 불가 코드라 파싱도 통과하고
+    기존 테스트도 전부 통과했다. 운영에서 전략 분석을 누르자
+
+        AttributeError: 'StrategyReq' object has no attribute 'scope'
+
+    로 500 이 났다. **필드 하나를 보는 테스트로는 이것을 잡을 수 없다.**
+    """
+
+    def test_모든_필드가_살아있다(self):
+        need = {'holdings', 'prices', 'usd_krw', 'scope',
+                'force_refresh', 'years_to_retirement', 'monthly_inflow'}
+        have = set(StrategyReq.model_fields)
+        assert need <= have, '사라진 필드: %s' % (need - have)
+
+    def test_기본값으로도_만들어진다(self):
+        # 엔드포인트가 req.scope 등을 바로 읽는다 — 접근 가능해야 한다
+        r = StrategyReq()
+        assert r.scope == 'ALL'
+        assert r.force_refresh is False
+        assert r.years_to_retirement is None
+        assert r.monthly_inflow is None
+
+    def test_값을_넣으면_그대로_들어간다(self):
+        r = StrategyReq(scope='US', force_refresh=True,
+                        years_to_retirement=12, monthly_inflow=1500000, usd_krw=1333.0)
+        assert (r.scope, r.force_refresh, r.years_to_retirement,
+                r.monthly_inflow, r.usd_krw) == ('US', True, 12, 1500000, 1333.0)
+
+
 class TestFieldExists:
     def test_요청의_환율이_버려지지_않는다(self):
         # 이 필드가 없으면 Pydantic 이 말없이 버린다 — 그게 이 사고의 전부였다

@@ -6034,6 +6034,10 @@ class StrategyReq(BaseModel):
     # 외부 LLM 교차검증은 이것을 'AI 환각'으로 지목했지만, LLM 은 주어진 값을
     # 그대로 썼을 뿐이다. 에러도 경고도 없이 값만 틀어지는 종류의 고장이다.
     usd_krw:  float | None = None
+    scope:    str  = 'ALL'        # 어떤 계좌 필터로 분석했는지 (캐시 저장용)
+    force_refresh: bool = False   # True면 캐시 무시하고 새로 분석
+    years_to_retirement: int | None = None   # 은퇴까지 남은 햇수 (Life Timeline)
+    monthly_inflow:      float | None = None  # 매월 추가 투입 가능액 (KRW)
 
 
 # 지표를 어떤 조건으로 뽑았는지. 리포트에 **같이** 실어야 한다 —
@@ -6118,10 +6122,6 @@ def _effective_usd_krw(req_rate) -> float:
     except Exception:
         pass
     return 1380.0
-    scope:    str  = 'ALL'        # 어떤 계좌 필터로 분석했는지 (캐시 저장용)
-    force_refresh: bool = False   # True면 캐시 무시하고 새로 분석
-    years_to_retirement: int | None = None   # 은퇴까지 남은 햇수 (Life Timeline)
-    monthly_inflow:      float | None = None  # 매월 추가 투입 가능액 (KRW)
 
 @app.get("/api/portfolio/strategy/cached")
 def portfolio_strategy_cached(scope: str = 'ALL', cu: dict = Depends(get_current_user)):
