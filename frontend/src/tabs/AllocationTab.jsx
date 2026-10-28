@@ -88,7 +88,7 @@ function _pct(v, t) { return t > 0 ? (v / t * 100) : 0 }
 function _strategyToMd(s) {
   if (!s || typeof s !== 'object')
     return '_AI 전략 리포트가 아직 생성되지 않았습니다 — 분석 탭에서 "다온 AI 전략 리포트"를 생성한 뒤 다시 내보내면 포함됩니다._'
-  const skip = new Set(['_cached', '_computed_at', 'cached', 'computed_at', 'fingerprint', 'scope', 'model'])
+  const skip = new Set(['_cached', '_computed_at', 'cached', 'computed_at', 'fingerprint', 'scope', 'model', 'lens_views'])
   const out = []
   for (const [k, v] of Object.entries(s)) {
     if (skip.has(k) || v == null) continue
@@ -206,6 +206,30 @@ function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKr
   }
   if (strategy?.verified_facts?.usd_krw)
     L.push(`- 5번 계산에 쓴 환율: **₩${strategy.verified_facts.usd_krw}/USD**`)
+  /* 3렌즈는 JSON 덩어리로 쏟지 않고 사람이 읽는 꼴로 따로 낸다 —
+     교차검증에서 가장 중요한 부분이기 때문이다(2026-10-28). */
+  {
+    const lv = strategy?.lens_views
+    if (lv && typeof lv === 'object') {
+      const names = [['aggressive', '위험 감당형', '5년 내 손실 감당 · 인출 없음'],
+                     ['balanced', '균형형', '10년 지평 · 일부 보호'],
+                     ['defensive', '안전형', '인출 임박 · 변동성이 곧 비용']]
+      const any = names.some(([k]) => lv[k])
+      if (any) {
+        L.push(``, `### 같은 수치, 세 가지 관점`)
+        L.push(`> 아래 진단은 하나의 투자 철학 위에 서 있습니다. 같은 숫자도 관점에 따라`)
+        L.push(`> 다르게 읽힙니다 — 어느 쪽이 옳은지는 본인의 기간과 감내 수준이 정합니다.`, ``)
+        for (const [k, t, sub] of names) {
+          const v = lv[k]; if (!v) continue
+          L.push(`**${t}** — _${sub}_`)
+          if (v.premise) L.push(`- 전제: ${v.premise}`)
+          if (v.reading) L.push(`- 해석: ${v.reading}`)
+          if (v.watch)   L.push(`- 지켜볼 것: ${v.watch}`)
+          L.push(``)
+        }
+      }
+    }
+  }
   L.push(``, _strategyToMd(strategy))
   L.push(``, `## 6. 교차검증 요청 (다른 LLM에게)`, `아래 관점에서 검토해 주세요:`)
   L.push(`1. **수치 정합성** — 비중 합계·평가액·손익 계산 오류`)
@@ -213,6 +237,10 @@ function _buildAnalysisMd({ dateStr, rows, health, alerts, div, strategy, cashKr
   L.push(`3. **누락 리스크** — 놓친 집중·상관·거시 리스크`)
   L.push(`4. **개선 제안** — 분산·리밸런싱·헷지 관점의 구체적 액션`)
   L.push(`5. **AI 전략 품질** — 근거·실행가능성·과신 여부`)
+  L.push(`6. **관점의 균형** — 위 '세 가지 관점'이 실제로 서로 다른 결론에 도달합니까?`)
+  L.push(`   셋이 같은 말을 돌려 하고 있다면 어느 대목입니까? 집중(한 종목·한 섹터 비중)을`)
+  L.push(`   **자동으로 결함으로 취급**하고 있지는 않습니까 — 분산은 하나의 투자 철학이지`)
+  L.push(`   보편 법칙이 아닙니다. 반대 근거가 있다면 함께 제시해 주세요.`)
   L.push(``, `> 가정: 미국 종목은 USD→KRW 환율 환산, 가격은 조회 시점 기준. 참고용이며 투자 자문 아님.`)
   return L.join('\n')
 }
@@ -1606,6 +1634,67 @@ function _fmtKstDateTime(epochSec) {
  *  · 글로벌 매크로 포지셔닝 → 삭제 (예측이고, 개인 포트폴리오 행동을 바꾸지 않는다)
  *  · 저점발굴 시계열 → 삭제 (발굴 탭이 따로 있어 중복. 투기 영역을 전략에 섞지 않는다)
  */
+const _LENS = [
+  { k: 'aggressive', t: '위험 감당형', s: '5년 내 손실 감당 · 인출 없음' },
+  { k: 'balanced',   t: '균형형',     s: '10년 지평 · 일부 보호' },
+  { k: 'defensive',  t: '안전형',     s: '인출 임박 · 변동성이 곧 비용' },
+]
+
+/* 같은 수치를 세 관점으로 읽는다 (2026-10-28 오너 요청).
+ *
+ * 왜 필요했나: 기존 진단은 "엔비디아 24.8%는 과도", "샤프 0.19는 비효율" 처럼
+ * **한 가지 투자 철학의 명제를 사실처럼** 적고 있었다. 분산은 하나의 철학이지
+ * 보편 법칙이 아니다 — 버핏 본인이 "분산은 무지에 대한 방어"라고 했고
+ * 집중으로 부를 쌓았다. 같은 리포트가 "12년은 공격적 운용이 가능한 구간"이라
+ * 써놓고 결론은 집중 해소로 가는 모순도 있었다.
+ *
+ * 그래서 렌즈를 **하나 고르게 하지 않는다.** 고르게 하는 것 자체가 또 하나의
+ * 전제를 강요하는 일이다. 셋을 나란히 두고 판단은 사용자에게 맡긴다.
+ */
+function LensViews({ lens }) {
+  if (!lens || typeof lens !== 'object') return null
+  const has = _LENS.filter(l => lens[l.k] && (lens[l.k].reading || lens[l.k].premise))
+  if (!has.length) return null
+  return (
+    <div className="mono-card" style={{ marginBottom: 12 }}>
+      <div className="mono-section-title is-accent" style={{ marginBottom: 2 }}>
+        같은 수치, 세 가지 관점
+      </div>
+      <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
+        lineHeight: 1.6, marginBottom: 10 }}>
+        아래 진단은 하나의 투자 철학 위에 서 있습니다. 같은 숫자도 관점에 따라
+        다르게 읽힙니다 — 어느 쪽이 옳은지는 <strong>본인의 기간과 감내 수준</strong>이 정합니다.
+      </div>
+      <div style={{ display: 'grid', gap: 10 }}>
+        {has.map(l => {
+          const v = lens[l.k] || {}
+          return (
+            <div key={l.k} style={{ border: '1px solid var(--m-outline-variant)',
+              borderRadius: 4, padding: '9px 11px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--m-text)' }}>{l.t}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)' }}>{l.s}</span>
+              </div>
+              {v.premise && (
+                <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)',
+                  marginTop: 4, fontStyle: 'italic' }}>전제 — {v.premise}</div>
+              )}
+              {v.reading && (
+                <div className="ko-keep" style={{ fontSize: 12, color: 'var(--m-text)',
+                  lineHeight: 1.75, marginTop: 5 }}>{v.reading}</div>
+              )}
+              {v.watch && (
+                <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)',
+                  lineHeight: 1.6, marginTop: 5 }}>지켜볼 것 — {v.watch}</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function DaonAIReport({ data, computedAt = 0, part = 'diagnosis' }) {
   const priorityMeta = {
     HIGH: { color: '#DC2626', bg: 'rgba(220,38,38,.10)', label: '즉시', desc: '1주일 내', icon: '⚡' },
@@ -1629,6 +1718,7 @@ function DaonAIReport({ data, computedAt = 0, part = 'diagnosis' }) {
             분석 기준 {_fmtKstDateTime(computedAt)}
           </div>
         )}
+        <LensViews lens={data.lens_views} />
         <div className="mono-card" style={{ marginBottom: 12 }}>
           <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>
             종합 리스크 진단

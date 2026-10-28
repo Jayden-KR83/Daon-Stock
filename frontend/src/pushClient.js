@@ -34,22 +34,49 @@ export async function getPushState() {
        실제로 오너 폰이 그 상태였다 — 진단은 '구독 있음', 테스트는 '보낼 기기 없음',
        알림 100건이 앱 안에만 쌓였다.
        그래서 이제 서버에도 묻고, 어긋나 있으면 조용히 다시 등록한다. */
-    syncSubscription(sub)
+    syncSubscription()
     return 'on'
   } catch {
     return 'off'
   }
 }
 
+/* 구독을 **새로 발급**한다 — 기존 것을 버리고 다시 만든다.
+ *
+ * 2026-10-28: 처음엔 "서버에 다시 등록"만 했는데 그것으로는 낫지 않았다.
+ * 서버가 그 구독을 지웠다는 것은 **푸시 서비스가 404/410 을 돌려줬다**는 뜻이고,
+ * 죽은 주소를 다시 넣어 봐야 다음 발송에서 또 지워진다. 같은 자리를 맴돈다.
+ * VAPID 키가 바뀐 경우에도 기존 구독은 전부 무효가 되는데, 그 역시 재발급이 답이다.
+ *
+ * 권한이 이미 granted 면 사용자에게 아무것도 묻지 않고 조용히 끝난다.
+ */
+export async function resubscribe() {
+  const reg = await swRegistration(10000)
+  const old = await reg.pushManager.getSubscription()
+  if (old) { try { await old.unsubscribe() } catch {} }
+  let key
+  try { ({ key } = await getVapidPublicKey()) } catch { throw new Error('vapid_failed') }
+  if (!key) throw new Error('vapid_failed')
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(key),
+  })
+  await subscribePush(sub.toJSON())
+  return sub
+}
+
 /* 브라우저 구독과 서버 등록을 맞춘다. 실패해도 조용히 넘어간다 —
-   상태 조회를 막아서는 안 되고, 다음 호출에서 다시 시도하면 된다.
-   서버의 저장은 INSERT OR REPLACE 라 몇 번을 보내도 안전하다. */
-export async function syncSubscription(sub) {
+   상태 조회를 막아서는 안 되고, 다음 호출에서 다시 시도하면 된다. */
+export async function syncSubscription() {
   try {
     const st = await getPushStatus()
     if ((st?.devices ?? 0) > 0) return 'ok'
-    await subscribePush(sub.toJSON())
-    return 'repaired'
+    /* 서버에 0대 = **이 구독은 서버가 이미 버린 것**이다. 그대로 다시 넣지 않고
+       새로 발급한다(위 resubscribe 주석 참조). 권한이 없으면 사용자가 켜야 한다. */
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted')
+      return 'need_permission'
+    await resubscribe()
+    return 'reissued'
   } catch {
     return 'failed'
   }

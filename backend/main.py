@@ -5919,7 +5919,7 @@ def _metrics_fingerprint(holdings: list) -> str:
 # 전략 리포트 프롬프트 버전. 지침·어조를 바꾸면 반드시 올린다.
 # 지문(fingerprint)에 섞어 넣으므로, 올리면 다음 조회 때 새 지침으로 다시 생성된다.
 # (올리지 않으면 보유 종목이 그대로인 한 예전 어조의 캐시가 계속 나온다)
-STRATEGY_PROMPT_VERSION = 'v2-formal'
+STRATEGY_PROMPT_VERSION = 'v3-lenses'
 
 def _strategy_fingerprint(holdings: list, prices: dict, years, inflow) -> str:
     """AI 전략 리포트 캐시 지문. 평가액을 결정하는 모든 입력(수량·평단·현재가)을 포함해야
@@ -6485,6 +6485,11 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
 다음 JSON만 응답하세요 (다른 텍스트 없이). 문자열 값 안에 큰따옴표(")를 절대 쓰지 말고 작은따옴표(')를 쓰세요.
 {{
   "expert_review": "전문가 총평 — 포트폴리오 전반 진단·강약점 (3-4문장)",
+  "lens_views": {{
+    "aggressive": {{"premise": "이 관점의 전제 (1문장)", "reading": "같은 수치를 이 관점으로 읽으면 (2-3문장)", "watch": "이 관점에서 지켜볼 것 (1문장)"}},
+    "balanced":   {{"premise": "...", "reading": "...", "watch": "..."}},
+    "defensive":  {{"premise": "...", "reading": "...", "watch": "..."}}
+  }},
   "risk_diagnosis": "[1] 종합 리스크 진단 — 타임라인 대비 변동성·섹터 쏠림 유효성 + 절세계좌(DC/ISA) 활용 진단 (5-7문장)",
   "allocation_phases": [
     {{"name": "단계명(예: 공격적 성장기)", "years": "1~5년차", "allocation": {{"주식": 60, "채권": 15, "금": 10, "리츠": 10, "암호화폐": 5}}, "account_strategy": "계좌별 운용 — 어떤 계좌(ISA/DC 등)에서 어떤 자산을 매집", "inflow_direction": "추가 유입금 최적 투입 방향"}}
@@ -6500,6 +6505,26 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
   "macro_view": "글로벌 매크로 환경과 이 포트폴리오 포지셔닝 평가 (2문장)",
   "edge_notes": "마이크로캡 격리·환율 등 예외 처리 코멘트 (해당 없으면 빈 문자열)"
 }}
+
+[절대 규칙 — 3렌즈 해석 (lens_views)]
+**같은 수치를 세 가지 투자 관점으로 각각 읽어라.** 권고가 아니라 해석이다.
+- aggressive(위험 감당형): 5년 내 손실을 감당할 수 있고 인출 계획이 없는 사람의 관점
+- balanced(균형형): 10년 지평, 일부 보호를 원하는 사람의 관점
+- defensive(안전형): 인출이 가까워 변동성 자체가 비용인 사람의 관점
+
+1. **세 렌즈는 반드시 서로 다른 결론에 도달해야 한다.** 셋이 같은 말을 하면 렌즈를
+   나눈 의미가 없다. 같은 집중도·같은 샤프를 두고 한쪽은 "핵심 베팅", 다른 쪽은
+   "인출 위험"으로 읽히는 것이 정상이다.
+2. 각 렌즈는 **premise(전제)를 먼저 밝혀라.** 결론만 쓰면 그것이 또 하나의 숨은
+   전제가 된다.
+3. **어느 렌즈가 옳다고 말하지 마라.** 고르는 것은 사용자다. "~하실 것을 권고합니다"는
+   lens_views 안에서 쓰지 마라 — 거기서는 "이 관점에서는 ~로 읽힙니다"로 쓴다.
+4. 집중(한 종목·한 섹터 비중이 큰 것)을 **자동으로 결함으로 취급하지 마라.**
+   분산은 하나의 투자 철학이지 보편 법칙이 아니다. aggressive 렌즈에서 집중은
+   **확신의 표현**일 수 있고, 그때의 질문은 "비중이 높다"가 아니라
+   "그 확신의 근거가 아직 유효한가"다.
+5. 단기 지표(1년 샤프·1년 MDD)를 장기 관점에 그대로 들이대지 마라. aggressive
+   렌즈에서 1년 샤프는 노이즈에 가깝다 — 그 사실을 reading 에 밝혀라.
 
 [규칙] allocation_phases 는 {_yrs_eff}년을 5년 단위로 나눈 개수만큼 생성하고, 각 Phase allocation 자산 비중의 합은 반드시 100이어야 한다."""
 

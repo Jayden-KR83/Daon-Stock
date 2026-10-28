@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { pushSupported, getPushState, enablePush, disablePush, pushDiagnostics } from '../pushClient'
+import { pushSupported, getPushState, enablePush, disablePush, pushDiagnostics,
+         resubscribe } from '../pushClient'
 import { sendTestPush, getMovePrefs, saveMovePrefs, listNotifications } from '../api'
 import { useInstall, isStandalone as pwaStandalone } from '../utils/installPrompt'
 import ToggleSwitch from './ToggleSwitch'
@@ -156,11 +157,24 @@ export default function PushSetupCard() {
     if (busy) return
     setBusy(true); setMsg('')
     try {
-      const r = await sendTestPush()
+      let r = await sendTestPush()
+      /* 2026-10-28: 예전에는 여기서 "보낼 기기가 없습니다. 먼저 켜주세요"로 끝났다.
+         그런데 오너는 **이미 켜 둔 상태**였다 — 브라우저 구독은 있는데 서버가
+         그 주소를 버린 것이었고, 사용자가 할 수 있는 일이 없었다.
+         안내로 떠넘기지 말고 그 자리에서 고친다: 구독을 새로 발급해 다시 보낸다. */
+      if (!(r?.sent > 0)) {
+        setMsg('보낼 기기가 없어 구독을 새로 발급하는 중…')
+        await resubscribe()
+        setState(await getPushState())
+        r = await sendTestPush()
+      }
       setMsg(r?.sent > 0
         ? `테스트 알림을 보냈습니다 (기기 ${r.sent}대). 잠금화면을 확인해 보세요.`
-        : '보낼 기기가 없습니다. 이 기기에서 알림을 먼저 켜주세요.')
-    } catch { setMsg('테스트 발송에 실패했습니다.') }
+        : '구독을 새로 발급했는데도 보낼 기기가 없습니다 — 아래 진단 정보를 알려주세요.')
+      setDiag(await pushDiagnostics().catch(() => null))
+    } catch (e) {
+      setMsg(`테스트 발송에 실패했습니다 (${String(e?.message || '원인 미상')}).`)
+    }
     finally { setBusy(false) }
   }
 
