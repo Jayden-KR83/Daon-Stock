@@ -8513,15 +8513,45 @@ def get_discover(market: str = 'ALL', min_score: float = 0, sort: str = 'score',
 # VAPID 키는 최초 호출 시 1회 생성해 settings에 저장(cron_secret 패턴과 동일).
 PUSH_VAPID_SUB = 'mailto:rising.yu@gmail.com'   # VAPID claims sub (연락처)
 
+def _vapid_usable(priv: str) -> bool:
+    """이 개인키를 **실제로 로드해 본다.**
+
+    2026-10-28: 저장된 키가 있다는 것과 그 키를 쓸 수 있다는 것은 다른 사실이었다.
+    운영에서 발송이 전부 `ValueError: Could not deserialize key data` 로 죽고 있었는데,
+    `_get_vapid()` 는 값이 있다는 이유로 그대로 돌려주고 있었다. 그래서 알림은
+    조용히 한 건도 가지 않았다 — 구독도 멀쩡하고 권한도 멀쩡한 채로.
+
+    있는지 묻지 말고 되는지 돌려 볼 것. 검증은 실행으로 한다.
+    """
+    if not priv or not priv.strip():
+        return False
+    try:
+        from cryptography.hazmat.primitives import serialization
+        serialization.load_pem_private_key(priv.encode(), password=None)
+        return True
+    except Exception:
+        return False
+
+
 def _get_vapid() -> tuple[str, str]:
-    """(private_pem, public_app_server_key_b64url) 반환. 없으면 생성·저장."""
+    """(private_pem, public_app_server_key_b64url) 반환. 없거나 **못 쓰면** 재생성."""
     with _db() as conn:
         rows = {r['key']: r['value'] for r in conn.execute(
             "SELECT key, value FROM settings WHERE key IN ('vapid_private','vapid_public')"
         ).fetchall()}
     priv, pub = rows.get('vapid_private'), rows.get('vapid_public')
-    if priv and pub:
+    if priv and pub and _vapid_usable(priv):
         return priv, pub
+    if priv or pub:
+        # 값은 있는데 못 쓴다 → 새로 만든다. 그러면 **기존 구독은 전부 무효**가 된다
+        # (다른 공개키로 맺어진 구독이라 서버가 보낼 수 없다). 남겨 두면 클라이언트가
+        # "서버에 등록돼 있다"고 믿어 재구독하지 않으므로, 여기서 같이 지운다.
+        # 지우면 자가 치유(syncSubscription)가 다음 실행에서 새 키로 다시 구독한다.
+        try:
+            with _db() as conn:
+                conn.execute("DELETE FROM push_subscriptions")
+        except Exception:
+            pass
     # 최초 1회 생성 (cryptography는 pywebpush 의존성으로 항상 존재)
     import base64
     from cryptography.hazmat.primitives.asymmetric import ec
