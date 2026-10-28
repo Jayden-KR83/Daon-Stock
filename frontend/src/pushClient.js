@@ -53,7 +53,12 @@ export async function getPushState() {
 export async function resubscribe() {
   const reg = await swRegistration(10000)
   const old = await reg.pushManager.getSubscription()
-  if (old) { try { await old.unsubscribe() } catch {} }
+  if (old) {
+    /* 서버 쪽 옛 주소도 같이 지운다. 2026-10-28: 이 줄이 없어서 재발급할 때마다
+       서버 등록이 1대 → 2대로 늘었다. 죽은 주소가 쌓이면 발송 때마다 헛돈다. */
+    try { await unsubscribePush(old.endpoint) } catch {}
+    try { await old.unsubscribe() } catch {}
+  }
   let key
   try { ({ key } = await getVapidPublicKey()) } catch { throw new Error('vapid_failed') }
   if (!key) throw new Error('vapid_failed')

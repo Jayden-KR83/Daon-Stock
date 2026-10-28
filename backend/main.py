@@ -8543,7 +8543,7 @@ def _get_vapid() -> tuple[str, str]:
     return priv, pub
 
 def _send_push(user_id: str, title: str, body: str, url: str = '/',
-               tag: str = '') -> int:
+               tag: str = '', errors: list = None) -> int:
     """user_id의 모든 구독에 푸시 발송. 만료 구독(404/410)은 정리. 발송 성공 수 반환.
     실패해도 호출부(알림 INSERT 등)에 영향 없도록 전부 격리.
 
@@ -8551,13 +8551,24 @@ def _send_push(user_id: str, title: str, body: str, url: str = '/',
     payload.tag  = 알림 그룹 키. 종목별로 다르게 주어야 여러 건이 겹치지 않고 쌓인다
                    (같은 tag면 OS가 이전 알림을 '교체' → 안드로이드 런처 뱃지가 1에서 안 늘어남).
     """
+    # 2026-10-28: 이 함수는 실패 사유를 **전부 버리고** 0 만 돌려주고 있었다.
+    # 그래서 "서버에 2대가 등록돼 있는데 발송 0건"이라는 상태가 생겼을 때,
+    # 라이브러리가 없는 건지 VAPID 가 틀린 건지 푸시 서비스가 거절한 건지
+    # **구분할 방법이 없었다.** errors 리스트를 받으면 거기에 사유를 적는다.
+    # 호출부 대부분은 errors 를 넘기지 않으므로 동작은 그대로다.
+    def _err(msg):
+        if errors is not None:
+            errors.append(str(msg)[:200])
+
     try:
         from pywebpush import webpush, WebPushException
-    except Exception:
+    except Exception as e:
+        _err(f'pywebpush 임포트 실패 — {type(e).__name__}: {e}')
         return 0
     try:
         priv, _ = _get_vapid()
-    except Exception:
+    except Exception as e:
+        _err(f'VAPID 키를 읽지 못했습니다 — {type(e).__name__}: {e}')
         return 0
     with _db() as conn:
         subs = conn.execute(
@@ -8565,6 +8576,7 @@ def _send_push(user_id: str, title: str, body: str, url: str = '/',
             (user_id,)
         ).fetchall()
         if not subs:
+            _err('이 사용자 앞으로 등록된 구독이 없습니다')
             return 0
         badge = conn.execute(
             "SELECT COUNT(*) AS n FROM notifications "
@@ -8590,8 +8602,13 @@ def _send_push(user_id: str, title: str, body: str, url: str = '/',
             code = getattr(getattr(e, 'response', None), 'status_code', None)
             if code in (404, 410):       # 만료/해지된 구독
                 dead.append(s['endpoint'])
-        except Exception:
-            pass
+                _err(f'{code} 만료된 구독 — 삭제함 ({s["endpoint"][:40]}…)')
+            else:
+                # 401/403 은 VAPID 키·claims 문제, 413 은 payload 초과.
+                # 여기서 조용히 넘어가면 '멀쩡한데 안 온다'가 된다.
+                _err(f'WebPush {code or "?"} — {str(e)[:120]}')
+        except Exception as e:
+            _err(f'전송 예외 — {type(e).__name__}: {str(e)[:120]}')
     if dead:
         with _db() as conn:
             conn.executemany("DELETE FROM push_subscriptions WHERE endpoint=?",
@@ -8652,10 +8669,20 @@ def push_unsubscribe(req: PushUnsubReq, cu: dict = Depends(require_approved)):
 
 @app.post("/api/push/test")
 def push_test(cu: dict = Depends(require_approved)):
-    """본인에게 테스트 푸시 1건 — 구독/발송 동작 검증용."""
+    """본인에게 테스트 푸시 1건 — 구독/발송 동작 검증용.
+
+    2026-10-28: `sent` 만 돌려주던 때는 "서버 등록 2대 / 발송 0건"이라는 상태를
+    설명할 수 없었다. 원인이 라이브러리인지 VAPID 인지 푸시 서비스 거절인지
+    화면에서 구분이 안 됐다. 이제 실패 사유를 그대로 실어 보낸다 —
+    테스트는 **왜 안 되는지 말해 주는 것**이 본래 일이다.
+    """
+    errs = []
     sent = _send_push(cu['user_id'], '다온 알림 테스트',
-                      '푸시 알림이 정상 동작합니다. 🎉', '/')
-    return {'ok': True, 'sent': sent}
+                      '푸시 알림이 정상 동작합니다. 🎉', '/', errors=errs)
+    with _db() as conn:
+        n = conn.execute("SELECT COUNT(*) c FROM push_subscriptions WHERE user_id=?",
+                         (cu['user_id'],)).fetchone()['c']
+    return {'ok': True, 'sent': sent, 'devices': n, 'errors': errs}
 
 
 # ─── 목표 기반 포트폴리오 (Goal-Based Investing) ───────────────────

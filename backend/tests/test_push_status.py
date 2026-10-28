@@ -61,3 +61,48 @@ class TestPushStatus:
                     "INSERT OR REPLACE INTO push_subscriptions(user_id, endpoint, p256dh, auth, created_at) "
                     "VALUES(?,?,?,?,?)", (UID, 'https://fcm.example/a', 'k', 'a', main.time()))
         assert main.push_status(cu=CU)['devices'] == 1   # 중복으로 쌓이지 않는다
+
+
+class TestSendPushErrors:
+    """실패 사유를 버리면 '등록 2대인데 발송 0건'을 설명할 수 없다 (2026-10-28)."""
+
+    def test_실패하면_반드시_사유가_남는다(self):
+        # 사유가 **무엇이든** 남아야 한다는 것이 핵심이다. 빈 손으로 0 을 돌려주면
+        # 화면에서 원인을 구분할 수 없다 — 그게 이번 사고의 전부였다.
+        _reset()
+        errs = []
+        sent = main._send_push(UID, 't', 'b', '/', errors=errs)
+        assert sent == 0
+        assert errs, '실패했는데 사유가 비어 있다'
+
+    def test_errors_를_안_넘기면_예전처럼_동작한다(self):
+        # 호출부 대부분은 errors 를 넘기지 않는다 — 그쪽 동작이 바뀌면 안 된다
+        _reset()
+        assert main._send_push(UID, 't', 'b', '/') == 0
+
+    def test_라이브러리가_없으면_그렇게_말한다(self, monkeypatch):
+        _reset(['https://fcm.example/a'])
+        import builtins
+        real = builtins.__import__
+
+        def boom(name, *a, **k):
+            if name == 'pywebpush':
+                raise ImportError('no module named pywebpush')
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(builtins, '__import__', boom)
+        errs = []
+        assert main._send_push(UID, 't', 'b', '/', errors=errs) == 0
+        assert errs and 'pywebpush' in errs[0]
+
+    def test_전송_예외도_사유가_남는다(self, monkeypatch):
+        pywebpush = pytest.importorskip('pywebpush')   # 서버에만 있는 의존성
+        _reset(['https://fcm.example/a'])
+        monkeypatch.setattr(
+            pywebpush, 'webpush',
+            lambda **k: (_ for _ in ()).throw(RuntimeError('boom')))
+        errs = []
+        assert main._send_push(UID, 't', 'b', '/', errors=errs) == 0
+        assert errs and 'boom' in errs[0]
+        # 알 수 없는 실패로 구독을 지우지는 않는다 — 410 일 때만 지운다
+        assert main.push_status(cu=CU)['devices'] == 1
