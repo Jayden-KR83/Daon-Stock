@@ -644,6 +644,22 @@ def pwa_sw():
     return FileResponse(p, media_type="application/javascript",
                         headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
 
+@app.get("/build.json", include_in_schema=False)
+def pwa_build_id():
+    """지금 서버에 올라가 있는 빌드 식별자.
+
+    설정 탭이 이 값과 자기 번들의 __BUILD_ID__ 를 비교해 '최신인지'를 말한다.
+    **절대 캐시하면 안 된다** — 캐시된 build.json 은 "최신입니다"라고 거짓말한다.
+    (2026-10-30: 이 라우트가 없어 배포 스모크가 404 로 잡아냈다. /assets·/icons 만
+     마운트돼 있고 루트의 파일은 라우트를 따로 둬야 한다.)
+    """
+    p = os.path.join(STATIC_DIR, "build.json")
+    if not os.path.exists(p):
+        raise HTTPException(404, "build.json not found")
+    return FileResponse(p, media_type="application/json",
+                        headers={"Cache-Control": "no-store, max-age=0"})
+
+
 @app.get("/registerSW.js", include_in_schema=False)
 def pwa_register_sw():
     p = os.path.join(STATIC_DIR, "registerSW.js")
