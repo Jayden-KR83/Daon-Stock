@@ -318,6 +318,17 @@ function CachedAI({ ticker, name, onPick }) {
   const a = data?.cached ? data.data : null
   const aiAgo = data?.computed_at ? agoLabel(data.computed_at) : null
   const recColor = recoColor
+
+  /* 2026-10-30: 발굴 종목의 AI 분석이 몇 달 전 날짜인 채로 떠 있었다.
+     원인은 단순하다 — **아무도 갱신하지 않는다.**
+     일일 분석(analysis_gap.py)은 `portfolios`(보유 종목)만 대상으로 하고,
+     발굴 스캔(매일 22시)은 **점수만** 다시 매긴다. AI 심층 분석은 누군가
+     그 종목을 열어 생성한 그 시점에 멈춘다.
+     보유 종목을 먼저 갱신하는 것이 맞으므로(내 돈이 들어간 쪽이 우선),
+     발굴은 '볼 때 갱신'으로 간다. 대신 **낡았다는 사실을 숨기지 않는다.** */
+  const ageDays = data?.computed_at
+    ? (Date.now() / 1000 - data.computed_at) / 86400 : null
+  const stale = ageDays != null && ageDays >= 14
   if (!a) {
     return (
       <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onPick(ticker) }}
@@ -330,8 +341,28 @@ function CachedAI({ ticker, name, onPick }) {
         <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--m-text-secondary)' }}>AI 심층</span>
         {a.recommendation && <span style={{ fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 2,
           color: recColor(a.recommendation), border: `1px solid ${recColor(a.recommendation)}` }}>{a.recommendation}</span>}
-        {aiAgo && <span style={{ fontSize: 9.5, color: 'var(--m-text-tertiary)', marginLeft: 'auto' }}>분석 {aiAgo}</span>}
+        {aiAgo && (
+          <span style={{ fontSize: 9.5, marginLeft: 'auto',
+            color: stale ? 'var(--m-negative)' : 'var(--m-text-tertiary)',
+            fontWeight: stale ? 800 : 400 }}>
+            분석 {aiAgo}{stale ? ' · 오래됨' : ''}
+          </span>
+        )}
       </div>
+      {stale && (
+        <div className="ko-keep" style={{ fontSize: 10.5, lineHeight: 1.6, marginBottom: 6,
+          color: 'var(--m-text-secondary)' }}>
+          발굴 종목은 <strong>보유 종목과 달리 자동 갱신되지 않습니다</strong> —
+          점수(매일 22시)만 새로 매기고 아래 심층 분석은 생성 시점 그대로입니다.
+          <button onClick={(e) => { e.stopPropagation(); onPick(ticker) }}
+            style={{ marginLeft: 6, padding: '2px 8px', fontSize: 10.5, fontWeight: 700,
+              borderRadius: 3, cursor: 'pointer', fontFamily: 'inherit',
+              background: 'transparent', color: 'var(--m-negative)',
+              border: '1px solid var(--m-negative)' }}>
+            지금 다시 분석
+          </button>
+        </div>
+      )}
       <div className="ko-keep" style={{ fontSize: 11.5, color: 'var(--m-text)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>{breakSentences(a.summary)}</div>
       {(a.catalysts_short?.[0] || a.bear?.[0]) && (
         <div style={{ display: 'grid', gap: 4, marginTop: 7 }}>

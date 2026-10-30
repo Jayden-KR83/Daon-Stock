@@ -8102,6 +8102,11 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
         return {'events': [], 'upcoming': [], 'annual_estimate_krw': 0,
                 'ttm_received_krw': 0, 'by_ticker': {}, 'tickers_checked': 0}
 
+    # '지난 12개월'은 **12개월이어야 한다.** 요청한 이력 기간(months_back)과는
+    # 별개다 — 이력은 차트용으로 길게 받고, 합계는 1년으로 자른다.
+    from datetime import timedelta as _td_ttm
+    _ttm_cutoff = (datetime.now() - _td_ttm(days=365)).strftime('%Y-%m-%d')
+
     with _cf.ThreadPoolExecutor(max_workers=min(len(valid), 15)) as ex:
         futs = {ex.submit(_fetch_dividends_single, h['ticker'], req.months_back): h
                 for h in valid}
@@ -8117,7 +8122,14 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
             name = h.get('name') or tkr
 
             annual_est   = d['annual_rate_per_share'] * qty * mul
-            ttm_per_sh   = sum(p['per_share'] for p in d['past'])
+            # 2026-10-30: 여기가 `sum(... for p in d['past'])` 였다 — **받은 이력을
+            # 통째로 합산**하고 있었다. 프런트는 분기 히스토그램을 그리려고
+            # months_back=48(4년)을 보내므로, 화면의 '지난 12개월 수령'에는
+            # 실제로 **4년치 합계**가 찍혔다(오너 실측: 예상 339만 vs 851만).
+            # 변수 이름이 ttm(Trailing Twelve Months)인데 48개월을 담고 있었다 —
+            # 이름이 거짓말을 하면 아무도 의심하지 않는다.
+            ttm_per_sh   = sum(p['per_share'] for p in d['past']
+                               if p['date'] >= _ttm_cutoff)
             ttm_received = ttm_per_sh * qty * mul
 
             by_ticker[tkr] = {

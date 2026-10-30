@@ -55,7 +55,16 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
         <div>
           <div className="mono-section-title is-accent">배당금 이력 · 캘린더</div>
           <div className="mono-section-sub ko-keep">
-            연간 예상 배당과 최근 24개월 수령 이력 · 한국 종목은 yfinance 데이터 한정
+            연간 예상 배당과 지난 12개월 실제 수령 · 아래 차트는 최근 4년 이력
+            <br />
+            {/* 2026-10-30: 두 수치가 2.5배 차이 나서 오너가 물었다. 원인은
+                합계 기간이 48개월이었던 것(고침). 다시 묻지 않도록 **무엇이
+                어떻게 다른지** 화면에 적는다. */}
+            <span style={{ opacity: .85 }}>
+              <strong>예상</strong>은 앞으로 1년 추정(현재 수량 기준) ·
+              <strong> 수령</strong>은 지난 1년 실제 지급액.
+              중간에 사고팔았다면 둘은 다를 수 있습니다.
+            </span>
           </div>
         </div>
       </div>
