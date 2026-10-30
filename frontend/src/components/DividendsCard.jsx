@@ -55,7 +55,11 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
         <div>
           <div className="mono-section-title is-accent">배당금 이력 · 캘린더</div>
           <div className="mono-section-sub ko-keep">
-            연간 예상 배당과 지난 12개월 실제 수령 · 아래 차트는 최근 4년 이력
+            {/* 기간을 **손으로 적지 않는다.** 서버가 숫자와 함께 그 숫자의 기간을
+                보내므로 그대로 쓴다. 2026-10-30: 설명문엔 '24개월'이라 적혀 있고
+                계산은 48개월이었다 — 두 곳에 적으면 반드시 어긋난다. */}
+            연간 예상 배당과 지난 {Math.round((data?.ttm_window_days || 365) / 30)}개월 실제 수령
+            {data?.history_months ? ` · 아래 차트는 최근 ${data.history_months}개월 이력` : ''}
             <br />
             {/* 2026-10-30: 두 수치가 2.5배 차이 나서 오너가 물었다. 원인은
                 합계 기간이 48개월이었던 것(고침). 다시 묻지 않도록 **무엇이
@@ -104,7 +108,9 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 130 }}>
-              <div className="m3-label" style={{ marginBottom: 3 }}>지난 12개월 수령</div>
+              <div className="m3-label" style={{ marginBottom: 3 }}>
+                지난 {Math.round((data?.ttm_window_days || 365) / 30)}개월 수령
+              </div>
               <div style={{ fontSize: 18, fontWeight: 800,
                 color: 'var(--m-text-secondary)',
                 fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>

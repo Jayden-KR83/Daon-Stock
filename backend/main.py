@@ -3534,63 +3534,63 @@ def _most_active_us() -> list:
         pass
     return []
 
+# 시총 상위 몇 종을 받아 거래량으로 다시 세울지. 크게 잡을수록 '진짜 거래량
+# 상위'에 가까워지지만 응답이 느려진다. 국내 상장 2,481종 중 상위 200종(시장당 100).
+MOST_ACTIVE_KR_POOL = 100
+
+
 @ttl_cache(1800)
 def _most_active_kr() -> dict:
+    """국내 거래 활발 종목 — **네이버 모바일 증권 JSON API**를 쓴다.
+
+    2026-10-30: 원래는 finance.naver.com/sise/sise_quant 페이지를 BeautifulSoup 으로
+    긁었다. 그 페이지가 SPA 로 바뀌면서 HTML 에 테이블이 **0개**가 됐고
+    (`table.type_2` 도 `a.tltle` 도 못 찾음), 함수는 조용히 `items: []` 를 돌려줬다.
+    화면은 "KR 토글을 눌러도 아무것도 안 나온다"가 됐다 — 에러도 로그도 없이.
+    2026-10-11 에 `_kr_price` 가 같은 이유로 깨졌던 것과 **같은 종류**다.
+
+    ⚠️ 거래량 정렬 파라미터는 열려 있지 않다(tradingVolume·tradingValue 모두 404).
+    marketValue(시총) 정렬만 받을 수 있어, **시총 상위를 받아 거래량으로 다시
+    세운다.** 따라서 이것은 '시장 전체 거래량 1~10위'가 아니다 —
+    그 사실을 `basis` 로 함께 내보내 화면이 기준을 적게 한다(추측하지 않게).
+    """
     fetch_date = datetime.now().strftime('%Y-%m-%d')
-    results = []
-    for sosok, market_name in [('0', 'KOSPI'), ('1', 'KOSDAQ')]:
-        if len(results) >= 10:
-            break
+    pool = []
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+        'Referer': 'https://m.stock.naver.com/',
+    }
+    for market in ('KOSPI', 'KOSDAQ'):
         try:
-            url = f'https://finance.naver.com/sise/sise_quant.nhn?sosok={sosok}'
-            r = _session.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+            r = _session.get(
+                'https://m.stock.naver.com/api/stocks/marketValue/%s?page=1&pageSize=%d'
+                % (market, MOST_ACTIVE_KR_POOL), headers=headers, timeout=10)
             if r.status_code != 200:
                 continue
-            soup = BeautifulSoup(r.text, 'html.parser')
-            rows = soup.select('table.type_2 tr')
-            for row in rows:
-                cols = row.select('td')
-                if len(cols) < 6:
-                    continue
-                name_el = row.select_one('a.tltle')
-                if not name_el:
-                    continue
-                name = name_el.text.strip()
-                href = name_el.get('href', '')
-                code = href.split('code=')[-1] if 'code=' in href else ''
+            for it in (r.json().get('stocks') or []):
+                code = str(it.get('itemCode') or '').strip()
                 if not code:
                     continue
-                try: price = int(cols[2].text.strip().replace(',', ''))
-                except: price = 0
-                try:
-                    pct_txt = cols[4].text.strip().replace('%', '').replace(',', '')
-                    pct = float(pct_txt) if pct_txt else 0.0
-                except: pct = 0.0
-                try: vol = int(cols[5].text.strip().replace(',', ''))
-                except: vol = 0
-                results.append({'ticker': code, 'name': name, 'price': price,
-                                 'change_pct': pct, 'volume': vol, 'market': market_name,
-                                 'spark': []})
-                if len(results) >= 10:
-                    break
+                try: vol = int(it.get('accumulatedTradingVolumeRaw') or 0)
+                except (TypeError, ValueError): vol = 0
+                try: price = int(float(it.get('closePriceRaw') or 0))
+                except (TypeError, ValueError): price = 0
+                try: pct = float(it.get('fluctuationsRatio') or 0)
+                except (TypeError, ValueError): pct = 0.0
+                pool.append({'ticker': code, 'name': it.get('stockName') or code,
+                             'price': price, 'change_pct': pct, 'volume': vol,
+                             'market': market, 'spark': []})
         except Exception:
-            pass
-    # KR 종목 spark 병렬 fetch (.KS/.KQ 자동 시도)
-    def _fetch_kr_spark(item):
-        for sfx in ('.KS', '.KQ'):
-            sp = _fetch_spark(f"{item['ticker']}{sfx}")
-            if sp:
-                return sp
-        return []
-    if results:
-        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
-            futs = {ex.submit(_fetch_kr_spark, it): i for i, it in enumerate(results)}
-            for fut in _as_completed_safe(futs, timeout=12):
-                try:
-                    results[futs[fut]]['spark'] = fut.result(timeout=0)
-                except Exception:
-                    pass
-    return {'items': results[:10], 'date': fetch_date}
+            continue
+
+    pool.sort(key=lambda x: x['volume'], reverse=True)
+    return {
+        'items': pool[:10],
+        'date':  fetch_date,
+        # 숫자와 **그 숫자의 기준**을 같이 보낸다(2026-10-30 규약).
+        'basis': 'KOSPI·KOSDAQ 시총 상위 %d종 중 거래량 순' % (MOST_ACTIVE_KR_POOL * 2),
+        'pool_size': len(pool),
+    }
 
 @ttl_cache(1800)
 def _sector_us() -> list:
@@ -7939,8 +7939,11 @@ def _fetch_earnings_all(tkr: str) -> list:
 
 @app.post("/api/earnings/calendar")
 def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
-    """보유·관심 + 참고 유니버스(나스닥30·S&P500 30·KOSPI30)의 실적 발표일 일괄 조회.
-    보유종목이 없어도 참고 유니버스는 항상 표시한다."""
+    """**보유·관심 종목**의 실적 발표일 조회.
+
+    2026-10-30 까지는 참고 유니버스(S&P500·Nasdaq100 상위)를 늘 섞었는데,
+    내 종목이 남의 일정에 묻혔다. 캘린더는 '내가 챙길 날짜'를 보는 곳이다.
+    보유·관심이 하나도 없을 때만 참고 유니버스를 쓴다(빈 화면 방지)."""
     import yfinance as yf
     from datetime import timedelta as _td
     days_ahead = max(1, min(req.days_ahead, 365))
@@ -7954,9 +7957,14 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
         return [e for e in _fetch_earnings_all(tkr)
                 if win_lo <= datetime.strptime(e['date'], '%Y-%m-%d') <= cutoff]
 
-    # 보유·관심 + 참고 유니버스(S&P500·Nasdaq100 상위) 병합
+    # 2026-10-30 오너 요청: **보유·관심 종목만** 보여준다.
+    # 참고 유니버스(S&P500·Nasdaq100 상위 ~100종)를 섞으니 내 종목이 남의 일정에
+    # 묻혔다. 캘린더는 "내가 챙길 날짜"를 보는 곳이지 시장 전체 일정표가 아니다.
+    #
+    # 다만 보유·관심이 **하나도 없는** 사용자(가입 직후)에게 빈 화면을 주지 않기
+    # 위해, 그때만 참고 유니버스를 쓴다. 볼 것이 생기면 자동으로 사라진다.
     held = {str(t).upper() for t in req.tickers}
-    all_tickers = sorted(held | set(_EARNINGS_REF_TICKERS))
+    all_tickers = sorted(held) if held else sorted(set(_EARNINGS_REF_TICKERS))
 
     events = []
     # with 블록 금지(느린 스레드 대기 → 먹통) → 수동 executor + 비대기 shutdown.
@@ -7975,9 +7983,16 @@ def earnings_calendar(req: EarningsReq, cu: dict = Depends(require_approved)):
     for e in events:
         e['held'] = e['ticker'] in held
     events.sort(key=lambda x: x['date'])
-    return {'events': events, 'tickers_checked': len(all_tickers)}
+    # 무엇을 기준으로 모았는지 함께 보낸다(화면이 기준을 따로 적지 않도록).
+    return {'events': events, 'tickers_checked': len(all_tickers),
+            'scope': 'held' if held else 'reference'}
 
 # ─── 배당금 이력 & 캘린더 ─────────────────────────────────────────
+# '지난 N개월 수령'의 N. 요청의 months_back(이력 길이)과 **섞이면 안 된다** —
+# 2026-10-30 에 섞여서 4년치가 '지난 12개월'로 표시됐다.
+TTM_WINDOW_DAYS = 365
+
+
 class DividendsReq(BaseModel):
     holdings: list = []          # [{ticker, quantity, name, account}]
     months_back: int = 12
@@ -8104,8 +8119,14 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
 
     # '지난 12개월'은 **12개월이어야 한다.** 요청한 이력 기간(months_back)과는
     # 별개다 — 이력은 차트용으로 길게 받고, 합계는 1년으로 자른다.
+    #
+    # 2026-10-30 재발방지: 기간을 **응답에 실어 보낸다**(ttm_window_days).
+    # 이 사고의 본질은 "요청 파라미터가 계산 기간을 바꾸는데 결과 필드 이름은
+    # 고정(ttm)"이었다. 화면이 기간을 **따로 적으면** 반드시 어긋난다 —
+    # 실제로 설명문에는 '최근 24개월'이라 적혀 있었고 계산은 48개월이었다.
+    # 숫자를 주는 쪽이 그 숫자의 기간도 같이 말해야 한다.
     from datetime import timedelta as _td_ttm
-    _ttm_cutoff = (datetime.now() - _td_ttm(days=365)).strftime('%Y-%m-%d')
+    _ttm_cutoff = (datetime.now() - _td_ttm(days=TTM_WINDOW_DAYS)).strftime('%Y-%m-%d')
 
     with _cf.ThreadPoolExecutor(max_workers=min(len(valid), 15)) as ex:
         futs = {ex.submit(_fetch_dividends_single, h['ticker'], req.months_back): h
@@ -8163,6 +8184,9 @@ def portfolio_dividends(req: DividendsReq, cu: dict = Depends(require_approved))
         'upcoming':            upcoming[:20],
         'annual_estimate_krw': round(annual_total, 0),
         'ttm_received_krw':    round(ttm_total, 0),
+        # 숫자와 **그 숫자의 기간**을 같이 보낸다. 화면이 기간을 따로 적으면 어긋난다.
+        'ttm_window_days':     TTM_WINDOW_DAYS,
+        'history_months':      req.months_back,
         'by_ticker':           by_ticker,
         'tickers_checked':     len(valid),
     }

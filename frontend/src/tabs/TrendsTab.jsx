@@ -344,8 +344,13 @@ export default function TrendsTab() {
         <div className="tt-card-header">
           <div>
             <div className="tt-card-title">거래량 Top 10</div>
+            {/* 기준을 **서버가 준 값으로** 적는다(2026-10-30 규약).
+                KR 은 거래량 정렬 API 가 없어 시총 상위를 받아 다시 세운다 —
+                '시장 전체 1~10위'가 아니므로 그 사실을 숨기지 않는다. */}
             <div className="tt-card-sub">
-              {activeList === 'us' ? 'S&P500' : 'KOSPI'} · 위 토글로 시장 변경
+              {activeList === 'us'
+                ? 'S&P500 · 위 토글로 시장 변경'
+                : (krActive?.basis || 'KOSPI') + ' · 위 토글로 시장 변경'}
             </div>
           </div>
         </div>
@@ -360,7 +365,14 @@ export default function TrendsTab() {
             onClick={() => setChartTicker(s.ticker)} />
         ))}
 
-        {/* KR 목록 */}
+        {/* KR 목록 — 비어 있으면 **그렇다고 말한다.**
+            2026-10-30 까지 네이버 페이지 스크래핑이 깨져 빈 배열이 왔는데,
+            화면은 아무것도 그리지 않아 "왜 미국 것만 있지?"가 됐다. */}
+        {activeList === 'kr' && krItems.length === 0 && (
+          <div className="tt-loading">
+            국내 목록을 불러오지 못했습니다 — 잠시 후 다시 시도해 주세요.
+          </div>
+        )}
         {activeList === 'kr' && krItems.slice(0, 10).map((s, i) => (
           <StockRow key={s.ticker} rank={i + 1}
             ticker={s.ticker} name={s.name}
