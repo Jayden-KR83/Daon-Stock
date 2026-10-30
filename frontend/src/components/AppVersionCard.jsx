@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import changelog from '../changelog.json'
 
 /* ══════════════════════════════════════════════════════════════
@@ -13,6 +13,30 @@ import changelog from '../changelog.json'
 export default function AppVersionCard() {
   const [state, setState] = useState('')   // '' | 'checking' | 'latest' | 'updating'
   const latest = changelog?.[0]?.version || '—'
+
+  /* 2026-10-30: 예전에는 changelog 의 버전만 보여줬다. 그런데 그 파일은
+     2026-08-28(v2.5)에 멈춰 있었고 그 뒤로 수십 번 배포됐다 —
+     **사람이 손으로 쓰는 기록은 배포를 따라오지 못한다.**
+     그래서 '최신인가'는 빌드 식별자로 판단한다:
+       내 번들의 __BUILD_ID__  vs  서버의 /build.json
+     둘이 같으면 최신이다. 추측이 아니라 사실로 말할 수 있다. */
+  const myBuild = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : ''
+  const [srv, setSrv] = useState(null)   // null=확인 중 · ''=확인 실패 · 'YYYYMMDDhhmmss'
+
+  useEffect(() => {
+    let alive = true
+    fetch('/build.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive) setSrv(String(d?.build || '')) })
+      .catch(() => { if (alive) setSrv('') })
+    return () => { alive = false }
+  }, [])
+
+  const upToDate = srv && myBuild && srv === myBuild
+  const stale    = srv && myBuild && srv !== myBuild
+  const fmtBuild = (b) => (b && b.length >= 12
+    ? `${b.slice(0, 4)}-${b.slice(4, 6)}-${b.slice(6, 8)} ${b.slice(8, 10)}:${b.slice(10, 12)}`
+    : (b || '—'))
 
   const check = async () => {
     if (state === 'checking' || state === 'updating') return
@@ -44,8 +68,23 @@ export default function AppVersionCard() {
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--clr-text-strong)' }}>
             앱 버전 <span style={{ fontVariantNumeric: 'tabular-nums' }}>{latest}</span>
           </div>
+          {/* '최신인지'를 **글로** 말한다. 버전 숫자만 보여주면 그게 최신인지
+              알 수 없고, 알 수 없으면 버튼을 누를 이유도 없다. */}
+          <div className="ko-keep" style={{ fontSize: 11.5, marginTop: 3, fontWeight: 700,
+            color: upToDate ? 'var(--clr-pos-dark)'
+                 : stale    ? 'var(--clr-warn)'
+                 : 'var(--clr-text-muted)' }}>
+            {srv === null ? '최신 여부 확인 중…'
+             : upToDate   ? '✓ 최신 버전입니다'
+             : stale      ? '새 버전이 나와 있습니다 — 아래 버튼을 누르세요'
+             : '최신 여부를 확인하지 못했습니다 (네트워크 확인)'}
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--clr-text-muted)', marginTop: 3,
+            fontVariantNumeric: 'tabular-nums' }}>
+            이 화면 {fmtBuild(myBuild)}{stale ? ` · 서버 ${fmtBuild(srv)}` : ''}
+          </div>
           <div className="ko-keep" style={{ fontSize: 11, color: 'var(--clr-text-muted)',
-            marginTop: 2, lineHeight: 1.7 }}>
+            marginTop: 4, lineHeight: 1.7 }}>
             홈 화면 앱은 완전히 닫았다 열어야 새 버전이 적용됩니다.
             바로 적용하려면 아래 버튼을 누르세요.
           </div>

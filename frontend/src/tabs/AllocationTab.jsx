@@ -584,7 +584,8 @@ export default function AllocationTab() {
   return (
     <div style={{ paddingTop: 8 }}>
       {/* 목차 — 분석 탭은 3~5화면이라 원하는 챕터까지 스크롤로만 가기 힘들다 */}
-      <ChapterNav />
+      {/* 2026-10-30 오너 요청: 장 목차(틀고정 바) 제거. 화면 위를 늘 차지하는데
+          장이 4개뿐이라 스크롤로 충분했다. ChapterNav 정의도 같이 지웠다. */}
 
       {/* 투자 나침반 — 판단이 바뀐 보유 종목이 있을 때만 나타난다(없으면 렌더 0) */}
       <CompassBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
@@ -1311,105 +1312,11 @@ function breakSentences(text) {
    챕터 목록을 코드에 적지 않고 DOM([data-chapter])에서 읽는 이유:
    Ⅱ장·부록은 보유 종목이 없으면 렌더되지 않는다. 하드코딩하면 없는 챕터로
    점프하는 죽은 버튼이 생긴다. */
-/* 스크롤포트의 실제 윗변 — 컨테이너 top 에 padding-top 을 더해야 한다.
-   웹 모드의 .web-main-col 은 padding-top 이 24px 이라, 이걸 빼먹으면 점프 후
-   챕터 제목이 딱 그만큼 sticky 목차 바 뒤로 들어간다. */
-function viewTop(sc) {
-  if (!sc) return 0
-  return sc.getBoundingClientRect().top + (parseFloat(getComputedStyle(sc).paddingTop) || 0)
-}
-
-function ChapterNav() {
-  const wrapRef     = useRef(null)
-  const scrollerRef = useRef(null)
-  const [items, setItems]   = useState([])
-  const [active, setActive] = useState('')
-
-  useEffect(() => {
-    /* 스크롤 컨테이너는 모드마다 다르다(앱=.app-main, 웹=.web-main-col).
-       클래스명을 박아두는 대신 실제로 스크롤되는 조상을 찾아 올라간다. */
-    let scroller = wrapRef.current?.parentElement
-    while (scroller && scroller !== document.body) {
-      const ov = getComputedStyle(scroller).overflowY
-      if (ov === 'auto' || ov === 'scroll') break
-      scroller = scroller.parentElement
-    }
-    if (scroller === document.body) scroller = null
-    scrollerRef.current = scroller
-
-    let raf = 0
-    const read = () => {
-      raf = 0
-      const nodes = Array.from(document.querySelectorAll('[data-chapter]'))
-      const next = nodes.map(n => ({ id: n.id, label: n.dataset.chapter, num: n.dataset.chapterNum || '' }))
-      setItems(prev => (prev.map(p => p.id).join() === next.map(p => p.id).join() ? prev : next))
-      // 목차 바 바로 아래를 지난 마지막 챕터가 '지금 보는 챕터'
-      const line = viewTop(scroller) + (wrapRef.current?.getBoundingClientRect().height || 44) + 14
-      let cur = next[0]?.id || ''
-      nodes.forEach(n => { if (n.getBoundingClientRect().top <= line) cur = n.id })
-      setActive(cur)
-    }
-    const onScroll = () => { if (!raf) raf = requestAnimationFrame(read) }
-
-    read()
-    // 지연 로딩(차트·AI 카드)이 붙은 뒤 한 번 더 읽는다
-    const t1 = setTimeout(read, 1200)
-    const t2 = setTimeout(read, 4000)
-    scroller?.addEventListener('scroll', onScroll, { passive: true })
-    window.addEventListener('resize', onScroll)
-    return () => {
-      clearTimeout(t1); clearTimeout(t2)
-      if (raf) cancelAnimationFrame(raf)
-      scroller?.removeEventListener('scroll', onScroll)
-      window.removeEventListener('resize', onScroll)
-    }
-    /* ⚠ items.length 를 의존성에 두는 이유: 첫 렌더에서는 챕터가 0개라
-       아래에서 null 을 반환하고, 그러면 wrapRef 가 DOM에 붙지 않아
-       스크롤 컨테이너를 못 찾는다. 목차가 실제로 그려진 뒤 한 번 더 붙여야
-       '지금 보는 챕터' 추적이 동작한다. */
-  }, [items.length])
-
-  /* scrollIntoView 대신 직접 계산해 스크롤한다.
-     scrollIntoView({block:'start'}) 는 웹 모드에서 제목이 sticky 목차 바 뒤로
-     들어가는 경우가 있었다(스크롤포트가 중첩돼 scroll-margin 이 기대대로 안 먹었다).
-     '목차 바 높이 + 10px' 만큼 아래에 오도록 직접 옮기면 두 모드에서 같게 동작한다. */
-  const jump = (id) => {
-    const sc = scrollerRef.current
-    let tries = 0
-    /* 한 번에 안 끝내고 최대 2번 보정한다. 스크롤이 부드럽게 움직이는 동안
-       위쪽에서 지연 로딩 카드가 붙으면 목표 지점이 밀린다(웹 모드에서 24px 어긋났다). */
-    const step = () => {
-      const el = document.getElementById(id)
-      if (!el || !wrapRef.current) return
-      const pad  = (wrapRef.current.getBoundingClientRect().height || 44) + 10
-      const d    = el.getBoundingClientRect().top - viewTop(sc) - pad
-      if (Math.abs(d) < 4 || tries > 2) return
-      tries += 1
-      ;(sc || window).scrollBy({ top: d, behavior: tries === 1 ? 'smooth' : 'auto' })
-      setTimeout(step, 550)
-    }
-    step()
-  }
-
-  if (items.length < 2) return null
-  return (
-    <nav className="chapter-nav" ref={wrapRef} aria-label="분석 목차">
-      {items.map(it => (
-        <button key={it.id} type="button"
-          className={`chapter-nav-btn${active === it.id ? ' is-active' : ''}`}
-          aria-current={active === it.id ? 'true' : undefined}
-          onClick={() => jump(it.id)}>
-          {it.num && <span className="chapter-nav-num">{it.num}</span>}{it.label}
-        </button>
-      ))}
-    </nav>
-  )
-}
-
 function ChapterHeader({ n, title, sub, id }) {
   return (
-    /* id/data-chapter 는 목차(ChapterNav)가 DOM에서 챕터를 찾는 단서다.
-       scrollMarginTop 은 점프했을 때 sticky 목차 바 뒤로 제목이 숨지 않게 한다. */
+    /* id/data-chapter 는 바깥(앱 바로가기·검색)에서 챕터를 집을 때 쓰는 단서다.
+       2026-10-30 에 목차 바를 없앴지만 속성은 남긴다 — 비용이 없고,
+       지우면 그걸 쓰는 곳이 생겼을 때 말없이 깨진다. */
     <div id={id} data-chapter={title} data-chapter-num={n}
       style={{ margin: '20px 0 10px', borderTop: '2px solid var(--m-text)', paddingTop: 8,
         scrollMarginTop: 56 }}>

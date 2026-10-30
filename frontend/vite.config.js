@@ -1,10 +1,42 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { writeFileSync } from 'fs'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+// vite.config 는 ESM 이라 __dirname 이 없다
+const __root = dirname(fileURLToPath(import.meta.url))
+
+/* 빌드 식별자 — "내가 보고 있는 게 최신인가"를 판단할 **유일한 근거**.
+ *
+ * 2026-10-30: 설정 탭이 changelog 의 버전("v2.5")만 보여주고 있었는데,
+ * 그 파일은 2026-08-28 에 멈춰 있었다. 그 뒤로 수십 번 배포했는데도 화면은
+ * 계속 v2.5 였다. **사람이 손으로 쓰는 기록은 배포를 따라오지 못한다.**
+ *
+ * 그래서 빌드마다 자동으로 바뀌는 값을 쓴다. 같은 값을 두 곳에 심는다:
+ *   · 번들 안(__BUILD_ID__)      → 지금 내 화면이 어느 빌드인지
+ *   · backend/static/build.json  → 서버에 올라가 있는 최신 빌드가 무엇인지
+ * 둘을 비교하면 '최신인지'를 추측이 아니라 사실로 말할 수 있다.
+ */
+const BUILD_ID = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
 
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
   plugins: [
     react(),
+    {
+      // 번들과 **같은 값**을 서버가 받을 파일로도 쓴다. 두 곳이 어긋나면
+      // 비교 자체가 거짓말이 되므로 반드시 한 상수에서 나와야 한다.
+      name: 'daon-write-build-id',
+      closeBundle() {
+        writeFileSync(
+          resolve(__root, '..', 'backend', 'static', 'build.json'),
+          JSON.stringify({ build: BUILD_ID }) + '\n', 'utf-8')
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       // icon-badge.png는 manifest.icons에 없어 자동 프리캐시 대상이 아니다.
