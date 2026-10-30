@@ -80,12 +80,19 @@ def endpoint(cu: dict = Depends(require_approved)):
 ### 6.5 가격 알림 (V1 인앱 + V2 Web Push)
 - `GET/POST/DELETE /api/alerts` — 종목별 목표가·손절가 규칙
 - `GET/POST /api/alerts/move` — **급등락 알림 설정**(사용자 1행). `{enabled, threshold_pct(1~50), scope: both|holdings|watchlist}`. 행이 없으면 `MOVE_ALERT_DEFAULTS`(켜짐·5%·both)로 동작 — 무설정 기본 ON. 저장 시 `move_alert_state` 삭제(재무장).
+- `GET/POST /api/alerts/index` — **지수 알림 설정**(상단 마켓바 지수). `GET` → `{enabled(마스터), items[{ticker,name,enabled,threshold_pct,default_enabled,default_threshold_pct,customized}], scan_interval_sec, threshold_range}`. `POST {enabled?, items[], reset?}`.
+  - **임계는 지수별이다**(`INDEX_ALERT_RULES`). 종목과 같은 ±5%를 쓰면 VIX는 거의 매일 울리고 USD/KRW는 영원히 조용하다 — 하나의 숫자는 둘 중 하나를 반드시 속인다.
+  - 기본 켜짐 6종: S&P500(1.5%) · Nasdaq(2%) · VIX(10%) · KOSPI(2%) · BTC(5%) · USD/KRW(1%). 꺼짐 6종: Dow·Russell·ETH·Gold·Silver·10Y채권(화면에서 켤 수 있다).
+  - **기본값·허용 범위·스캔 주기는 서버가 응답에 실어 보낸다.** 화면은 그 값을 쓴다 (두 곳에 적으면 어긋나고, 어긋나도 아무도 모른다).
+  - 마스터 스위치는 `index_alert_prefs`, 지수별 override 는 `index_alert_rules` — `move_alert_prefs` 에 컬럼으로 붙이지 않았다. 그쪽 `INSERT OR REPLACE` 가 행을 갈아끼울 때 조용히 기본값으로 돌아가기 때문이다.
+  - 임계를 바꾸면 **그 지수의** `index_alert_state` 행만 삭제(재무장).
 - `GET /api/notifications` (unread_only=bool) · `POST /api/notifications/{id}/read` · `POST /api/notifications/read_all`
   - `kind`: `high`|`low`(목표가/손절가) · `surge`|`plunge`(급등락) · `info`. `change_pct`는 surge/plunge에만 채워짐.
 - `POST /api/cron/check_alerts` — cron_secret 검증, 5분 간격. 내부에서 두 스캔 수행:
   1. **목표가 스캔** — 등록된 `price_alerts` 전수, 24h 재발화 방지
   2. **급등락 스캔**(`_run_move_scan`) — approved 사용자별 보유(quantity>0)+관심 합집합의 일간 `change_pct` 대 임계 비교. **15분 스로틀**(`settings.move_scan_at`)이라 5분 cron 3회 중 1회만 실제 조회. 티커 상한 `MOVE_SCAN_MAX_TICKERS=200`(초과분은 응답 `move.truncated`에 표시). 시세는 `quotes` dict로 두 스캔이 공유해 중복 호출 없음. 전체 try/except 격리 — 실패해도 목표가 알림에 영향 없음.
   - 재발화 규칙(`_decide_move_alert`, 순수함수·pytest 12건): 최초 돌파 발화 → 같은 방향은 임계만큼 더 벌어질 때만(−5% 후 −10%) → 방향 전환은 즉시 → `|변동률|<임계`로 되돌아오면 `move_alert_state` 행 삭제해 재무장. **날짜 경계가 아닌 되돌림 기준**이라 장 마감 후 값이 고정된 미국장에서 자정마다 중복 발화하지 않음.
+  3. **지수 스캔**(`_run_index_scan`) — `_market_data()`(TTL 300초, 대시보드와 공유) 의 12개 지수를 사용자별 지수 규칙과 비교. 판정은 급등락과 같은 `_decide_move_alert` 를 쓰고, 상태만 `index_alert_state` 로 분리했다 — 급등락 설정 저장이 상태를 통째로 지우므로(재무장) 섞으면 지수가 덤으로 울린다. **15분 스로틀**(`settings.index_scan_at`, 급등락과 별도 키). 알림 문구는 `[지수] VIX +18.4% 급등 · 현재 24.80`, 푸시 태그 `index-<티커>`. 값 표기는 지수마다 다르다(`_fmt_index_value`: 원·달러·포인트·수익률%).
 - `GET /api/push/public_key` · `POST /api/push/subscribe|unsubscribe|test` — Web Push(VAPID 자동 생성). 앱이 닫혀 있어도 도달.
 
 ### 6.6 자산 추이

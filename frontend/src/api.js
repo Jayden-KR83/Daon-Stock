@@ -185,6 +185,11 @@ export const getMovePrefs = () =>
   api.get('/alerts/move').then(r => r.data)
 export const saveMovePrefs = (body) =>
   api.post('/alerts/move', body).then(r => r.data)
+// 지수 알림 (상단 마켓바 지수, 임계는 지수별 — 서버가 기본값·범위를 함께 준다)
+export const getIndexPrefs = () =>
+  api.get('/alerts/index').then(r => r.data)
+export const saveIndexPrefs = (body) =>
+  api.post('/alerts/index', body).then(r => r.data)
 export const listNotifications = (unreadOnly = false, limit = 50) =>
   api.get('/notifications', { params: { unread_only: unreadOnly, limit } }).then(r => r.data)
 export const markNotificationRead = (id) =>

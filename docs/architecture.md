@@ -154,6 +154,9 @@ flowchart TD
 | audit_log | id | event_type, details (json) | 활동 로그 |
 | price_alerts | id | ticker, target_high/low, enabled, triggered_at | 목표가 알림 |
 | notifications | id | kind, target_price, current_price, read_at | 미확인 알림 |
+| index_alert_prefs | user_id | enabled | 지수 알림 마스터 스위치 (행 없으면 켜짐) |
+| index_alert_rules | user_id+ticker | enabled, threshold_pct | 지수별 임계 override (행 없으면 `INDEX_ALERT_RULES` 기본값) |
+| index_alert_state | user_id+ticker | last_kind, last_pct, fired_at | 지수 재발화 제어 (급등락과 분리) |
 | discovery_scores | ticker | market, peg, eps_growth, roe, pct_*, composite_score, gate_pass, data_completeness | 신규 발굴 GARP 일배치 (공용) |
 
 ### DB 접근 패턴 (모든 endpoint 공통)

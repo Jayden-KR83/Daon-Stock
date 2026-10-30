@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import {
   listNotifications, markNotificationRead, markAllNotificationsRead,
   listAlerts, deleteAlert, getMovePrefs, saveMovePrefs,
+  getIndexPrefs, saveIndexPrefs,
 } from '../api'
 import {
   pushSupported, getPushState, enablePush, disablePush, syncAppBadge,
@@ -292,6 +293,7 @@ export default function NotificationsBell() {
                 )}
 
                 {tab === 'rules' && <MoveAlertSettings open={open} />}
+                {tab === 'rules' && <IndexAlertSettings open={open} />}
 
                 {tab === 'rules' && (
                   (alerts?.alerts?.length || 0) === 0 ? (
@@ -360,6 +362,12 @@ const KIND_META = {
   info:     { label: '안내', cls: 'sev-label is-med' },
   earnings: { label: '실적', cls: 'sev-label is-med' },   // 실적발표 전날 cron
 }
+
+// R6: 다문장 안내 — 문장마다 줄바꿈(pre-line 으로 렌더)
+const INDEX_ALERT_HELP = [
+  '보유 종목이 조용한 날에도 시장이 움직였으면 알립니다.',
+  '임계는 지수마다 다릅니다 — VIX 는 ±5% 가 평범한 날이고 USD/KRW 는 ±1% 면 큰 날입니다.',
+].join('\n')
 
 const SCOPE_LABELS = [
   ['both', '보유+관심'], ['holdings', '보유만'], ['watchlist', '관심만'],
@@ -491,17 +499,194 @@ function MoveAlertSettings({ open }) {
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-            <button onClick={() => commit(draft)} disabled={busy || !dirty || !thrOk}
-              style={{
-                padding: '5px 14px', borderRadius: 2, border: 'none',
-                background: 'var(--m-text)', color: 'var(--m-surface)',
-                fontSize: 11, fontWeight: 800, fontFamily: 'inherit',
-                cursor: (busy || !dirty || !thrOk) ? 'default' : 'pointer',
-                opacity: (busy || !dirty || !thrOk) ? 0.4 : 1,
-              }}>{busy ? '저장 중…' : dirty ? '저장' : '저장됨'}</button>
+            {/* R4: 주 액션은 .btn-primary 단일 위계 — 색은 클래스에서, 크기만 패널에 맞춘다 */}
+            <button className="btn-primary"
+              onClick={() => commit(draft)} disabled={busy || !dirty || !thrOk}
+              style={{ width: 'auto', padding: '5px 14px', borderRadius: 2,
+                fontSize: 11 }}>{busy ? '저장 중…' : dirty ? '저장' : '저장됨'}</button>
             <span className="ko-keep" style={{ fontSize: 9.5,
               color: 'var(--m-text-tertiary)', lineHeight: 1.5 }}>
               약 15분 간격 스캔 · 되돌아왔다 다시 넘으면 재알림
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 지수 알림 설정 — 상단 마켓바의 지수에 임계치 알림.
+ *
+ * 임계가 지수별인 이유: 종목과 같은 ±5% 를 쓰면 VIX 는 거의 매일 울리고
+ * USD/KRW 는 영원히 조용하다. 기본값·허용 범위·스캔 주기는 **서버가 준 값만**
+ * 쓴다 (화면에 손으로 적으면 어긋나고, 어긋나도 아무도 모른다).
+ */
+function IndexAlertSettings({ open }) {
+  const qc = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ['index-prefs'],
+    queryFn: getIndexPrefs,
+    staleTime: 60_000,
+    enabled: open,
+  })
+  const [draft, setDraft] = useState({})     // ticker -> 임계 입력값(문자열 허용)
+  const [busy, setBusy]   = useState(false)
+  const [err, setErr]     = useState('')
+
+  useEffect(() => {
+    if (!data?.items) return
+    setDraft(Object.fromEntries(data.items.map(i => [i.ticker, i.threshold_pct])))
+  }, [data])
+
+  if (!data?.items) return null
+
+  const master = data.enabled
+  const [thrMin, thrMax] = data.threshold_range || [0.2, 50]
+  const scanMin = Math.round((data.scan_interval_sec || 900) / 60)
+
+  const dirty = data.items.filter(
+    i => Number(draft[i.ticker]) !== Number(i.threshold_pct))
+  const allOk = dirty.every(i => {
+    const v = Number(draft[i.ticker])
+    return Number.isFinite(v) && v >= thrMin && v <= thrMax
+  })
+  const onCount = data.items.filter(i => i.enabled).length
+
+  async function commit(body) {
+    setErr(''); setBusy(true)
+    try {
+      await saveIndexPrefs(body)
+      qc.invalidateQueries({ queryKey: ['index-prefs'] })
+    } catch (e) {
+      setErr(e.response?.data?.detail || '저장 실패')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{
+      padding: '12px 12px 10px', margin: '6px 0 14px', borderRadius: 4,
+      border: '1px solid var(--m-outline-variant)',
+      background: 'var(--m-surface-variant)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--m-text)' }}>
+            지수 알림{' '}
+            <span style={{ fontWeight: 700, fontSize: 10.5,
+              color: 'var(--m-text-tertiary)' }}>({onCount}개 감시 중)</span>
+          </div>
+          {/* R6: 다문장 안내는 문장마다 줄바꿈 */}
+          <div className="ko-keep" style={{ fontSize: 10, marginTop: 2,
+            color: 'var(--m-text-tertiary)', lineHeight: 1.55,
+            whiteSpace: 'pre-line' }}>
+            {INDEX_ALERT_HELP}
+          </div>
+        </div>
+        <button
+          onClick={() => commit({ enabled: !master })}
+          disabled={busy}
+          style={{
+            flexShrink: 0, padding: '5px 12px', borderRadius: 2,
+            background: master ? 'transparent' : 'var(--m-text)',
+            border: '1px solid ' + (master ? 'var(--m-outline-variant)' : 'var(--m-text)'),
+            color: master ? 'var(--m-text-secondary)' : 'var(--m-surface)',
+            fontSize: 11, fontWeight: 800, fontFamily: 'inherit',
+            cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1,
+          }}>{busy ? '...' : master ? '끄기' : '켜기'}</button>
+      </div>
+
+      {master && (
+        <>
+          {/* 지수 목록 — 라벨 폭을 고정해 입력칸 시작 x 를 맞춘다 */}
+          <div style={{ marginTop: 10, display: 'grid', rowGap: 4 }}>
+            {data.items.map(it => {
+              const v = draft[it.ticker]
+              const n = Number(v)
+              const bad = !Number.isFinite(n) || n < thrMin || n > thrMax
+              return (
+                <div key={it.ticker} style={{
+                  display: 'grid', gridTemplateColumns: '68px 1fr auto',
+                  alignItems: 'center', columnGap: 8,
+                }}>
+                  <span title={it.ticker} style={{ fontSize: 11, fontWeight: 800,
+                    color: it.enabled ? 'var(--m-text)' : 'var(--m-text-tertiary)',
+                    overflow: 'hidden', textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap' }}>{it.name}</span>
+
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700,
+                      color: 'var(--m-text-tertiary)' }}>±</span>
+                    <input type="number" min={thrMin} max={thrMax} step="0.1"
+                      value={v ?? ''}
+                      disabled={!it.enabled}
+                      onChange={e => setDraft({ ...draft, [it.ticker]: e.target.value })}
+                      aria-label={it.name + ' 임계 변동률(%)'}
+                      className="input"
+                      style={{ width: 58, padding: '2px 6px', borderRadius: 2,
+                        fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+                        fontVariantNumeric: 'tabular-nums',
+                        opacity: it.enabled ? 1 : 0.45,
+                        borderColor: bad ? 'var(--m-negative)' : undefined }} />
+                    <span style={{ fontSize: 10,
+                      color: 'var(--m-text-tertiary)' }}>%</span>
+                    {it.customized && (
+                      <span title={'기본값 ±' + it.default_threshold_pct + '%'}
+                        style={{ fontSize: 9, fontWeight: 800, padding: '1px 4px',
+                          borderRadius: 2,
+                          border: '1px solid var(--m-outline-variant)',
+                          color: 'var(--m-text-tertiary)' }}>변경</span>
+                    )}
+                  </span>
+
+                  <button
+                    onClick={() => commit({ items: [{
+                      ticker: it.ticker, enabled: !it.enabled,
+                      threshold_pct: Number(draft[it.ticker] ?? it.threshold_pct),
+                    }] })}
+                    disabled={busy}
+                    title={it.enabled ? '이 지수 알림 끄기' : '이 지수 알림 켜기'}
+                    style={{
+                      padding: '2px 9px', borderRadius: 2,
+                      background: it.enabled ? 'var(--m-text)' : 'transparent',
+                      border: '1px solid ' + (it.enabled ? 'var(--m-text)' : 'var(--m-outline-variant)'),
+                      color: it.enabled ? 'var(--m-surface)' : 'var(--m-text-tertiary)',
+                      fontSize: 10, fontWeight: 800, fontFamily: 'inherit',
+                      cursor: busy ? 'default' : 'pointer',
+                    }}>{it.enabled ? '켜짐' : '꺼짐'}</button>
+                </div>
+              )
+            })}
+          </div>
+
+          {err && (
+            <div style={{ marginTop: 8, padding: 6, fontSize: 10.5, borderRadius: 2,
+              border: '1px solid var(--m-negative)', color: 'var(--m-negative)' }}>
+              {err}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10,
+            flexWrap: 'wrap' }}>
+            {/* R4: 주 액션은 .btn-primary 단일 위계 */}
+            <button className="btn-primary"
+              onClick={() => commit({ items: dirty.map(i => ({
+                ticker: i.ticker, enabled: i.enabled,
+                threshold_pct: Number(draft[i.ticker]),
+              })) })}
+              disabled={busy || dirty.length === 0 || !allOk}
+              style={{ width: 'auto', padding: '5px 14px', borderRadius: 2,
+                fontSize: 11 }}>
+              {busy ? '저장 중…' : dirty.length ? '저장 (' + dirty.length + ')' : '저장됨'}
+            </button>
+            <button className="btn-secondary"
+              onClick={() => commit({ reset: true })} disabled={busy}
+              title="모든 지수를 내장 기본 임계로 되돌립니다"
+              style={{ padding: '5px 10px', borderRadius: 2, fontSize: 10.5 }}>
+              기본값으로</button>
+            <span className="ko-keep" style={{ fontSize: 9.5,
+              color: 'var(--m-text-tertiary)', lineHeight: 1.5 }}>
+              약 {scanMin}분 간격 스캔 · 되돌아왔다 다시 넘으면 재알림
             </span>
           </div>
         </>

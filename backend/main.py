@@ -279,6 +279,35 @@ def _init_db():
             fired_at  REAL NOT NULL,
             PRIMARY KEY(user_id, ticker)
         );
+        -- 지수 알림: 상단 마켓바의 지수(VIX·KOSPI·USD/KRW·BTC 등) 일간 변동률.
+        -- 종목과 달리 임계를 지수별로 둔다 — VIX 는 ±5% 가 평범한 날이고
+        -- USD/KRW 는 ±1% 면 큰 날이다. 하나의 숫자로는 둘 다 거짓이 된다.
+        -- 마스터 스위치는 별도 테이블로 둔다. move_alert_prefs 에 컬럼으로 붙이면
+        -- 그쪽 INSERT OR REPLACE 가 행을 갈아끼울 때 조용히 기본값으로 돌아간다.
+        CREATE TABLE IF NOT EXISTS index_alert_prefs (
+            user_id    TEXT PRIMARY KEY,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            updated_at REAL    NOT NULL DEFAULT 0
+        );
+        -- 지수별 사용자 override. 행이 없으면 INDEX_ALERT_RULES 의 내장 기본값.
+        CREATE TABLE IF NOT EXISTS index_alert_rules (
+            user_id       TEXT NOT NULL,
+            ticker        TEXT NOT NULL,          -- MARKET_TICKERS 의 티커 ('^VIX' 등)
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            threshold_pct REAL    NOT NULL,       -- 절대값 임계 (예: 10.0 = ±10%)
+            updated_at    REAL    NOT NULL DEFAULT 0,
+            PRIMARY KEY(user_id, ticker)
+        );
+        -- 재발화 제어. move_alert_state 와 같은 규칙이지만 테이블을 나눈다 —
+        -- 급등락 설정 저장이 상태를 통째로 지우므로(재무장) 섞으면 지수가 덤으로 울린다.
+        CREATE TABLE IF NOT EXISTS index_alert_state (
+            user_id   TEXT NOT NULL,
+            ticker    TEXT NOT NULL,
+            last_kind TEXT NOT NULL,          -- 'surge' | 'plunge'
+            last_pct  REAL NOT NULL,
+            fired_at  REAL NOT NULL,
+            PRIMARY KEY(user_id, ticker)
+        );
         CREATE TABLE IF NOT EXISTS earnings_alert_state (
             user_id    TEXT NOT NULL,
             ticker     TEXT NOT NULL,
@@ -8326,6 +8355,150 @@ def set_move_prefs(req: MovePrefsReq, cu: dict = Depends(require_approved)):
         conn.execute("DELETE FROM move_alert_state WHERE user_id=?", (cu['user_id'],))
     return {'ok': True}
 
+# ─── 지수 알림 (상단 마켓바 지수의 일간 변동률) ──────────────────────
+# 보유·관심 종목이 아무 일 없어도 시장 전체가 움직인 날은 알아야 한다.
+# 임계는 지수별이다 — 종목과 같은 ±5% 를 쓰면 VIX 는 거의 매일 울리고
+# USD/KRW 는 영원히 조용하다. 하나의 숫자는 둘 중 하나를 반드시 속인다.
+#
+# threshold = '평범한 날의 2~3배' 수준으로 잡은 값(일간 변동률 절대값, %)
+# unit      = 알림 문구의 값 표기법 (_fmt_index_value)
+# on        = 기본 켜짐 여부. 끈 것은 중복(Dow·Russell)이거나 보조 지표.
+INDEX_ALERT_RULES = {
+    '^GSPC':   {'threshold': 1.5,  'unit': 'pt',    'on': True},
+    '^DJI':    {'threshold': 1.5,  'unit': 'pt',    'on': False},
+    '^IXIC':   {'threshold': 2.0,  'unit': 'pt',    'on': True},
+    '^VIX':    {'threshold': 10.0, 'unit': 'pt2',   'on': True},
+    '^RUT':    {'threshold': 2.0,  'unit': 'pt',    'on': False},
+    '^KS11':   {'threshold': 2.0,  'unit': 'pt',    'on': True},
+    'BTC-USD': {'threshold': 5.0,  'unit': 'usd',   'on': True},
+    'ETH-USD': {'threshold': 6.0,  'unit': 'usd',   'on': False},
+    'GC=F':    {'threshold': 2.0,  'unit': 'usd',   'on': False},
+    'SI=F':    {'threshold': 3.0,  'unit': 'usd',   'on': False},
+    'KRW=X':   {'threshold': 1.0,  'unit': 'krw',   'on': True},
+    '^TNX':    {'threshold': 4.0,  'unit': 'yield', 'on': False},
+}
+# 이름은 MARKET_TICKERS 가 정본이다 — 여기 다시 적으면 어긋나도 아무도 모른다.
+INDEX_NAMES = {tkr: name for name, tkr in MARKET_TICKERS}
+INDEX_SCAN_INTERVAL = 900          # 15분 — 급등락 스캔과 같은 주기, 게이트는 별도
+INDEX_THRESHOLD_MIN = 0.2          # USD/KRW 는 1% 가 큰 날이므로 하한을 낮게
+INDEX_THRESHOLD_MAX = 50.0
+
+
+def _fmt_index_value(ticker: str, value) -> str:
+    """지수 현재값 표기 — 지수마다 단위가 다르다(포인트·원·달러·수익률%).
+
+    프런트 MarketBar.fmtPrice 와 같은 규칙. 알림 문구는 서버가 만들어 DB에
+    저장하므로 여기서도 포맷이 필요하다.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return '—'
+    unit = (INDEX_ALERT_RULES.get(ticker) or {}).get('unit', 'pt')
+    if unit == 'krw':
+        return f"₩{v:,.0f}"
+    if unit == 'usd':
+        return f"${v:,.0f}" if abs(v) >= 1000 else f"${v:,.2f}"
+    if unit == 'yield':
+        return f"{v:.2f}% (수익률)"     # 변동률 %와 값 %를 구별해 준다
+    if unit == 'pt2':
+        return f"{v:,.2f}"
+    return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:,.2f}"
+
+
+def _index_rules_for(conn, user_id: str) -> dict:
+    """지수별 유효 규칙 — 내장 기본값에 사용자 override 를 덮는다.
+
+    반환: {ticker: {'name','enabled','threshold_pct','default_*','customized'}}
+    MARKET_TICKERS 순서를 유지한다(화면 순서 = 마켓바 순서).
+    """
+    overrides = {}
+    for r in conn.execute(
+        "SELECT ticker, enabled, threshold_pct FROM index_alert_rules "
+        "WHERE user_id=?", (user_id,)
+    ).fetchall():
+        overrides[r['ticker']] = r
+    out = {}
+    for name, tkr in MARKET_TICKERS:
+        rule = INDEX_ALERT_RULES.get(tkr)
+        if not rule:
+            continue
+        ov = overrides.get(tkr)
+        out[tkr] = {
+            'ticker': tkr, 'name': name,
+            'enabled': bool(ov['enabled']) if ov else rule['on'],
+            'threshold_pct': float(ov['threshold_pct']) if ov else rule['threshold'],
+            'default_enabled': rule['on'],
+            'default_threshold_pct': rule['threshold'],
+            'customized': ov is not None,
+        }
+    return out
+
+
+def _index_master_enabled(conn, user_id: str) -> bool:
+    """마스터 스위치 — 행이 없으면 켜짐(무설정으로도 동작)."""
+    row = conn.execute(
+        "SELECT enabled FROM index_alert_prefs WHERE user_id=?", (user_id,)
+    ).fetchone()
+    return True if not row else bool(row['enabled'])
+
+
+class IndexRuleReq(BaseModel):
+    ticker:        str
+    enabled:       bool  = True
+    threshold_pct: float = 0.0
+
+class IndexPrefsReq(BaseModel):
+    enabled: bool | None        = None     # None = 마스터 스위치는 그대로
+    items:   list[IndexRuleReq] = []
+    reset:   bool               = False    # True = override 전부 삭제(내장 기본값으로)
+
+@app.get("/api/alerts/index")
+def get_index_prefs(cu: dict = Depends(require_approved)):
+    with _db() as conn:
+        return {
+            'enabled': _index_master_enabled(conn, cu['user_id']),
+            'items': list(_index_rules_for(conn, cu['user_id']).values()),
+            'scan_interval_sec': INDEX_SCAN_INTERVAL,
+            'threshold_range': [INDEX_THRESHOLD_MIN, INDEX_THRESHOLD_MAX],
+        }
+
+@app.post("/api/alerts/index")
+def set_index_prefs(req: IndexPrefsReq, cu: dict = Depends(require_approved)):
+    uid = cu['user_id']
+    for it in req.items:
+        if it.ticker not in INDEX_ALERT_RULES:
+            raise HTTPException(400, f"알 수 없는 지수: {it.ticker}")
+        if not (INDEX_THRESHOLD_MIN <= float(it.threshold_pct) <= INDEX_THRESHOLD_MAX):
+            raise HTTPException(
+                400, f"임계는 {INDEX_THRESHOLD_MIN}~{INDEX_THRESHOLD_MAX}% 사이")
+    now = time()
+    with _db() as conn:
+        if req.enabled is not None:
+            conn.execute(
+                "INSERT OR REPLACE INTO index_alert_prefs "
+                "(user_id, enabled, updated_at) VALUES (?,?,?)",
+                (uid, 1 if req.enabled else 0, now))
+        if req.reset:
+            conn.execute("DELETE FROM index_alert_rules WHERE user_id=?", (uid,))
+            conn.execute("DELETE FROM index_alert_state WHERE user_id=?", (uid,))
+        for it in req.items:
+            conn.execute(
+                "INSERT OR REPLACE INTO index_alert_rules "
+                "(user_id, ticker, enabled, threshold_pct, updated_at) "
+                "VALUES (?,?,?,?,?)",
+                (uid, it.ticker, 1 if it.enabled else 0,
+                 float(it.threshold_pct), now))
+            # 임계가 바뀌면 이전 발화 상태는 의미가 없다 → 그 지수만 재무장
+            conn.execute(
+                "DELETE FROM index_alert_state WHERE user_id=? AND ticker=?",
+                (uid, it.ticker))
+    with _db() as conn:
+        return {'ok': True,
+                'enabled': _index_master_enabled(conn, uid),
+                'items': list(_index_rules_for(conn, uid).values())}
+
+
 @app.get("/api/notifications")
 def list_notifications(unread_only: bool = False,
                        limit: int = 50,
@@ -9058,7 +9231,8 @@ def cron_check_alerts(req: TriggerReq):
 
     if not rows:
         move = _run_move_scan(now, quotes)
-        return {'checked': 0, 'triggered': 0, 'move': move}
+        return {'checked': 0, 'triggered': 0, 'move': move,
+                'index': _run_index_scan(now)}
 
     # 티커별 그룹핑하여 가격 일괄 조회
     tickers = sorted({r['ticker'] for r in rows})
@@ -9106,7 +9280,8 @@ def cron_check_alerts(req: TriggerReq):
 
     move = _run_move_scan(now, quotes)
     return {'checked': len(rows), 'triggered': triggered,
-            'unique_tickers': len(tickers), 'move': move}
+            'unique_tickers': len(tickers), 'move': move,
+            'index': _run_index_scan(now)}
 
 
 def _quote_for_alert(ticker: str, cache: dict) -> dict:
@@ -9121,6 +9296,82 @@ def _quote_for_alert(ticker: str, cache: dict) -> dict:
         q = {}
     cache[ticker] = q
     return q
+
+
+def _run_index_scan(now: float) -> dict:
+    """상단 마켓바 지수의 일간 변동률이 지수별 임계를 넘으면 알림.
+
+    시세는 `_market_data()`(TTL 300초) 를 그대로 쓴다 — 대시보드가 이미 5분마다
+    받아 두는 값이라 추가 호출 비용이 거의 없다.
+    급등락 스캔과 같은 15분 게이트지만 키를 따로 둔다(한쪽이 막아도 다른 쪽은 돈다).
+    실패해도 목표가·급등락 알림에 영향 없도록 전체를 격리한다.
+    """
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='index_scan_at'").fetchone()
+            last = float(row['value']) if row and row['value'] else 0.0
+            if now - last < INDEX_SCAN_INTERVAL:
+                return {'skipped': 'throttled'}
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)",
+                ('index_scan_at', str(now)))
+
+        market = _market_data() or []
+        quotes = {m['ticker']: m for m in market if m.get('ticker')}
+        if not quotes:
+            return {'indices': 0, 'triggered': 0, 'note': 'no market data'}
+
+        triggered, pushed, watched = 0, [], 0
+        with _db() as conn:
+            users = [r['user_id'] for r in conn.execute(
+                "SELECT user_id FROM users WHERE status='approved'").fetchall()]
+            for uid in users:
+                if not _index_master_enabled(conn, uid):
+                    continue
+                rules = _index_rules_for(conn, uid)
+                states = {r['ticker']: dict(r) for r in conn.execute(
+                    "SELECT ticker, last_kind, last_pct FROM index_alert_state "
+                    "WHERE user_id=?", (uid,)).fetchall()}
+                for tkr, rule in rules.items():
+                    if not rule['enabled']:
+                        continue
+                    q = quotes.get(tkr) or {}
+                    pct, cur = q.get('pct'), q.get('price')
+                    if pct is None or cur is None:
+                        continue
+                    watched += 1
+                    thr = float(rule['threshold_pct'])
+                    kind = _decide_move_alert(pct, thr, states.get(tkr))
+                    if kind is None:
+                        if abs(float(pct)) < thr and tkr in states:
+                            conn.execute(
+                                "DELETE FROM index_alert_state "
+                                "WHERE user_id=? AND ticker=?", (uid, tkr))
+                        continue
+                    nm = rule['name']
+                    msg = (f"[지수] {nm} {float(pct):+.1f}% "
+                           f"{'급등' if kind == 'surge' else '급락'} · "
+                           f"현재 {_fmt_index_value(tkr, cur)}")
+                    conn.execute(
+                        "INSERT INTO notifications (user_id, ticker, name, kind, "
+                        "       target_price, current_price, message, change_pct, "
+                        "       created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (uid, tkr, nm, kind, thr, float(cur), msg, float(pct), now))
+                    conn.execute(
+                        "INSERT OR REPLACE INTO index_alert_state "
+                        "(user_id, ticker, last_kind, last_pct, fired_at) "
+                        "VALUES (?,?,?,?,?)", (uid, tkr, kind, float(pct), now))
+                    triggered += 1
+                    pushed.append((uid, tkr, kind, msg))
+
+        for uid, tkr, kind, msg in pushed:
+            _send_push(uid, '다온 지수 급등' if kind == 'surge' else '다온 지수 급락',
+                       msg, '/', tag=f'index-{tkr}')
+
+        return {'indices': len(quotes), 'checks': watched, 'triggered': triggered}
+    except Exception as e:
+        return {'error': str(e)[:200]}
 
 
 def _run_move_scan(now: float, quotes: dict) -> dict:
