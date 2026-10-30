@@ -622,6 +622,7 @@ function IndexAlertSettings({ open }) {
                       disabled={!it.enabled}
                       onChange={e => setDraft({ ...draft, [it.ticker]: e.target.value })}
                       aria-label={it.name + ' 임계 변동률(%)'}
+                      data-index-ticker={it.ticker}
                       className="input"
                       style={{ width: 58, padding: '2px 6px', borderRadius: 2,
                         fontFamily: 'inherit', fontSize: 11, fontWeight: 700,

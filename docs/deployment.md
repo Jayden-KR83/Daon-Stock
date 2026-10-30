@@ -31,6 +31,16 @@ cd C:\Users\user\AgentDev\daon
 .\scripts\deploy.ps1          # 빌드 확인 → 업로드 → 재시작 → 운영 URL 스모크
 ```
 
+`deploy.ps1` 은 매 배포마다 `frontend/scripts/smoke-render.mjs`(로그인 전·후 + 전 탭 렌더)를
+돌린다. 알림 설정 패널까지 보려면 한 줄 더:
+
+```powershell
+cd frontend; node scripts\check-index-panel.mjs https://daonwealth.com
+```
+412px 에서 지수 알림 패널 렌더·12행·정렬·가로 넘침·저장이 서버까지 반영되는지 확인한다.
+**데모 계정의 VIX 임계를 잠깐 바꿨다 '기본값으로'로 되돌린다** — 그래서 배포 자동 단계에는
+넣지 않았다(운영 데이터를 매번 건드리는 검사는 두지 않는다).
+
 아래 수동 절차는 **참고용 기록이다. 그대로 쓰면 사고가 난다.**
 
 ```powershell
