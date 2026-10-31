@@ -10057,6 +10057,9 @@ def get_midterm_regime(cu: dict = Depends(require_approved)):
 
     return {'items': items,
             'portfolio': portfolio_regime(items),
+            # 화면이 '생각을 바꿀 조건'을 그대로 쓰도록 같이 보낸다 —
+            # 알림과 화면이 다른 조건을 말하면 둘 중 하나는 거짓말이 된다.
+            'flip': flip_requirement(items),
             'basis': dict(MIDTERM_BASIS),
             'truncated': truncated}
 

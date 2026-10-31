@@ -79,17 +79,30 @@ crontab -e
   -H 'Content-Type: application/json' -d '{"cron_secret":"SECRET"}' >> ~/portfolio/logs/midterm.log 2>&1
 ```
 
-확인: `sqlite3 ~/portfolio/daon.db 'SELECT COUNT(*) FROM midterm_state'`
-→ 첫 실행 뒤 보유 종목 수만큼 행이 생긴다(첫 실행은 기준선만 깔고 알리지 않는다).
+확인(서버 안에서):
+```bash
+python3 -c "import sqlite3; d=sqlite3.connect('/home/ubuntu/portfolio/daon.db'); print(d.execute('select count(*) from midterm_state').fetchone())"
+```
+첫 실행 뒤 보유 종목 수만큼 행이 생긴다(첫 실행은 기준선만 깔고 알리지 않는다).
 
 ### DB 마이그레이션
+
+🟥 **서버에 `sqlite3` CLI 가 없다** (2026-10-31 확인: `bash: sqlite3: command not found`).
+이 문서가 오랫동안 `sqlite3 ...` 로 적어 두고 있었다 — 그대로 치면 실패한다.
+**파이썬으로 연다.** 앱이 쓰는 것과 같은 라이브러리라 추가 설치도 필요 없다.
+
 ```bash
-# 1) 백업
+# 1) 백업 (이건 그대로)
 cp ~/portfolio/daon.db ~/portfolio/backup/daon-$(date +%Y%m%d-%H%M).db
-# 2) 스키마 변경은 _init_db()에 CREATE TABLE IF NOT EXISTS 형식으로
-# 3) 컬럼 추가는 ALTER TABLE 직접 실행
-ssh ubuntu@168.107.13.20 'sqlite3 ~/portfolio/daon.db "ALTER TABLE users ADD COLUMN xxx TEXT DEFAULT 0"'
+# 2) 스키마 변경은 _init_db()에 CREATE TABLE IF NOT EXISTS 형식으로 — 배포+재시작이면 끝
+# 3) 조회·컬럼 추가는 python3 로
+python3 -c "import sqlite3; d=sqlite3.connect('/home/ubuntu/portfolio/daon.db'); print(d.execute('select count(*) from users').fetchone())"
+python3 -c "import sqlite3; d=sqlite3.connect('/home/ubuntu/portfolio/daon.db'); d.execute('ALTER TABLE users ADD COLUMN xxx TEXT DEFAULT 0'); d.commit()"
 ```
+
+⚠ **PowerShell 에서 한 줄로 쏠 때 주의**: 바깥을 큰따옴표로 감싸면 PowerShell 이
+`$1`·`$2` 같은 토큰을 **자기 변수로 먹어서** 빈 문자열을 보낸다(2026-10-31 실제로 당함).
+한 줄 원격 실행이 필요하면 바깥을 작은따옴표로 감싸거나, 그냥 `ssh` 로 들어가서 친다.
 
 ## 3. systemd 서비스
 

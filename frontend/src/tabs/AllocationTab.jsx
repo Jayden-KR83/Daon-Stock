@@ -23,6 +23,7 @@ import { effPrice, priceableTickers, qtyUnit } from '../utils/effPrice'
 import { cashToKrw } from '../components/AccountCashCard'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import './TrendsTab.css'   // tt-ai-widget 스타일 공유 사용
+import MidtermRegimeCard from '../components/MidtermRegimeCard'
 
 function formatRelativeKo(epochSec) {
   if (!epochSec) return ''
@@ -974,6 +975,10 @@ export default function AllocationTab() {
           )}
         </>
       )}
+
+      {/* 중기 국면 — Ⅰ장(상태)에 둔다. 진단(Ⅱ)이 아니라 '지금 서 있는 자리'다.
+          예측을 말하지 않으므로 AI 리포트 유무와 무관하게 늘 보인다. */}
+      {allHoldings.length > 0 && <MidtermRegimeCard />}
 
       {/* ━━ Ⅱ. 진단 ━━
           결정론(룰 엔진) 경고를 먼저, AI 진단을 그다음에.
