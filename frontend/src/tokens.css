@@ -400,6 +400,12 @@
   animation: shimmer 1.5s infinite linear;
   border-radius: var(--r-md);
 }
+
+/* R7 — '동작 줄이기'에서는 흐르지 않는 회색 블록. 잃는 정보가 없다:
+   "아직 없음"은 반짝임이 아니라 스켈레톤의 **모양**이 말한다. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
 .skeleton-row {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px;

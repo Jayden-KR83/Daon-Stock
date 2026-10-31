@@ -176,6 +176,12 @@
   0%, 100% { opacity: 1; }
   50%       { opacity: .4; }
 }
+/* R7 — OS '동작 줄이기'를 켠 사용자에게는 멈춘 점으로 보인다.
+   잃는 정보가 없다: 열림/닫힘은 색(.open 초록)과 글자(.rp-status-text)가 이미 말한다. */
+@media (prefers-reduced-motion: reduce) {
+  .rp-status-dot.open { animation: none; }
+}
+
 .rp-status-text { font-size: 10px; font-weight: 700; }
 .rp-status-text.open   { color: #4ADE80; }
 .rp-status-text.closed { color: var(--clr-text-sub); }

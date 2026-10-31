@@ -7,6 +7,7 @@ import { useStore } from '../store'
 import LogoCircle from '../components/LogoCircle'
 import Sparkline from '../components/Sparkline'
 import { isKrTicker } from '../utils/displayName'
+import { usePriceFlash } from '../hooks/usePriceFlash'
 
 export default function WatchlistTab() {
   const qc = useQueryClient()
@@ -223,7 +224,11 @@ function WatchlistSearch({ existing, onAdded }) {
 }
 
 function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
-  const cur    = priceData?.current_price
+  /* 화면에 실제로 찍는 값 — 정규장 밖이면 확장시간 가격이다.
+     R7: 값이 바뀐 것을 말해 주는 모션. 보유 탭(FlashPrice)과 같은 훅을 쓴다 —
+     같은 일에 두 벌을 만들면 한쪽만 고쳐지고 두 탭이 다르게 움직인다. */
+  const shown  = priceData?.ext?.price ?? priceData?.current_price
+  const flash  = usePriceFlash(shown)
   /* 정규장 밖이면 확장시간 등락률을 보여준다 — 라벨로 무엇 대비인지 밝힌다 */
   const sc     = sessionChange(priceData)
   const chgPct = sc.pct
@@ -276,9 +281,10 @@ function WatchlistRow({ item, priceData, onChart, onDelete, onGroupChange }) {
 
         {/* Price */}
         <div style={{ textAlign: 'right', minWidth: 80 }}>
-          <div className="price-main">
-            {(() => { const v = priceData?.ext?.price ?? cur
-              return v != null ? (isUs ? `$${v.toFixed(2)}` : `₩${Math.round(v).toLocaleString()}`) : '—' })()}
+          <div className={`price-main ${flash}`}>
+            {shown != null
+              ? (isUs ? `$${shown.toFixed(2)}` : `₩${Math.round(shown).toLocaleString()}`)
+              : '—'}
           </div>
           <div className={`price-change ${up ? 'pos' : 'neg'}`}>
             {sc.label ? sc.label + ' ' : ''}{up ? '+' : ''}{(chgPct ?? 0).toFixed(2)}%

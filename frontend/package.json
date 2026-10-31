@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "check:tokens": "node ../scripts/check-css-tokens.mjs",
     "check:parser": "node scripts/check-broker-parser.mjs",
-    "check": "npm run check:tokens && npm run check:parser",
+    "check:motion": "node ../scripts/check-motion.mjs",
+    "check": "npm run check:tokens && npm run check:motion && npm run check:parser",
     "prebuild": "npm run check"
   },
   "dependencies": {
