@@ -100,6 +100,12 @@ const ALL_TABS = [
 
 /* 스와이프 전환 순서 = 하단바에 보이는 순서. App.jsx가 이걸 그대로 쓰므로
    두 곳이 어긋날 수 없다(예전에는 배열을 각자 하드코딩해 동기화가 수동이었다). */
+/** 탭 번호 → 이름. 사용 로그가 쓴다 — 이름을 두 곳에 적으면 집계가 갈린다. */
+export function tabLabel(idx) {
+  const t = ALL_TABS.find(x => x.idx === idx)
+  return t ? t.label : `#${idx}`
+}
+
 export function navTabOrder(isAdmin) {
   return ALL_TABS.filter(t => !t.adminOnly || isAdmin).map(t => t.idx)
 }

@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import { useStore } from '../store'
 import AnalysisAdminCard from '../components/AnalysisAdminCard'
 import AdminApiKeyCard from '../components/AdminApiKeyCard'
+import TabUsagePanel from '../components/TabUsagePanel'
 import {
   listUsers, adminApproveUser, adminRejectUser, adminSuspendUser, adminReinstateUser,
   adminToggleAi, adminPromoteUser, adminDeleteUser, adminGetStats, adminGetAuditLog,
@@ -332,6 +333,7 @@ function AdminDashboard() {
 
         {section === 'stats' && (
           <motion.div key="stats" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <TabUsagePanel isAdmin />
             <StatsPanel />
           </motion.div>
         )}

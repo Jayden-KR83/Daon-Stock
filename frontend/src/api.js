@@ -185,6 +185,22 @@ export const getMovePrefs = () =>
   api.get('/alerts/move').then(r => r.data)
 export const saveMovePrefs = (body) =>
   api.post('/alerts/move', body).then(r => r.data)
+// 화면 사용 로그 — 탭 이름과 머문 시간만 보낸다.
+// 앱이 닫히는 순간은 fetch(keepalive) 로 보낸다. sendBeacon 은 헤더를 못 붙여
+// 토큰을 URL 에 실어야 하는데, 그러면 서버 접근 로그에 토큰이 남는다.
+export const logTabDwell = (tab, dwellMs, closing = false) => {
+  const body = JSON.stringify({ tab, dwell_ms: dwellMs })
+  if (closing) {
+    const t = localStorage.getItem('authToken') || ''
+    return fetch(`${api.defaults.baseURL}/usage/tab`, {
+      method: 'POST', keepalive: true, body,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
+    }).catch(() => {})
+  }
+  return api.post('/usage/tab', { tab, dwell_ms: dwellMs }).catch(() => {})
+}
+export const getUsageTabs = (days = 30, scope = 'me') =>
+  api.get('/usage/tabs', { params: { days, scope } }).then(r => r.data)
 // 중기 국면 — 200일선 기준 '지금 서 있는 자리'. 규칙·조건은 서버가 함께 준다.
 export const getMidtermRegime = () =>
   api.get('/midterm/regime').then(r => r.data)

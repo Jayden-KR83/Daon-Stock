@@ -22,6 +22,7 @@ import Tour, { isTourDone } from './components/Tour'
 import changelog from './changelog.json'
 import { capturePnLSnapshot } from './api'
 import './App.css'
+import { useTabDwell } from './hooks/useTabDwell'
 
 // 나머지 9개 탭은 lazy — 클릭 시 청크 다운로드 (초기 번들 ↓)
 const WatchlistTab    = lazy(() => import('./tabs/WatchlistTab'))
@@ -51,6 +52,7 @@ function TabLoading() {
 
 export default function App() {
   const activeTab          = useStore(s => s.activeTab)
+  useTabDwell(activeTab)   // 탭 체류시간 기록 — 탭을 합칠 근거를 지금부터 쌓는다
   const setActiveTab       = useStore(s => s.setActiveTab)
   const setUsdKrw          = useStore(s => s.setUsdKrw)
   const setHasAnthropicKey = useStore(s => s.setHasAnthropicKey)

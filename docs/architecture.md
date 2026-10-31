@@ -158,6 +158,8 @@ flowchart TD
 | index_alert_rules | user_id+ticker | enabled, threshold_pct | 지수별 임계 override (행 없으면 `INDEX_ALERT_RULES` 기본값) |
 | index_alert_state | user_id+ticker | last_kind, last_pct, fired_at | 지수 재발화 제어 (급등락과 분리) |
 | midterm_state | user_id+ticker | phase, changed_at | 중기 국면 — '바뀐 날에만' 알리기 위한 직전 국면 |
+| cash_ledger | id | account, prev, curr, delta, changed_at | 예수금이 바뀐 사실만 (입금·매매·배당이 섞여 있어 delta≠입금) |
+| usage_events | id | tab, dwell_ms, at | 탭 체류시간 — 탭 통합 판단 근거. 180일 보관 |
 | discovery_scores | ticker | market, peg, eps_growth, roe, pct_*, composite_score, gate_pass, data_completeness | 신규 발굴 GARP 일배치 (공용) |
 
 ### DB 접근 패턴 (모든 endpoint 공통)

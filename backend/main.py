@@ -311,6 +311,33 @@ def _init_db():
         -- 중기 국면 상태. 나침반(compass_signals)과 같은 규율 — **바뀐 것만** 말한다.
         -- 오너 결정(2026-10-31): 국면이 바뀐 날에만 알린다. 매주 같은 말을 보내면
         -- 읽히지 않고, 읽히지 않는 알림은 중요한 날에도 무시당한다.
+        -- 예수금 변동 이력 (오너 결정 2026-10-31).
+        -- "매달 입출금을 손으로 적지는 않겠다. 다온에서 예수금을 고치면 그게 입금이다."
+        -- 그래서 예수금이 바뀔 때마다 그 사실만 남긴다. **해석은 나중에 한다** —
+        -- 예수금은 입금으로도, 매매로도, 배당으로도 변하기 때문이다(아래 cost_krw 참조).
+        -- 지금 안 적으면 영영 복구할 수 없는 값이라 기록부터 시작한다.
+        CREATE TABLE IF NOT EXISTS cash_ledger (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    TEXT NOT NULL,
+            account    TEXT NOT NULL,
+            prev       REAL NOT NULL,        -- 바뀌기 전 (계좌 통화 기준)
+            curr       REAL NOT NULL,        -- 바뀐 뒤
+            delta      REAL NOT NULL,        -- curr - prev
+            currency   TEXT NOT NULL DEFAULT 'KRW',
+            changed_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_cash_ledger_user
+            ON cash_ledger(user_id, changed_at DESC);
+        -- 화면 사용 로그 (오너 결정 2026-10-31): 탭을 합칠 때 **느낌이 아니라 체류시간**을
+        -- 기준으로 삼는다. 어느 탭에 오래 머물렀는지는 지금부터 쌓아야 알 수 있다.
+        CREATE TABLE IF NOT EXISTS usage_events (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id  TEXT NOT NULL,
+            tab      TEXT NOT NULL,
+            dwell_ms INTEGER NOT NULL,
+            at       REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_user_at ON usage_events(user_id, at DESC);
         CREATE TABLE IF NOT EXISTS midterm_state (
             user_id    TEXT NOT NULL,
             ticker     TEXT NOT NULL,
@@ -511,6 +538,12 @@ def _migrate_schema():
         nw_cols = {row['name'] for row in conn.execute("PRAGMA table_info(net_worth_snapshots)").fetchall()}
         if nw_cols and 'cash_krw' not in nw_cols:
             conn.execute("ALTER TABLE net_worth_snapshots ADD COLUMN cash_krw INTEGER")
+        # 매입원가 합계. 예수금 변동이 '입금'인지 '매수'인지 가르는 유일한 단서다 —
+        # 100만원어치를 사면 예수금은 100만 줄고 **원가는 100만 는다**(합이 0).
+        # 입금이면 예수금만 는다. 평가액으로는 못 가른다(시세가 같이 움직이므로).
+        # 과거는 복구할 수 없다. NULL = '그날은 몰랐다'.
+        if nw_cols and 'cost_krw' not in nw_cols:
+            conn.execute("ALTER TABLE net_worth_snapshots ADD COLUMN cost_krw INTEGER")
         # 자산 타입 분기 — 비상장 펀드는 거래소 시세가 없어 실시간 조회 대상이 아니다.
         # nav = 기준가(1좌당), nav_date = 그 기준가의 기준일. 둘 다 nullable.
         # manual_price 와 역할 분리: manual_price = 상장종목의 사용자 수동 override,
@@ -2661,14 +2694,27 @@ def update_account_cash(key: str, req: AccountCashReq, cu: dict = Depends(requir
     if abs(cash) > 1e15:
         raise HTTPException(400, "금액이 너무 큽니다")
 
+    now = time()
     with _db() as conn:
-        cur = conn.execute(
+        row = conn.execute(
+            "SELECT cash, currency FROM accounts WHERE user_id=? AND key=?",
+            (cu['user_id'], key)).fetchone()
+        if row is None:
+            raise HTTPException(404, "계좌를 찾을 수 없습니다")
+        prev = float(row['cash'] or 0)
+        conn.execute(
             "UPDATE accounts SET cash=?, cash_updated_at=? WHERE user_id=? AND key=?",
-            (cash, time(), cu['user_id'], key)
-        )
-    if cur.rowcount == 0:
-        raise HTTPException(404, "계좌를 찾을 수 없습니다")
-    return {'ok': True, 'key': key, 'cash': cash}
+            (cash, now, cu['user_id'], key))
+        # 값이 실제로 바뀐 때만 남긴다 — 같은 값 저장을 '입금 0원'으로 적으면 소음이다.
+        if cash != prev:
+            conn.execute(
+                "INSERT INTO cash_ledger "
+                "(user_id, account, prev, curr, delta, currency, changed_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (cu['user_id'], key, prev, cash, cash - prev,
+                 row['currency'] or 'KRW', now))
+    return {'ok': True, 'key': key, 'cash': cash,
+            'prev': prev, 'delta': round(cash - prev, 2)}
 
 
 @app.delete("/api/accounts/{key}")
@@ -7196,6 +7242,7 @@ def _capture_net_worth_snapshot(user_id: str, portfolio_dict: dict, prices: dict
     today = _kst_today_str()
     breakdown = {}
     total = 0.0
+    cost = 0.0          # 매입원가 합계 — 예수금 변동을 매매와 가르는 단서
     holdings_count = 0
     for acc, items in portfolio_dict.items():
         acc_val = 0.0
@@ -7211,6 +7258,7 @@ def _capture_net_worth_snapshot(user_id: str, portfolio_dict: dict, prices: dict
             v = qty * float(cur) * mul
             acc_val += v
             total += v
+            cost += qty * avg * mul       # 시세와 무관 — 사고 팔 때만 변한다
             holdings_count += 1
         if acc_val > 0:
             breakdown[acc] = round(acc_val)
@@ -7219,11 +7267,12 @@ def _capture_net_worth_snapshot(user_id: str, portfolio_dict: dict, prices: dict
             conn.execute(
                 "INSERT OR REPLACE INTO net_worth_snapshots "
                 "(user_id, snapshot_date, total_krw, holdings_count, breakdown, usd_krw, "
-                " created_at, cash_krw) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                " created_at, cash_krw, cost_krw) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (user_id, today, round(total), holdings_count,
                  json.dumps(breakdown, ensure_ascii=False), usd_krw, time(),
-                 None if cash_krw is None else round(float(cash_krw)))
+                 None if cash_krw is None else round(float(cash_krw)),
+                 round(cost) if cost > 0 else None)
             )
     except Exception:
         pass
@@ -9982,6 +10031,134 @@ def _record_compass_signal(ticker: str, name: str, prev_reco: str, res: dict) ->
         return True
     except Exception:
         return False
+
+
+# ─── 화면 사용 로그 (오너 결정 2026-10-31) ───────────────────────────
+# "탭 10개를 절반으로 줄이자"는 제안에 오너가 단 조건: **느낌이 아니라 기록으로 정하자.**
+# 어느 탭에 오래 머물렀는지는 지금부터 쌓아야 알 수 있다.
+#
+# 설계에서 일부러 뺀 것
+#  - 클릭 좌표·스크롤·입력값을 남기지 않는다. 탭 이름과 머문 시간만 남긴다.
+#    탭을 합칠 판단에 그 이상은 필요 없고, 더 모으면 지우기 어려운 것이 쌓인다.
+#  - 다른 사용자의 로그는 서로 볼 수 없다(🟥 개인 데이터 격리). 관리자는
+#    사용자를 가리지 않은 **합계**만 본다.
+USAGE_MIN_DWELL_MS = 2000       # 2초 미만은 '지나간 것'이다 — 세지 않는다
+USAGE_MAX_DWELL_MS = 30 * 60 * 1000   # 탭을 켜 두고 자리를 비운 시간은 사용이 아니다
+USAGE_KEEP_DAYS    = 180        # 그 이상은 지운다. 탭 구조 판단에 반년이면 충분하다
+
+
+class UsageEventReq(BaseModel):
+    tab:      str = ''
+    dwell_ms: int = 0
+
+@app.post("/api/usage/tab")
+def log_usage_tab(req: UsageEventReq, cu: dict = Depends(require_approved)):
+    """탭을 떠날 때 1건. 조용히 버리는 경우가 많다 — 그래서 늘 ok 를 돌려준다."""
+    tab = (req.tab or '').strip()[:32]
+    try:
+        dwell = int(req.dwell_ms)
+    except (TypeError, ValueError):
+        return {'ok': True, 'stored': False}
+    if not tab or dwell < USAGE_MIN_DWELL_MS:
+        return {'ok': True, 'stored': False, 'reason': 'too_short'}
+    if dwell > USAGE_MAX_DWELL_MS:
+        dwell = USAGE_MAX_DWELL_MS        # 자리 비움은 상한으로 잘라 기록
+    now = time()
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO usage_events (user_id, tab, dwell_ms, at) VALUES (?,?,?,?)",
+            (cu['user_id'], tab, dwell, now))
+        # 보관 기간을 넘긴 것은 쓸 때 같이 지운다(별도 cron 을 늘리지 않는다)
+        conn.execute("DELETE FROM usage_events WHERE at < ?",
+                     (now - USAGE_KEEP_DAYS * 86400,))
+    return {'ok': True, 'stored': True}
+
+
+@app.get("/api/usage/tabs")
+def get_usage_tabs(days: int = 30, scope: str = 'me',
+                   cu: dict = Depends(require_approved)):
+    """탭별 체류시간 집계. scope='me'(기본) | 'all'(관리자만, 사용자 구분 없이 합계).
+
+    **분모를 함께 보낸다** — 기록 시작일과 집계 기간을 모르면 "분석 탭 40%"가
+    무슨 뜻인지 알 수 없다(🟥 숫자 규약).
+    """
+    days = max(1, min(int(days or 30), USAGE_KEEP_DAYS))
+    since = time() - days * 86400
+    if scope == 'all' and not cu.get('is_admin'):
+        raise HTTPException(403, "관리자만 전체 집계를 볼 수 있습니다")
+
+    with _db() as conn:
+        if scope == 'all':
+            rows = conn.execute(
+                "SELECT tab, COUNT(*) n, SUM(dwell_ms) ms FROM usage_events "
+                "WHERE at>=? GROUP BY tab ORDER BY ms DESC", (since,)).fetchall()
+            first = conn.execute(
+                "SELECT MIN(at) a FROM usage_events").fetchone()
+        else:
+            rows = conn.execute(
+                "SELECT tab, COUNT(*) n, SUM(dwell_ms) ms FROM usage_events "
+                "WHERE user_id=? AND at>=? GROUP BY tab ORDER BY ms DESC",
+                (cu['user_id'], since)).fetchall()
+            first = conn.execute(
+                "SELECT MIN(at) a FROM usage_events WHERE user_id=?",
+                (cu['user_id'],)).fetchone()
+
+    total_ms = sum(int(r['ms'] or 0) for r in rows) or 0
+    items = [{
+        'tab':      r['tab'],
+        'visits':   int(r['n']),
+        'total_ms': int(r['ms'] or 0),
+        'share_pct': round(int(r['ms'] or 0) / total_ms * 100, 1) if total_ms else 0.0,
+        'avg_ms':   round(int(r['ms'] or 0) / int(r['n'])) if r['n'] else 0,
+    } for r in rows]
+
+    return {
+        'items': items, 'scope': scope,
+        'basis': {
+            'days': days,
+            'since': since,
+            'first_event_at': (first['a'] if first and first['a'] else None),
+            'total_ms': total_ms,
+            'min_dwell_ms': USAGE_MIN_DWELL_MS,
+            'max_dwell_ms': USAGE_MAX_DWELL_MS,
+            'keep_days': USAGE_KEEP_DAYS,
+            'note': ('2초 미만 체류는 세지 않고, 30분을 넘는 체류는 30분으로 자른다. '
+                     '비중(%)의 분모는 이 기간에 기록된 전체 체류시간이다'),
+        },
+    }
+
+
+# ─── 예수금 변동 이력 (오너 결정 2026-10-31) ──────────────────────────
+@app.get("/api/cash/ledger")
+def get_cash_ledger(days: int = 365, cu: dict = Depends(require_approved)):
+    """예수금이 언제 얼마나 바뀌었나 — **사실만** 돌려준다.
+
+    ⚠ 해석은 하지 않는다. 예수금은 세 가지 이유로 변한다:
+    입금·출금(외부) / 매수·매도(내부 이동) / 배당·이자(수익).
+    그래서 `delta` 를 그대로 '입금'이라 부르지 않는다. 가르려면 같은 기간의
+    **매입원가 변화**(`net_worth_snapshots.cost_krw`)가 필요하고, 그 값은
+    2026-10-31 부터 쌓기 시작했다. 쌓이기 전 구간은 가를 수 없다 —
+    모르는 것을 지어내지 않는다.
+    """
+    days = max(1, min(int(days or 365), 3650))
+    since = time() - days * 86400
+    with _db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT account, prev, curr, delta, currency, changed_at "
+            "FROM cash_ledger WHERE user_id=? AND changed_at>=? "
+            "ORDER BY changed_at DESC LIMIT 500", (cu['user_id'], since)).fetchall()]
+        first = conn.execute(
+            "SELECT MIN(changed_at) a FROM cash_ledger WHERE user_id=?",
+            (cu['user_id'],)).fetchone()
+    return {
+        'items': rows,
+        'basis': {
+            'days': days,
+            'first_change_at': (first['a'] if first and first['a'] else None),
+            'meaning': ('예수금이 바뀐 사실만 기록한 것이다. 입금·매매·배당이 섞여 있어 '
+                        'delta 를 입금액으로 읽으면 안 된다'),
+        },
+    }
 
 
 # ─── 중기 국면 (요청 #12 의 바닥) ─────────────────────────────────────
