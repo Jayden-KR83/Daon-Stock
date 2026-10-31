@@ -100,6 +100,11 @@ def endpoint(cu: dict = Depends(require_approved)):
   - **이력이 모자라면 그 항목은 `None`** 이고 그 종목은 포트폴리오 집계의 **분모에서 빠진다**. 얼마나 못 봤는지는 `covered_weight_pct`/`unknown_weight_pct` 로 밝힌다 — 모르는 것을 '중립'으로 채우지 않는다.
   - 집계는 **금액 가중**이다(종목 수로 세면 9천만원짜리와 1천만원짜리가 같은 표를 던진다). 상한 `MIDTERM_MAX_TICKERS=60`.
   - 캐시: 종목별 종가 2년치 `_closes_2y` TTL 3600초.
+- `POST /api/cron/midterm_scan` — **중기 자비스**(일 1회, cron_secret). 국면이 **바뀐 날에만** 인앱 알림 + 푸시(`kind='midterm'`, tag `midterm`).
+  - 오너 결정(2026-10-31) 두 가지가 이 기능의 모양이다. **① 방향을 단언하지 않고 조건을 말한다** — "하락 우위"가 아니라 "삼성전자 ₩78,400을 회복하면 '추세 아래' 과반이 깨진다". 틀릴 수 있는 형태라 나중에 채점된다. **② 바뀐 날에만 보낸다** — 매주 같은 말을 보내면 읽히지 않고, 읽히지 않는 알림은 중요한 날에도 무시당한다.
+  - 조건 계산은 순수 함수다: `change_trigger`(종목이 뒤집히는 가격 = 200일선) · `flip_requirement`(**금액 기준**으로 과반을 잃게 만드는 최소 묶음).
+  - 소음 차단: `MIDTERM_MIN_WEIGHT_PCT=10` 미만 종목의 전환은 알리지 않는다. **다만 상태(`midterm_state`)는 갱신한다** — 안 울렸다고 상태를 안 남기면 다음에 중복 발화한다.
+  - **첫 관측은 전환이 아니다**(기준선만 저장하고 조용히 넘어간다). 데모 계정 제외. 사용자별 실패는 격리된다.
 - `GET /api/push/public_key` · `POST /api/push/subscribe|unsubscribe|test` — Web Push(VAPID 자동 생성). 앱이 닫혀 있어도 도달.
 
 ### 6.6 자산 추이

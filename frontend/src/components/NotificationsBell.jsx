@@ -361,6 +361,7 @@ const KIND_META = {
   plunge: { label: '급락',   cls: 'sev-label is-high' },
   info:     { label: '안내', cls: 'sev-label is-med' },
   earnings: { label: '실적', cls: 'sev-label is-med' },   // 실적발표 전날 cron
+  midterm:  { label: '중기', cls: 'sev-label is-med' },   // 중기 국면이 바뀐 날만 — 방향이 아니라 '무엇이 바뀌면 생각을 바꾸나'를 말한다
 }
 
 // R6: 다문장 안내 — 문장마다 줄바꿈(pre-line 으로 렌더)

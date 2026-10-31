@@ -308,6 +308,16 @@ def _init_db():
             fired_at  REAL NOT NULL,
             PRIMARY KEY(user_id, ticker)
         );
+        -- 중기 국면 상태. 나침반(compass_signals)과 같은 규율 — **바뀐 것만** 말한다.
+        -- 오너 결정(2026-10-31): 국면이 바뀐 날에만 알린다. 매주 같은 말을 보내면
+        -- 읽히지 않고, 읽히지 않는 알림은 중요한 날에도 무시당한다.
+        CREATE TABLE IF NOT EXISTS midterm_state (
+            user_id    TEXT NOT NULL,
+            ticker     TEXT NOT NULL,
+            phase      TEXT NOT NULL,        -- 마지막으로 알린 국면
+            changed_at REAL NOT NULL,
+            PRIMARY KEY(user_id, ticker)
+        );
         CREATE TABLE IF NOT EXISTS earnings_alert_state (
             user_id    TEXT NOT NULL,
             ticker     TEXT NOT NULL,
@@ -829,7 +839,8 @@ KOSPI_SECTOR_ETFS = {
 from sectors import (KR_ETF_SECTOR, US_ETF_SECTOR, SECTOR_GROUPS,
                      LABEL_TO_GROUP, LEGACY_ALIASES, USD_EXPOSED_KR_ETF,
                      sector_group, labels_by_group, unknown_labels, currency_of)
-from midterm import midterm_regime, portfolio_regime, MIDTERM_BASIS
+from midterm import (midterm_regime, portfolio_regime, MIDTERM_BASIS,
+                     change_trigger, flip_requirement)
 
 # ─── TTL Cache ────────────────────────────────────────────────────────
 _cache: Dict[str, Any] = {}
@@ -9373,6 +9384,137 @@ def _run_index_scan(now: float) -> dict:
         return {'indices': len(quotes), 'checks': watched, 'triggered': triggered}
     except Exception as e:
         return {'error': str(e)[:200]}
+
+
+# ─── 중기 자비스 — 국면이 바뀐 날에만 말한다 ──────────────────────────
+# 오너 결정(2026-10-31) 두 가지가 이 함수의 모양을 정했다.
+#   ① **방향을 단언하지 않고 조건을 말한다** — "하락 우위" 가 아니라
+#      "셋 중 둘이 200일선을 회복하면 뒤집힌다". 틀릴 수 있는 형태라 채점이 된다.
+#   ② **국면이 바뀐 날에만** 보낸다 — 나침반과 같은 규율.
+# 비중이 작은 종목까지 알리면 소음이 된다. 그래서 문턱을 둔다.
+MIDTERM_MIN_WEIGHT_PCT = 10.0     # 이 비중 미만 종목의 국면 전환은 알리지 않는다
+
+
+def _fmt_level(ticker: str, v) -> str:
+    """경계 가격 표기. 조건은 수치로 말해야 나중에 채점할 수 있다."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return '—'
+    return f"\u20a9{f:,.0f}" if is_kr(ticker) else f"${f:,.2f}"
+
+
+def _midterm_message(changed: list, port: dict, flip: dict | None) -> str:
+    """알림 문구 — 무엇이 바뀌었나 + 무엇이 바뀌면 또 바뀌나.
+
+    한 덩어리로 뭉치지 않는다(design.md R6): 문장마다 줄바꿈한다.
+    """
+    lines = []
+    for c in changed:
+        lines.append(f"{c['name']} {c['prev']} → {c['phase']}")
+    side = port.get('phases') or {}
+    below = round((side.get('추세 이탈', 0) or 0) + (side.get('하락추세', 0) or 0), 1)
+    lines.append(f"보유의 {below}%가 200일선 아래 (파악 {port.get('covered_weight_pct', 0)}%)")
+    if flip:
+        names = ' · '.join(
+            f"{n['name']} {_fmt_level(n['ticker'], n['level'])}" for n in flip['need'])
+        verb = '회복하면' if flip['direction'] == 'up' else '이탈하면'
+        lines.append(f"생각을 바꿀 조건 — {names} {verb} '{flip['side']}' 과반이 깨진다")
+    return '\n'.join(lines)
+
+
+def _run_midterm_scan(now: float) -> dict:
+    """보유 종목의 중기 국면을 훑어 **바뀐 사용자에게만** 알린다.
+
+    일 1회 cron 이 부른다. 전체를 try/except 로 격리한다 — 실패해도 다른 알림에
+    영향이 없어야 한다.
+    """
+    try:
+        with _db() as conn:
+            users = [r['user_id'] for r in conn.execute(
+                "SELECT user_id FROM users WHERE status='approved'").fetchall()]
+
+        notified, scanned, pushed = 0, 0, []
+        for uid in users:
+            if _is_demo({'user_id': uid}):
+                continue
+            try:
+                data = get_midterm_regime(cu={'user_id': uid})
+            except Exception:
+                continue
+            items = data.get('items') or []
+            if not items:
+                continue
+            scanned += 1
+            total = sum(float(i.get('weight') or 0) for i in items) or 0.0
+            if total <= 0:
+                continue
+
+            with _db() as conn:
+                prev = {r['ticker']: r['phase'] for r in conn.execute(
+                    "SELECT ticker, phase FROM midterm_state WHERE user_id=?",
+                    (uid,)).fetchall()}
+                changed = []
+                for i in items:
+                    ph = (i.get('regime') or {}).get('phase')
+                    if not ph:
+                        continue
+                    was = prev.get(i['ticker'])
+                    if was == ph:
+                        continue
+                    conn.execute(
+                        "INSERT OR REPLACE INTO midterm_state "
+                        "(user_id, ticker, phase, changed_at) VALUES (?,?,?,?)",
+                        (uid, i['ticker'], ph, now))
+                    # 첫 관측은 '바뀐 것'이 아니다 — 기준선만 깔고 조용히 넘어간다.
+                    if was is None:
+                        continue
+                    wpct = float(i.get('weight') or 0) / total * 100
+                    if wpct < MIDTERM_MIN_WEIGHT_PCT:
+                        continue
+                    changed.append({'ticker': i['ticker'],
+                                    'name': i.get('name') or i['ticker'],
+                                    'prev': was, 'phase': ph,
+                                    'weight_pct': round(wpct, 1)})
+
+            if not changed:
+                continue
+
+            msg = _midterm_message(changed, data.get('portfolio') or {},
+                                   flip_requirement(items))
+            head = changed[0]
+            with _db() as conn:
+                conn.execute(
+                    "INSERT INTO notifications (user_id, ticker, name, kind, "
+                    "       current_price, message, created_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (uid, head['ticker'], head['name'], 'midterm',
+                     (items[0].get('regime') or {}).get('price'), msg, now))
+            notified += 1
+            pushed.append((uid, msg))
+
+        for uid, msg in pushed:
+            _send_push(uid, '다온 중기 국면이 바뀌었습니다',
+                       msg.split('\n')[0], '/', tag='midterm')
+
+        return {'users': scanned, 'notified': notified}
+    except Exception as e:
+        return {'error': str(e)[:200]}
+
+
+class MidtermScanReq(BaseModel):
+    cron_secret: str = ''
+
+@app.post("/api/cron/midterm_scan")
+def cron_midterm_scan(req: MidtermScanReq):
+    """일 1회 — 중기 국면이 바뀐 사용자에게만 알린다."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='cron_secret'").fetchone()
+    secret = row['value'] if row else ''
+    if not secret or req.cron_secret != secret:
+        raise HTTPException(403, "invalid cron secret")
+    return _run_midterm_scan(time())
 
 
 def _run_move_scan(now: float, quotes: dict) -> dict:

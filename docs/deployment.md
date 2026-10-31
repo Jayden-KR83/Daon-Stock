@@ -63,6 +63,25 @@ ssh -i $env:ORACLE_KEY ubuntu@168.107.13.20 "sudo systemctl restart portfolio &&
 `127.0.0.1` 바인딩이라 외부에서 안 닿는다 — 늘 실패하는 검사가 되고, 그러면 다음 사람이
 검사를 지운다. 사용자가 실제로 쓰는 주소로 확인한다.
 
+### ⚠ 중기 자비스 cron — **아직 서버에 등록되지 않았다** (2026-10-31)
+
+`POST /api/cron/midterm_scan` 은 배포돼 있지만 **부르는 사람이 없다.**
+CLI 자동모드가 SSH 를 막아(Production Reads/Deploy) 등록하지 못했다.
+등록 전까지 이 기능은 **아무 일도 하지 않는다** — 엔드포인트가 있는 것과
+동작하는 것은 다르다(🟥 "뜬다"의 기준).
+
+```bash
+# 장 마감 뒤 하루 한 번. 07:30 전략 cron 과 겹치지 않게 뗀다.
+ssh -i "$ORACLE_KEY" ubuntu@168.107.13.20
+crontab -e
+# 아래 한 줄 추가 (SECRET 은 settings 테이블의 cron_secret)
+30 16 * * 1-5 curl -s -X POST http://127.0.0.1:8501/api/cron/midterm_scan \
+  -H 'Content-Type: application/json' -d '{"cron_secret":"SECRET"}' >> ~/portfolio/logs/midterm.log 2>&1
+```
+
+확인: `sqlite3 ~/portfolio/daon.db 'SELECT COUNT(*) FROM midterm_state'`
+→ 첫 실행 뒤 보유 종목 수만큼 행이 생긴다(첫 실행은 기준선만 깔고 알리지 않는다).
+
 ### DB 마이그레이션
 ```bash
 # 1) 백업

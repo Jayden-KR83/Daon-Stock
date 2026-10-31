@@ -188,3 +188,87 @@ def portfolio_regime(items: list) -> dict:
         out['ma_gap_pct'] = round(sum(w * g for w, g in gaps) / gw, 2)
 
     return out
+
+
+# ─── "무엇이 바뀌면 생각을 바꾸나" ────────────────────────────────────
+# 오너 결정(2026-10-31): 자비스는 **방향을 단언하지 않고 조건을 말한다**.
+# 단언은 틀렸을 때 책임질 방법이 없고, 다온이 지켜온 '판정하지 않고 숫자만'을 깬다.
+# 조건은 **틀릴 수 있는 형태**라서 나중에 채점이 된다 — 그게 자비스답기도 하다.
+#
+# 조건은 반드시 **가격 수치**로 말한다. "회복하면"은 검증할 수 없고
+# "200일선 78,400원을 회복하면"은 검증된다.
+
+def change_trigger(regime: dict) -> dict | None:
+    """이 종목의 국면이 뒤집히는 조건 — 결정론적.
+
+    국면 규칙이 '200일선 위/아래'이므로, 뒤집히는 지점도 200일선 하나다.
+    위에 있으면 이탈이, 아래에 있으면 회복이 조건이 된다.
+    """
+    if not regime or not regime.get('phase'):
+        return None
+    ma, gap = regime.get('ma'), regime.get('ma_gap_pct')
+    if ma is None or gap is None:
+        return None
+    above = gap >= 0
+    return {
+        'direction': 'down' if above else 'up',
+        'level':     round(float(ma), 2),      # 그 가격이 경계다
+        'gap_pct':   gap,                      # 지금 거기서 몇 % 떨어져 있나
+        'verb':      '이탈하면' if above else '회복하면',
+        'becomes':   '추세 아래' if above else '추세 위',
+    }
+
+
+# 네 칸을 둘로 묶는다 — 조건을 말할 때는 '선 위냐 아래냐' 한 축만 쓴다.
+ABOVE_PHASES = ('상승추세', '반등 시도')
+BELOW_PHASES = ('추세 이탈', '하락추세')
+
+
+def flip_requirement(items: list) -> dict | None:
+    """포트폴리오의 우세한 쪽이 뒤집히려면 무엇이 필요한가.
+
+    "보유 59%가 추세 아래" 다음에 와야 할 문장은 "그래서 어떻게 되면 바뀌는가" 다.
+    평가액이 큰 종목부터 세어, **과반을 잃게 만드는 최소 묶음**을 돌려준다.
+    종목 수가 아니라 금액으로 센다 — 1천만원짜리 셋이 뒤집혀도 9천만원은 그대로다.
+
+    과반이 아니면(=팽팽하면) None. 뒤집을 것이 없는 상태에 조건을 지어내지 않는다.
+    """
+    known = [i for i in items if (i.get('regime') or {}).get('phase')]
+    tot = sum(max(0.0, float(i.get('weight') or 0)) for i in known)
+    if tot <= 0:
+        return None
+
+    def side_of(i):
+        return 'above' if i['regime']['phase'] in ABOVE_PHASES else 'below'
+
+    w = {'above': 0.0, 'below': 0.0}
+    for i in known:
+        w[side_of(i)] += max(0.0, float(i.get('weight') or 0))
+
+    side = 'above' if w['above'] > w['below'] else 'below'
+    side_w = w[side]
+    if side_w <= tot / 2:
+        return None                      # 과반이 없다 — 뒤집을 '우세'가 없다
+
+    # 큰 것부터 뒤집어 과반을 잃는 순간까지
+    members = sorted((i for i in known if side_of(i) == side),
+                     key=lambda i: -max(0.0, float(i.get('weight') or 0)))
+    moved, need = 0.0, []
+    for i in members:
+        need.append(i)
+        moved += max(0.0, float(i.get('weight') or 0))
+        if side_w - moved <= tot / 2:
+            break
+
+    return {
+        'side':        '추세 위' if side == 'above' else '추세 아래',
+        'side_pct':    round(side_w / tot * 100, 1),
+        'need_count':  len(need),
+        'need':        [{'ticker': i['ticker'], 'name': i.get('name') or i['ticker'],
+                         'level': (i['regime'].get('ma') or 0) and
+                                  round(float(i['regime']['ma']), 2)}
+                        for i in need],
+        'direction':   'down' if side == 'above' else 'up',
+        'rule':        ('평가액이 큰 종목부터 세어 과반(50%)을 잃게 만드는 최소 묶음. '
+                        '종목 수가 아니라 금액 기준이다'),
+    }

@@ -179,3 +179,83 @@ class TestPortfolioRollup:
         out = portfolio_regime([_item(-5_000_000, self.UP, 'BAD'),
                                 _item(10_000_000, self.DN, 'OK')])
         assert out['phases']['하락추세'] == 100.0
+
+
+from midterm import change_trigger, flip_requirement
+
+
+class TestChangeTrigger:
+    """오너 결정(2026-10-31): 방향을 단언하지 않고 **조건**을 말한다.
+
+    조건은 가격 수치여야 한다 — "회복하면"은 채점할 수 없고
+    "200일선 78,400을 회복하면"은 채점된다.
+    """
+    UP = series(400, daily=0.001)
+    DN = series(400, daily=-0.001)
+
+    def test_above_trend_asks_for_break(self):
+        t = change_trigger(midterm_regime(self.UP))
+        assert t['direction'] == 'down' and t['verb'] == '이탈하면'
+        assert t['becomes'] == '추세 아래'
+        assert t['level'] > 0
+
+    def test_below_trend_asks_for_recovery(self):
+        t = change_trigger(midterm_regime(self.DN))
+        assert t['direction'] == 'up' and t['verb'] == '회복하면'
+        assert t['becomes'] == '추세 위'
+
+    def test_level_is_the_moving_average(self):
+        r = midterm_regime(self.UP)
+        assert change_trigger(r)['level'] == round(r['ma'], 2)
+
+    def test_no_phase_no_trigger(self):
+        # 이력이 모자라 국면을 모르면 조건도 지어내지 않는다
+        assert change_trigger(midterm_regime(series(50))) is None
+        assert change_trigger({}) is None
+        assert change_trigger(None) is None
+
+
+class TestFlipRequirement:
+    UP = series(400, daily=0.001)
+    DN = series(400, daily=-0.001)
+
+    def test_minimum_group_by_money_not_count(self):
+        # 아래쪽 70%: 50M + 20M. 과반을 잃으려면 50M 하나면 된다(20M 셋보다 먼저).
+        items = [_item(50_000_000, self.DN, 'BIG'),
+                 _item(20_000_000, self.DN, 'MID'),
+                 _item(30_000_000, self.UP, 'UP')]
+        f = flip_requirement(items)
+        assert f['side'] == '추세 아래' and f['side_pct'] == 70.0
+        assert f['need_count'] == 1
+        assert f['need'][0]['ticker'] == 'BIG'
+        assert f['direction'] == 'up'
+
+    def test_needs_two_when_one_is_not_enough(self):
+        # 아래 80M / 전체 100M → 과반을 깨려면 30M 이상이 움직여야 한다.
+        # 가장 큰 것이 28M 이라 하나로는 모자라고 둘이 필요하다.
+        # (첫 픽스처는 30M 짜리를 뒀다가 하나로 충분해져서 틀렸다 — 산수는 코드가 맞았다.)
+        items = [_item(28_000_000, self.DN, 'A'),
+                 _item(28_000_000, self.DN, 'B'),
+                 _item(24_000_000, self.DN, 'C'),
+                 _item(20_000_000, self.UP, 'UP')]
+        f = flip_requirement(items)
+        assert f['need_count'] == 2
+        assert {x['ticker'] for x in f['need']} == {'A', 'B'}
+
+    def test_no_majority_no_claim(self):
+        # 팽팽하면 뒤집을 '우세'가 없다 — 조건을 지어내지 않는다
+        assert flip_requirement([_item(50_000_000, self.UP, 'U'),
+                                 _item(50_000_000, self.DN, 'D')]) is None
+
+    def test_unknown_only_is_safe(self):
+        assert flip_requirement([_item(10_000_000, series(20), 'NEW')]) is None
+        assert flip_requirement([]) is None
+
+    def test_need_carries_price_level(self):
+        f = flip_requirement([_item(90_000_000, self.DN, 'BIG'),
+                              _item(10_000_000, self.UP, 'UP')])
+        assert f['need'][0]['level'] > 0, '조건에 가격이 없으면 채점할 수 없다'
+
+    def test_rule_is_shipped(self):
+        f = flip_requirement([_item(90_000_000, self.DN), _item(10_000_000, self.UP)])
+        assert '금액' in f['rule']
