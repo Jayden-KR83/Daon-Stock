@@ -829,6 +829,7 @@ KOSPI_SECTOR_ETFS = {
 from sectors import (KR_ETF_SECTOR, US_ETF_SECTOR, SECTOR_GROUPS,
                      LABEL_TO_GROUP, LEGACY_ALIASES, USD_EXPOSED_KR_ETF,
                      sector_group, labels_by_group, unknown_labels, currency_of)
+from midterm import midterm_regime, portfolio_regime, MIDTERM_BASIS
 
 # ─── TTL Cache ────────────────────────────────────────────────────────
 _cache: Dict[str, Any] = {}
@@ -9839,6 +9840,83 @@ def _record_compass_signal(ticker: str, name: str, prev_reco: str, res: dict) ->
         return True
     except Exception:
         return False
+
+
+# ─── 중기 국면 (요청 #12 의 바닥) ─────────────────────────────────────
+# 예측을 말하기 전에 **지금 어디에 서 있는지**부터 있어야 한다. 이 층은 AI 가
+# 아니라 산수다 — 계산은 backend/midterm.py 의 순수 함수가 하고(네트워크·DB 없음),
+# 여기서는 시세를 모아 넘기고 캐시할 뿐이다.
+MIDTERM_MAX_TICKERS = 60       # 폭주 방지. 넘치면 평가액 큰 순으로 자른다.
+
+@ttl_cache(3600)
+def _closes_2y(ticker: str) -> list:
+    """일봉 종가 2년치. 200일선 + 60일 기울기에 260거래일 이상이 필요하다.
+
+    실패는 빈 리스트다 — 짧은 이력을 긴 창인 척 채우지 않는다. 그 결과
+    그 종목의 국면은 None 이 되고, 포트폴리오 집계의 분모에서 빠진다.
+    """
+    syms = ([f"{kr_code(ticker)}{sfx}" for sfx in ('.KS', '.KQ')]
+            if is_kr(ticker) else [ticker.upper()])
+    for sym in syms:
+        try:
+            res = _yf_chart(sym, '2y', '1d')
+            if not res:
+                continue
+            q0 = res.get('indicators', {}).get('quote', [{}])[0]
+            cl = [c for c in (q0.get('close') or []) if c is not None]
+            if len(cl) >= 30:
+                return cl
+        except Exception:
+            continue
+    return []
+
+
+@app.get("/api/midterm/regime")
+def get_midterm_regime(cu: dict = Depends(require_approved)):
+    """보유 종목의 중기 국면 + 포트폴리오 한 장.
+
+    국면은 '200일선 위/아래 × 200일선이 오르는 중인가' 네 칸이다. 예측이 아니다 —
+    규칙(`phase_rule`)과 계산 조건(`basis`)을 값과 함께 돌려보내므로 화면은 그것을
+    그대로 쓴다(🟥 숫자 규약 2번: 기간·분모를 화면에 손으로 적지 않는다).
+    """
+    with _db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT ticker, name, quantity, avg_price, manual_price "
+            "FROM portfolios WHERE user_id=? AND quantity>0", (cu['user_id'],)
+        ).fetchall()]
+    if not rows:
+        return {'items': [], 'portfolio': portfolio_regime([]),
+                'basis': dict(MIDTERM_BASIS), 'truncated': 0}
+
+    fx = _usd_krw() or 1380.0
+
+    def _one(r):
+        tkr = r['ticker']
+        closes = _closes_2y(tkr)
+        cur = closes[-1] if closes else float(r.get('manual_price') or 0) \
+            or float(r.get('avg_price') or 0)
+        val = float(r['quantity'] or 0) * float(cur or 0) * (1.0 if is_kr(tkr) else fx)
+        return {'ticker': tkr, 'name': r.get('name') or tkr,
+                'weight': round(val), 'regime': midterm_regime(closes)}
+
+    items = []
+    with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {ex.submit(_one, r): r for r in rows}
+        for fut in _as_completed_safe(futs, timeout=40):
+            try:
+                items.append(fut.result(timeout=0))
+            except Exception:
+                pass
+
+    items.sort(key=lambda x: x['weight'], reverse=True)
+    truncated = max(0, len(items) - MIDTERM_MAX_TICKERS)
+    if truncated:
+        items = items[:MIDTERM_MAX_TICKERS]
+
+    return {'items': items,
+            'portfolio': portfolio_regime(items),
+            'basis': dict(MIDTERM_BASIS),
+            'truncated': truncated}
 
 
 @app.get("/api/compass/signals")

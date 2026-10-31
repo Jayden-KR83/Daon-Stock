@@ -93,6 +93,13 @@ def endpoint(cu: dict = Depends(require_approved)):
   2. **급등락 스캔**(`_run_move_scan`) — approved 사용자별 보유(quantity>0)+관심 합집합의 일간 `change_pct` 대 임계 비교. **15분 스로틀**(`settings.move_scan_at`)이라 5분 cron 3회 중 1회만 실제 조회. 티커 상한 `MOVE_SCAN_MAX_TICKERS=200`(초과분은 응답 `move.truncated`에 표시). 시세는 `quotes` dict로 두 스캔이 공유해 중복 호출 없음. 전체 try/except 격리 — 실패해도 목표가 알림에 영향 없음.
   - 재발화 규칙(`_decide_move_alert`, 순수함수·pytest 12건): 최초 돌파 발화 → 같은 방향은 임계만큼 더 벌어질 때만(−5% 후 −10%) → 방향 전환은 즉시 → `|변동률|<임계`로 되돌아오면 `move_alert_state` 행 삭제해 재무장. **날짜 경계가 아닌 되돌림 기준**이라 장 마감 후 값이 고정된 미국장에서 자정마다 중복 발화하지 않음.
   3. **지수 스캔**(`_run_index_scan`) — `_market_data()`(TTL 300초, 대시보드와 공유) 의 12개 지수를 사용자별 지수 규칙과 비교. 판정은 급등락과 같은 `_decide_move_alert` 를 쓰고, 상태만 `index_alert_state` 로 분리했다 — 급등락 설정 저장이 상태를 통째로 지우므로(재무장) 섞으면 지수가 덤으로 울린다. **15분 스로틀**(`settings.index_scan_at`, 급등락과 별도 키). 알림 문구는 `[지수] VIX +18.4% 급등 · 현재 24.80`, 푸시 태그 `index-<티커>`. 값 표기는 지수마다 다르다(`_fmt_index_value`: 원·달러·포인트·수익률%).
+- `GET /api/midterm/regime` — **중기 국면**(요청 #12 의 바닥). 보유 종목별 + 포트폴리오 한 장.
+  - 계산은 `backend/midterm.py` 순수 함수(네트워크·DB 없음)가 한다. 엔드포인트는 시세를 모아 넘기고 캐시만 한다.
+  - `phase` = **200일선 위/아래 × 200일선이 최근 60일간 올랐는가** 네 칸(상승추세·반등 시도·추세 이탈·하락추세). **예측이 아니라 분류다** — 규칙(`phase_rule`)과 조건(`basis`)을 값과 함께 보내므로 화면은 그것을 그대로 쓴다.
+  - 그 밖에: `ma_gap_pct`·`ret_3m/6m/12m`·`band_pct`(52주 밴드 위치)·`drawdown_pct`·`vol_annual_pct`.
+  - **이력이 모자라면 그 항목은 `None`** 이고 그 종목은 포트폴리오 집계의 **분모에서 빠진다**. 얼마나 못 봤는지는 `covered_weight_pct`/`unknown_weight_pct` 로 밝힌다 — 모르는 것을 '중립'으로 채우지 않는다.
+  - 집계는 **금액 가중**이다(종목 수로 세면 9천만원짜리와 1천만원짜리가 같은 표를 던진다). 상한 `MIDTERM_MAX_TICKERS=60`.
+  - 캐시: 종목별 종가 2년치 `_closes_2y` TTL 3600초.
 - `GET /api/push/public_key` · `POST /api/push/subscribe|unsubscribe|test` — Web Push(VAPID 자동 생성). 앱이 닫혀 있어도 도달.
 
 ### 6.6 자산 추이
