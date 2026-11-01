@@ -1630,6 +1630,18 @@ function DaonAIReport({ data, computedAt = 0, part = 'diagnosis' }) {
             분석 기준 {_fmtKstDateTime(computedAt)}
           </div>
         )}
+        {/* 잘린 답을 완성된 답처럼 보여주지 않는다(🟥 AI 응답 파싱 규약).
+            2026-11-01: 길이 상한에서 끊긴 응답을 앞부분만 되살리게 했다.
+            되살렸다는 사실을 숨기면, 뒷부분이 없는 리포트를 전부인 줄 알고 읽는다. */}
+        {data._truncated && (
+          <div className="ko-keep" style={{ padding: '8px 10px', marginBottom: 8,
+            borderRadius: 2, border: '1px solid var(--m-negative)',
+            color: 'var(--m-negative)', fontSize: 11, lineHeight: 1.6,
+            whiteSpace: 'pre-line' }}>
+            {['AI 답이 길어 뒷부분이 잘렸습니다 — 아래는 받은 데까지입니다.',
+              '계좌를 하나만 골라 다시 분석하면 짧아집니다.'].join('\n')}
+          </div>
+        )}
         <LensViews lens={data.lens_views} />
         <div className="mono-card" style={{ marginBottom: 12 }}>
           <div className="mono-section-title is-accent" style={{ marginBottom: 8 }}>

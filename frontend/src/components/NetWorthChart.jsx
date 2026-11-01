@@ -102,6 +102,27 @@ export default function NetWorthChart() {
             <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--m-text-tertiary)',
               fontWeight: 500 }}>{range}</span>
           </div>
+          {/* 기록 시작 대비 — 위 숫자는 **선택한 기간**의 변동이라 1M 을 보는 중에는
+              "처음부터 얼마나 왔나"를 알 수 없었다. 기준일은 서버가 준 값을 쓴다. */}
+          {/* 고른 기간이 이미 기록 전체를 덮으면 위 숫자와 같아진다 —
+              같은 값을 두 번 보여주면 읽는 사람이 다른 뜻인 줄 알고 멈춘다. */}
+          {summary.inception && summary.inception.date !== summary.first_date && (
+            <div className="ko-keep" style={{ fontSize: 10.5, marginTop: 4,
+              color: 'var(--m-text-tertiary)', fontWeight: 600,
+              fontVariantNumeric: 'tabular-nums' }}>
+              기록 시작 {summary.inception.date} 대비{' '}
+              <strong className={summary.inception.change_pct >= 0 ? 'num-pos' : 'num-neg'}>
+                {summary.inception.change_pct >= 0 ? '+' : ''}{summary.inception.change_pct}%
+              </strong>
+              {!priv.on && (
+                <span style={{ marginLeft: 4 }}>
+                  ({summary.inception.change >= 0 ? '+' : '−'}
+                  {priv.won(Math.abs(summary.inception.change))})
+                </span>
+              )}
+            </div>
+          )}
+
           {/* 포트폴리오 탭의 총자산과 이 숫자가 어떻게 이어지는지 한 줄로 못박는다.
               둘이 다른 이유를 화면에서 설명하지 않으면 "수치가 안 맞는다"가 된다. */}
           {cashNow > 0 && (

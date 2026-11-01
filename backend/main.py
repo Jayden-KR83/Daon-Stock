@@ -2860,8 +2860,15 @@ def _anthropic_post(payload: dict, api_key: str, timeout: int) -> requests.Respo
     return resp
 
 
-def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout: int) -> str:
-    """Claude API 호출 — system 프롬프트로 순수 JSON 반환 강제. 429/529는 1회 자동 재시도."""
+def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout: int,
+                 return_meta: bool = False):
+    """Claude API 호출 — system 프롬프트로 순수 JSON 반환 강제. 429/529는 1회 자동 재시도.
+
+    return_meta=True 면 (text, {'stop_reason': ...}) 를 준다.
+    2026-11-01: 이 함수가 stop_reason 을 **버리고 있었다.** 길이 상한에서 잘려도
+    호출부는 알 길이 없었고, 잘린 JSON 은 파서 4단계를 전부 통과하지 못해
+    화면에는 'JSON 파싱 실패'만 떴다 — 진짜 원인(답이 길었다)은 어디에도 없었다.
+    """
     payload = {
         "model": model,
         "max_tokens": max_tokens,
@@ -2901,6 +2908,9 @@ def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout
         stop = data.get("stop_reason") or "?"
         raise HTTPException(502, "AI 응답에 본문이 없습니다 — 받은 블록: "
                                  f"{kinds} / stop_reason: {stop}. 잠시 후 다시 시도해주세요.")
+    if return_meta:
+        return texts[-1], {'stop_reason': data.get('stop_reason') or '',
+                           'usage': data.get('usage') or {}}
     return texts[-1]
 
 
@@ -2995,10 +3005,18 @@ def _parse_claude_json(text: str) -> dict:
     if m and m.group() != text:
         candidates.append(m.group())
 
+    # 선언이 '-> dict' 다. 스칼라나 리스트를 통과시키면 호출부가 전부
+    # result['x'] = ... 를 하므로 **엉뚱한 자리에서** TypeError 로 터진다.
+    # (2026-11-01 확인: 'null' 한 단어가 그대로 None 이 되어 나갔다.)
+    def _obj(v):
+        if isinstance(v, dict):
+            return v
+        raise ValueError('JSON 최상위가 객체가 아니다')
+
     for raw in candidates:
         # 시도 1: 직접 파싱
         try:
-            return json.loads(raw)
+            return _obj(json.loads(raw))
         except Exception:
             pass
 
@@ -3014,13 +3032,13 @@ def _parse_claude_json(text: str) -> dict:
                 elif in_str and ord(c) < 0x20:
                     out.append(' '); i += 1; continue
                 out.append(c); i += 1
-            return json.loads(''.join(out))
+            return _obj(json.loads(''.join(out)))
         except Exception:
             pass
 
         # 시도 3: 공격적 — 모든 제어문자 공백 치환
         try:
-            return json.loads(re.sub(r'[\x00-\x1f\x7f]', ' ', raw))
+            return _obj(json.loads(re.sub(r'[\x00-\x1f\x7f]', ' ', raw)))
         except Exception:
             pass
 
@@ -3046,11 +3064,93 @@ def _parse_claude_json(text: str) -> dict:
                             last_complete = i
                 i += 1
             if last_complete > 0:
-                return json.loads(cleaned[:last_complete + 1])
+                return _obj(json.loads(cleaned[:last_complete + 1]))
+        except Exception:
+            pass
+
+        # 시도 5: **끊긴 응답 되살리기** (2026-11-01).
+        # 시도 4 는 "완결된 최상위 객체가 어딘가에 있다"를 전제한다. 길이 상한에서
+        # 잘린 응답에는 그런 것이 없다 — depth 가 0 으로 돌아오지 않아 통째로 실패했다.
+        # 여기서는 반대로 **끝에서부터 거슬러 올라가며** 값이 온전히 끝난 지점을 찾아
+        # 거기서 자르고, 열려 있던 괄호를 닫아 준다. 뒷부분은 잃지만 앞부분은 살린다.
+        # 잃은 사실을 숨기지 않으려고 '_truncated' 를 표시해 호출부가 알리게 한다.
+        try:
+            salvaged = _salvage_truncated_json(raw)
+            if salvaged is not None:
+                return salvaged
         except Exception:
             pass
 
     raise ValueError(f"JSON 파싱 실패 (text[:80]={text[:80]!r})")
+
+
+def _salvage_truncated_json(raw: str):
+    """길이 상한에서 잘린 JSON 을 **앞부분만이라도** 살린다. 못 살리면 None.
+
+    되살린 결과에는 `_truncated: True` 를 넣는다 — 잘린 답을 완성된 답처럼
+    보여주지 않기 위해서다(🟥 AI 응답 파싱 규약). 값을 조용히 지어내지 않는다.
+    """
+    cleaned = re.sub(r'[\x00-\x1f\x7f]', ' ', raw).strip()
+    if not cleaned.startswith('{'):
+        return None
+
+    # 한 번 훑으며 "값이 온전히 끝난 지점"과 그때 열려 있던 괄호를 기록한다.
+    cuts: list[tuple[int, tuple]] = []
+    stack: list[str] = []
+    in_s = esc = False
+    for i, c in enumerate(cleaned):
+        if in_s:
+            if esc:
+                esc = False
+            elif c == '\\':
+                esc = True
+            elif c == '"':
+                in_s = False
+                cuts.append((i + 1, tuple(stack)))      # 문자열 값이 끝난 자리
+            continue
+        if c == '"':
+            in_s = True
+        elif c in '{[':
+            stack.append('}' if c == '{' else ']')
+        elif c in '}]':
+            if stack:
+                stack.pop()
+            cuts.append((i + 1, tuple(stack)))          # 객체·배열이 닫힌 자리
+    # ① 문자열 **한가운데서** 끊긴 경우 — 가장 흔하다(오너 사례 2026-11-01).
+    #    살릴 '완결된 값'이 하나도 없으므로 아래 ②로는 못 건진다.
+    #    문장을 닫아서라도 살린다. 반 토막 문장을 버리고 리포트 전체를 잃는 것보다
+    #    낫다 — 다만 말줄임표를 붙여 **읽는 사람이 잘렸음을 보게** 한다.
+    if in_s:
+        head = cleaned.rstrip()
+        if head.endswith('\\'):         # 이스케이프가 반쪽 — 떼어낸다
+            head = head[:-1]
+        candidate = head + '…"' + ''.join(reversed(stack))
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict) and obj:
+                obj['_truncated'] = True
+                return obj
+        except Exception:
+            pass
+
+    if not cuts:
+        return None
+
+    # ② 뒤에서부터 — 가장 많이 살아남는 지점이 먼저다. 과한 탐색은 막는다.
+    for cut, open_stack in reversed(cuts[-80:]):
+        frag = cleaned[:cut].rstrip()
+        frag = re.sub(r',\s*$', '', frag)                      # 매달린 쉼표
+        frag = re.sub(r',?\s*"[^"]*"\s*:\s*$', '', frag)       # 값 없는 키
+        frag = re.sub(r',\s*"[^"]*"$', '', frag)                # 콜론도 없는 키
+        candidate = frag + ''.join(reversed(open_stack))
+        try:
+            obj = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(obj, dict) and obj:
+            obj['_truncated'] = True
+            return obj
+    return None
 
 # ─── AI 인사이트 품질 가드 (결정론) ────────────────────────────────────
 # Karpathy 지식베이스 §A2(model collapse): LLM 출력은 좁은 분포로 수렴 —
@@ -6289,9 +6389,23 @@ def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_me
                       discovery_horizon=None):
     try:
         # 모델 상수는 MODEL_ANALYSIS 한 곳에서만 정한다(파일 상단 주석 참조).
-        # max_tokens 7000 → 9000: 상한일 뿐 생성한 만큼만 과금되므로 여유를 둔다.
-        text = _call_claude(api_key, MODEL_ANALYSIS, prompt, 9000, 150)
-        result = _parse_claude_json(text)
+        # max_tokens 9000 → 16000 (2026-11-01). 상한일 뿐 생성한 만큼만 과금된다.
+        # 9000 에서 실제로 잘렸다 — 리포트가 한국어라 토큰을 많이 먹는다.
+        text, meta = _call_claude(api_key, MODEL_ANALYSIS, prompt, 16000, 180,
+                                  return_meta=True)
+        try:
+            result = _parse_claude_json(text)
+        except ValueError as e:
+            # 파싱이 끝내 실패했을 때, **왜 실패했는지**를 사람이 읽을 수 있게 한다.
+            # 'JSON 파싱 실패' 만으로는 다음 행동을 고를 수 없다(🟥 규약 6번).
+            if meta.get('stop_reason') == 'max_tokens':
+                raise ValueError(
+                    "AI 답이 길이 상한에서 잘려 리포트를 만들지 못했습니다. "
+                    "계좌를 하나만 골라 분석하면 짧아집니다.") from e
+            raise
+        if meta.get('stop_reason') == 'max_tokens':
+            # 되살렸더라도 잘린 것은 잘린 것이다 — 완성된 답처럼 보여주지 않는다.
+            result['_truncated'] = True
         result['_metrics_summary'] = summary_meta
         result['verified_facts'] = verified_facts
         # 어느 모델이 쓴 리포트인지 같이 남긴다. 내보내기 문서가 모델명을 손으로
@@ -7357,6 +7471,30 @@ def get_networth_snapshots(days: int = 365, cu: dict = Depends(require_approved)
         }
     else:
         summary = {'point_count': len(snapshots)}
+
+    # 기록 시작(첫 스냅샷) 대비 — **선택한 기간과 무관하다**.
+    # 위 change_pct 는 요청한 days 구간의 변동이라, 1M 을 보는 중에는
+    # "3개월 전부터 얼마나 왔나"를 알 수 없었다. 둘은 다른 숫자이므로
+    # 이름을 나누고 기준일을 함께 보낸다(🟥 숫자 규약 1·2번).
+    #
+    # ⚠ 이것은 **수익률이 아니라 평가액 변동**이다. 입금해서 더 산 것도 올라간다.
+    #    그래서 응답에 basis 로 그 사실을 적어 화면이 그대로 쓰게 한다.
+    with _db() as conn:
+        first = conn.execute(
+            "SELECT snapshot_date, total_krw FROM net_worth_snapshots "
+            "WHERE user_id=? ORDER BY snapshot_date ASC LIMIT 1",
+            (cu['user_id'],)).fetchone()
+    if first and snapshots and (first['total_krw'] or 0) > 0:
+        base = float(first['total_krw'])
+        now_v = float(snapshots[-1]['total_krw'])
+        summary['inception'] = {
+            'date':       first['snapshot_date'],
+            'value':      first['total_krw'],
+            'change':     round(now_v - base),
+            'change_pct': round((now_v - base) / base * 100, 2),
+            'basis':      ('기록 시작일부터 지금까지의 **주식 평가액** 변동이다. '
+                           '수익률이 아니다 — 입금해서 더 산 것도 이 숫자를 올린다'),
+        }
     return {'snapshots': snapshots, 'summary': summary}
 
 
