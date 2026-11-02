@@ -2861,7 +2861,7 @@ def _anthropic_post(payload: dict, api_key: str, timeout: int) -> requests.Respo
 
 
 def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout: int,
-                 return_meta: bool = False):
+                 return_meta: bool = False, system: str | None = None):
     """Claude API 호출 — system 프롬프트로 순수 JSON 반환 강제. 429/529는 1회 자동 재시도.
 
     return_meta=True 면 (text, {'stop_reason': ...}) 를 준다.
@@ -2872,7 +2872,10 @@ def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout
     payload = {
         "model": model,
         "max_tokens": max_tokens,
-        "system": (
+        # 기본은 JSON 강제. 산문이 필요한 호출(주간 리밸런싱 알림 등)은 system 을 바꿔
+        # 넘긴다 — 2026-11-02 사고: 산문 불릿을 요청했는데 이 시스템 프롬프트가
+        # JSON 을 강제해, 알림에 ```json {...}``` 가 통째로 찍혔다.
+        "system": system if system else (
             "You are a financial analyst AI. "
             "IMPORTANT: Respond with valid JSON ONLY. "
             "Do NOT use markdown code blocks (no ```json). "
@@ -9949,6 +9952,68 @@ def cron_earnings_alerts(req: TriggerReq):
 
 
 # ─── AI 주간 리밸런싱 리포트 (cron, 주 1회) ────────────────────────
+PROSE_SYSTEM = (
+    "You are a financial analyst AI writing in KOREAN. "
+    "Respond with PLAIN TEXT bullet lines only. "
+    "Do NOT use JSON. Do NOT use markdown code blocks. Do NOT add greetings or preamble."
+)
+
+
+def _prose_from_ai_text(text: str) -> str:
+    """알림 문구로 쓸 **사람이 읽는 글**을 만든다.
+
+    2026-11-02 사고: 주간 리밸런싱 알림에 ```json {"portfolio_review": ...}``` 가
+    통째로 찍혔다. 원인은 `_call_claude` 의 시스템 프롬프트가 JSON 을 강제한 것인데,
+    그것만 고치면 **모델이 다시 JSON 을 뱉는 날** 같은 화면이 또 나온다.
+    그래서 여기서 한 번 더 막는다 — JSON 이 와도 글로 바꾼다.
+
+    규칙은 하나: **사용자에게 중괄호를 보여주지 않는다.**
+    """
+    if not text:
+        return ''
+    t = text.strip()
+    # 코드펜스 제거
+    t = re.sub(r'^```[a-zA-Z]*\s*', '', t)
+    t = re.sub(r'\s*```$', '', t).strip()
+    if not (t.startswith('{') or t.startswith('[')):
+        return t
+
+    try:
+        data = json.loads(t)
+    except Exception:
+        try:
+            data = _parse_claude_json(t)       # 잘린 JSON 도 여기서 살아난다
+        except Exception:
+            # 끝내 못 읽으면 중괄호라도 걷어내고 내보낸다
+            return re.sub(r'[{}\[\]"]', ' ', t).strip()
+
+    # 두 갈래로 모은다. '제목 + 내용' 쌍이 하나라도 있으면 **그것만** 쓴다 —
+    # 안 그러면 analysis_date·total_assets 같은 머리말이 권고보다 위에 붙는다.
+    # 알림은 권고를 읽으라고 보내는 것이지 리포트 제목을 읽으라고 보내는 게 아니다.
+    rich: list[str] = []
+    plain: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            title = node.get('title') or node.get('제목')
+            body = node.get('content') or node.get('내용') or node.get('description')
+            if title and body:
+                rich.append(f"• {title} — {body}")
+                return
+            for k, v in node.items():
+                if str(k).startswith('_'):
+                    continue
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+        elif isinstance(node, str) and node.strip():
+            plain.append(f"• {node.strip()}")
+
+    walk(data)
+    return '\n'.join(rich or plain).strip()
+
+
 def _weekly_rebalance_for_user(uid: str, api_key: str) -> int:
     """ai_enabled 사용자 1인의 포트폴리오를 조립 → Haiku로 리밸런싱 핵심 3가지 →
     notifications(info) INSERT + Web Push. 생성=1, 스킵/실패=0. 전부 격리."""
@@ -9990,12 +10055,13 @@ def _weekly_rebalance_for_user(uid: str, api_key: str) -> int:
         "\n=== 섹터 비중 ===\n" + "\n".join(sec_lines)
     )
     try:
-        text = _call_claude(api_key, MODEL_LIGHT, prompt, 700, 60)
+        text = _call_claude(api_key, MODEL_LIGHT, prompt, 700, 60,
+                            system=PROSE_SYSTEM)
     except Exception:
         return 0
-    if not text or not text.strip():
+    msg = _prose_from_ai_text(text)[:900]
+    if not msg:
         return 0
-    msg = text.strip()[:900]
     now = time()
     with _db() as conn:
         conn.execute(

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { useStore } from '../store'
 import { getPortfolioDividends } from '../api'
+import { isKrTicker } from '../utils/displayName'
 
 /**
  * 배당금 이력 + 연간 예상 — A안 무채색 + 직사각형.
@@ -39,8 +40,10 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
   const fmtKrw = (v) => {
     if (privacyMode) return '••••'
     if (!v || v === 0) return '₩0'
-    if (v >= 1e8) return `${(v / 1e8).toFixed(2)}억`
-    if (v >= 1e4) return `${Math.round(v / 1e4).toLocaleString()}만`
+    // 2026-11-02 오너 지적: '1.23억' 에는 통화 표시가 아예 없었다.
+    // 축약하더라도 **무슨 돈인지는 남긴다** — 달러 금액과 나란히 놓이는 화면이다.
+    if (v >= 1e8) return `${(v / 1e8).toFixed(2)}억 원`
+    if (v >= 1e4) return `${Math.round(v / 1e4).toLocaleString()}만 원`
     return `₩${Math.round(v).toLocaleString()}`
   }
   const byTicker = data?.by_ticker || {}
@@ -294,7 +297,13 @@ export default function DividendsCard({ allHoldings = [], usdKrw = 1380 }) {
                         color: 'var(--m-text-tertiary)', marginLeft: 5 }}>{e.ticker}</span>
                     </span>
                     <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
-                      fontVariantNumeric: 'tabular-nums' }}>${e.per_share.toFixed(2)}/주</span>
+                      fontVariantNumeric: 'tabular-nums' }}>
+                      {/* 한국 종목에 '$' 가 고정으로 붙어 있었다 — 위 보유 목록은
+                          이미 고쳐졌는데(2026-10) 이 '예정' 목록만 남아 있었다. */}
+                      {isKrTicker(e.ticker)
+                        ? `₩${Math.round(e.per_share).toLocaleString()}/주`
+                        : `$${e.per_share.toFixed(2)}/주`}
+                    </span>
                     <span style={{ fontSize: 12, fontWeight: 800,
                       color: 'var(--m-positive)',
                       fontVariantNumeric: 'tabular-nums', minWidth: 64,

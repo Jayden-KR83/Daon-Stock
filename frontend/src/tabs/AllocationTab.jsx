@@ -23,7 +23,6 @@ import { effPrice, priceableTickers, qtyUnit } from '../utils/effPrice'
 import { cashToKrw } from '../components/AccountCashCard'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import './TrendsTab.css'   // tt-ai-widget 스타일 공유 사용
-import MidtermRegimeCard from '../components/MidtermRegimeCard'
 
 function formatRelativeKo(epochSec) {
   if (!epochSec) return ''
@@ -263,7 +262,12 @@ export default function AllocationTab() {
   const [accFilter,  setAccFilter]  = useState('ALL')  // for 섹터별/종목별
   // 진단(경고·건강도) 범위. 기본은 'ALL' — 계좌 단위로만 보면 분산이 실제보다
   // 나빠 보인다(ISA에 반도체만·퇴직에 채권만이면 각각은 쏠림이지만 합치면 균형).
-  const [diagAcc,    setDiagAcc]    = useState('ALL')
+  /* 계좌 선택기는 **하나뿐이어야 한다**(2026-11-02).
+     예전엔 Ⅰ장 드롭다운이 AI 리포트를, Ⅱ장 세그먼트가 건강도·경고를 따로 바꿨다.
+     그래서 Ⅱ장에서 계좌를 골라도 AI 진단은 그대로인데 바로 위에는
+     "이 진단은 ○○ 계좌만 기준입니다"라고 적혀 있었다 — 화면이 거짓말을 했다.
+     이제 Ⅱ장 세그먼트도 strategyAcc 를 바꾸고, 그러면 그 계좌에 저장된 리포트가
+     다시 로딩된다(아래 useEffect). */
   const [expandedKey, setExpandedKey] = useState(null) // 클릭 시 펼쳐지는 그룹 키
   const [metrics,    setMetrics]    = useState(null)  // { metrics: [...], summary: {...}, computed_at, fingerprint }
   const [metricsLoading, setMetricsLoading] = useState(false)
@@ -316,8 +320,8 @@ export default function AllocationTab() {
 
   // 진단 대상 — 계좌 필터 적용본
   const diagHoldings = React.useMemo(() => (
-    diagAcc === 'ALL' ? allHoldings : allHoldings.filter(h => h.account === diagAcc)
-  ), [allHoldings, diagAcc])
+    strategyAcc === 'ALL' ? allHoldings : allHoldings.filter(h => h.account === strategyAcc)
+  ), [allHoldings, strategyAcc])
 
   // 뷰에 따른 데이터 (accFilter 적용)
   const filteredForView = React.useMemo(() => {
@@ -976,9 +980,12 @@ export default function AllocationTab() {
         </>
       )}
 
-      {/* 중기 국면 — Ⅰ장(상태)에 둔다. 진단(Ⅱ)이 아니라 '지금 서 있는 자리'다.
-          예측을 말하지 않으므로 AI 리포트 유무와 무관하게 늘 보인다. */}
-      {allHoldings.length > 0 && <MidtermRegimeCard />}
+      {/* 중기 국면 카드는 **지웠다**(2026-11-02 오너 판단).
+          "구체적인 의미를 모르겠고 매일 보지도 않을 것 같다" — 맞는 말이다.
+          분석 탭은 이미 길고, 매일 볼 것이 아닌 카드가 길이를 더했다.
+          **알림은 남겼다** — 국면이 바뀐 날에만 오므로 화면을 늘리지 않고,
+          분기에 한두 번 올 신호라 소음이 되지 않는다.
+          되살리려면 MidtermRegimeCard 를 여기에 다시 걸면 된다(컴포넌트는 남겨 뒀다). */}
 
       {/* ━━ Ⅱ. 진단 ━━
           결정론(룰 엔진) 경고를 먼저, AI 진단을 그다음에.
@@ -992,16 +999,16 @@ export default function AllocationTab() {
           {/* 진단 범위 — 계좌 단위로 좁혀 볼 수 있다 */}
           <div className="seg-ctrl" style={{ marginBottom: 8 }}>
             {['ALL', ...ACCOUNTS].map(acc => (
-              <button key={acc} className={`seg-btn ${diagAcc === acc ? 'active' : ''}`}
-                onClick={() => setDiagAcc(acc)}>
+              <button key={acc} className={`seg-btn ${strategyAcc === acc ? 'active' : ''}`}
+                onClick={() => setStrategyAcc(acc)}>
                 {acc === 'ALL' ? '전체' : (ACC_LABELS[acc] || acc)}
               </button>
             ))}
           </div>
-          {diagAcc !== 'ALL' && (
+          {strategyAcc !== 'ALL' && (
             <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
               lineHeight: 1.6, marginBottom: 10 }}>
-              <div>이 진단은 <strong>{ACC_LABELS[diagAcc] || diagAcc}</strong> 계좌만 기준입니다.</div>
+              <div>이 진단은 <strong>{ACC_LABELS[strategyAcc] || strategyAcc}</strong> 계좌만 기준입니다.</div>
               <div>계좌 하나만 보면 분산이 실제보다 나빠 보일 수 있습니다 — 전체 기준도 함께 확인하세요.</div>
             </div>
           )}
@@ -1030,9 +1037,9 @@ export default function AllocationTab() {
             <>
               {/* 건강도 = 한 줄 배지. 점수 자체는 행동을 지시하지 못하므로 축약하고,
                   실제 행동은 바로 아래 경고에서 나온다. */}
-              <HealthScoreCard key={`h-${diagAcc}`} compact
+              <HealthScoreCard key={`h-${strategyAcc}`} compact
                 allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
-              <AlertsCard key={`a-${diagAcc}`}
+              <AlertsCard key={`a-${strategyAcc}`}
                 allHoldings={diagHoldings} prices={prices} usdKrw={usdKrw} />
             </>
           )}
@@ -1570,7 +1577,7 @@ function LensViews({ lens }) {
   return (
     <div className="mono-card" style={{ marginBottom: 12 }}>
       <div className="mono-section-title is-accent" style={{ marginBottom: 2 }}>
-        같은 수치, 세 가지 관점
+        투자 유형별 분석
       </div>
       <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
         lineHeight: 1.6, marginBottom: 10 }}>
