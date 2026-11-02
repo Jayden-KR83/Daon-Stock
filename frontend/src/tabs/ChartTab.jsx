@@ -134,6 +134,7 @@ function aggregateOHLC(daily, level) {
       ma20:   last.ma20,
       ma60:   last.ma60,
       ma120:  last.ma120,
+      ma200:  last.ma200,
       rsi:    last.rsi,
     }
   })
@@ -169,6 +170,7 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
     maVis?.ma20 && d.ma20,
     maVis?.ma60 && d.ma60,
     maVis?.ma120 && d.ma120,
+    maVis?.ma200 && d.ma200,
   ].filter(v => v != null && v > 0))
   if (!allPrices.length) return <div ref={containerRef} style={{ height }} />
 
@@ -231,7 +233,9 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
     return v.toFixed(0)
   }
 
-  const MA_COLORS = { ma20: '#F59E0B', ma60: '#10B981', ma120: '#8B5CF6' }
+  // 200 일선은 전 세계 공통 추세선이고 중기 국면 판정도 이것을 쓴다(backend/midterm.py).
+  // 단기선(20·60)보다 차분한 색으로 둬서 '배경 추세'처럼 읽히게 한다.
+  const MA_COLORS = { ma20: '#F59E0B', ma60: '#10B981', ma120: '#8B5CF6', ma200: '#64748B' }
 
   /* ── 드래그 줌: SVG 좌표 → 데이터 인덱스 변환 ── */
   const xToIndex = (x) => {
@@ -420,7 +424,7 @@ export default function ChartTab() {
   const [searchQ,      setSearchQ]      = useState('')
   const [showDrop,     setShowDrop]     = useState(false)
   const [alertSheetOpen, setAlertSheetOpen] = useState(false)
-  const [maVis,        setMaVis]        = useState({ ma20: true, ma60: true, ma120: false })
+  const [maVis,        setMaVis]        = useState({ ma20: true, ma60: true, ma120: false, ma200: true })
   const [rangeOpt,     setRangeOpt]     = useState('1Y')  // 기본 1Y (전체 데이터는 5Y까지)
   const [scaleOpt,     setScaleOpt]     = useState('D')   // 'D' | 'W' | 'M' — 캔들 집계 단위
   const [zoomRange,    setZoomRange]    = useState(null)  // null 또는 [startIdx, endIdx] (집계된 데이터 기준)
@@ -802,7 +806,7 @@ export default function ChartTab() {
               </div>
               {/* 이동평균 */}
               <div className="seg-ctrl" style={{ flex: 'none' }}>
-                {[['ma20','MA20'],['ma60','MA60'],['ma120','MA120']].map(([k, label]) => (
+                {[['ma20','MA20'],['ma60','MA60'],['ma120','MA120'],['ma200','MA200']].map(([k, label]) => (
                   <button key={k} className={`seg-btn ${maVis[k] ? 'active' : ''}`}
                     onClick={() => setMaVis(p => ({ ...p, [k]: !p[k] }))}>{label}</button>
                 ))}
@@ -869,7 +873,18 @@ export default function ChartTab() {
           {/* RSI */}
           {hist.some(d => d.rsi != null) && (
             <div className="chart-card">
-              <div className="chart-sub-title">RSI (14)</div>
+              <div className="chart-sub-title">
+                RSI (14)
+                {/* 계산 방식을 밝힌다 — 2026-11-02 이전에는 단순이동평균 버전이라
+                    증권사 앱과 값이 달랐다. 지금은 표준(Wilder)이고, 그 사실을
+                    화면이 서버가 준 값으로 말한다(🟥 숫자 규약: 기준을 함께 준다). */}
+                {stockData?.indicator_basis?.rsi_method && (
+                  <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 600,
+                    color: 'var(--clr-text-muted)' }}>
+                    {String(stockData.indicator_basis.rsi_method).split('—')[0].trim()}
+                  </span>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={90}>
                 <ComposedChart data={hist} margin={{ top: 4, right: 52, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />

@@ -872,6 +872,7 @@ KOSPI_SECTOR_ETFS = {
 from sectors import (KR_ETF_SECTOR, US_ETF_SECTOR, SECTOR_GROUPS,
                      LABEL_TO_GROUP, LEGACY_ALIASES, USD_EXPOSED_KR_ETF,
                      sector_group, labels_by_group, unknown_labels, currency_of)
+from indicators import attach_indicators, INDICATOR_BASIS
 from midterm import (midterm_regime, portfolio_regime, MIDTERM_BASIS,
                      change_trigger, flip_requirement)
 
@@ -1338,17 +1339,9 @@ def _chart_to_full(ticker: str, res: dict) -> dict | None:
         }, index=pd.to_datetime(ts, unit='s'))
         df = df.dropna(subset=['close'])
 
-        # Moving averages
-        df['ma20']  = df['close'].rolling(20).mean()
-        df['ma60']  = df['close'].rolling(60).mean()
-        df['ma120'] = df['close'].rolling(120).mean()
-
-        # RSI
-        delta = df['close'].diff()
-        gain  = delta.where(delta > 0, 0).rolling(14).mean()
-        loss  = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        df['rsi'] = 100 - (100 / (1 + gain / loss.replace(0, np.nan)))
-
+        # 이동평균·RSI 는 backend/indicators.py 정본이 계산한다.
+        # 2026-11-02 이전에는 여기와 _kr_history 에 **같은 식이 복붙**돼 있었고,
+        # RSI 가 단순이동평균 버전이라 증권사 앱·트레이딩뷰와 값이 달랐다.
         hist_data = []
         for idx, row in df.iterrows():
             hist_data.append({
@@ -1358,11 +1351,8 @@ def _chart_to_full(ticker: str, res: dict) -> dict | None:
                 'low':    _f(row['low']),
                 'close':  _f(row['close']),
                 'volume': int(row['volume']) if not _nan(row['volume']) else None,
-                'ma20':   _f(row['ma20']),
-                'ma60':   _f(row['ma60']),
-                'ma120':  _f(row['ma120']),
-                'rsi':    _f(row['rsi'], 2),
             })
+        attach_indicators(hist_data)
 
         cur  = _f(df['close'].iloc[-1])
         prev = _f(df['close'].iloc[-2]) if len(df) > 1 else cur
@@ -3620,20 +3610,13 @@ def _kr_history(ticker: str) -> list | None:
             df = df.dropna(subset=['close'])
             if len(df) < 5:
                 continue
-            df['ma20']  = df['close'].rolling(20).mean()
-            df['ma60']  = df['close'].rolling(60).mean()
-            df['ma120'] = df['close'].rolling(120).mean()
-            delta = df['close'].diff()
-            gain  = delta.where(delta > 0, 0).rolling(14).mean()
-            loss  = (-delta.where(delta < 0, 0)).rolling(14).mean()
-            df['rsi'] = 100 - (100 / (1 + gain / loss.replace(0, np.nan)))
-            return [{'date':   str(idx)[:10],
+            # 지표는 indicators.py 정본이 붙인다 — 미국 경로와 같은 식이어야 한다
+            rows = [{'date':   str(idx)[:10],
                      'open':   _f(row['open']),   'high':   _f(row['high']),
                      'low':    _f(row['low']),    'close':  _f(row['close']),
-                     'volume': int(row['volume']) if not _nan(row['volume']) else None,
-                     'ma20':   _f(row['ma20']),   'ma60':   _f(row['ma60']),
-                     'ma120':  _f(row['ma120']),  'rsi':    _f(row['rsi'], 2)}
+                     'volume': int(row['volume']) if not _nan(row['volume']) else None}
                     for idx, row in df.iterrows()]
+            return attach_indicators(rows)
         except Exception:
             pass
     return None
@@ -5282,7 +5265,9 @@ def get_stock(ticker: str):
     etf = _etf_top_holdings(ticker.upper())
     if etf:
         d = {**d, 'etf_holdings': etf}
-    return {**d, '_data_status': 'ok', '_data_message': None}
+    # 지표를 어떤 식으로 뽑았는지 같이 보낸다 — 화면이 "RSI 14" 를 손으로 적지 않는다
+    return {**d, '_data_status': 'ok', '_data_message': None,
+            'indicator_basis': dict(INDICATOR_BASIS)}
 
 @app.get("/api/stock/{ticker}/price")
 def get_price(ticker: str):
