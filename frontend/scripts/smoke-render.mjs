@@ -24,7 +24,19 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage()
 const errs = []
 page.on('pageerror', e => errs.push('pageerror: ' + String(e.message).slice(0, 200)))
-page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text().slice(0, 200)) })
+// 서비스워커가 **활성화되기 전**에 스쳐 지나가는 프리캐시 404 는 세지 않는다.
+// 404 를 통째로 무시하면 진짜 깨진 자원을 놓친다(미탐) — 그래서 범위를 좁힌다:
+//   · swActive 가 true 가 된 뒤의 404 는 그대로 실패로 센다
+//   · 설치가 끝난 자원이 정말 빠졌는지는 배포 5단계의 **프리캐시 전수 검사**가
+//     따로 본다(거기서는 36건 전부 200 이어야 한다)
+let swActive = false
+const INSTALL_NOISE = /Failed to load resource: the server responded with a status of 404/
+page.on('console', m => {
+  if (m.type() !== 'error') return
+  const t = m.text()
+  if (!swActive && INSTALL_NOISE.test(t)) return
+  errs.push('console: ' + t.slice(0, 200))
+})
 
 try {
   await page.goto(BASE + '/', { waitUntil: 'networkidle', timeout: 60000 })
@@ -55,11 +67,27 @@ try {
   console.log('  OK  탭 ' + names.length + '개 전환')
 
   // 서비스워커가 실제로 활성화되는가 (프리캐시 404 사고의 직접 지표)
-  const sw = await page.evaluate(async () => {
-    const r = await navigator.serviceWorker.getRegistration('/')
-    return r ? (r.active ? 'active' : (r.installing?.state || r.waiting?.state || 'none')) : 'none'
-  })
-  if (sw !== 'active') fail('서비스워커가 활성화되지 않았다 (' + sw + ') — PWA 가 깨진다')
+  //
+  // ⚠ **기다려야 한다**(2026-11-02). 예전엔 한 번 물어보고 끝냈는데, 이 검사는
+  //    늘 **빈 프로필의 새 브라우저**로 돈다 — 배포 직후에는 서비스워커가 아직
+  //    installing 이고 프리캐시를 받는 중이다. 그 순간을 보고 "PWA 가 깨졌다"고
+  //    신고했고, 그 바람에 **멀쩡한 배포가 실패로 끝났다**(실제로 두 번).
+  //    검사기가 거짓 신고를 반복하면 다음 사람이 그 검사를 지운다 — 그게 더 큰 손해다.
+  //    20초까지 기다리고, 그래도 안 되면 그때는 진짜 고장이다.
+  const swDeadline = Date.now() + 20000
+  let sw = 'none'
+  while (Date.now() < swDeadline) {
+    sw = await page.evaluate(async () => {
+      const r = await navigator.serviceWorker.getRegistration('/')
+      if (!r) return 'none'
+      if (r.active) return 'active'
+      return r.installing?.state || r.waiting?.state || 'none'
+    })
+    if (sw === 'active') break
+    await page.waitForTimeout(500)
+  }
+  swActive = (sw === 'active')
+  if (!swActive) fail('서비스워커가 20초 안에 활성화되지 않았다 (' + sw + ') — PWA 가 깨진다')
   else console.log('  OK  서비스워커 활성')
 
   // 하단 네비 가로 끌기 — 2026-10-12 사고: touch-action:pan-y 가 남아 있어

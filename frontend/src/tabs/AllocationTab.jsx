@@ -318,6 +318,12 @@ export default function AllocationTab() {
     return cashByAccount[accFilter] || 0
   }, [cashByAccount, accFilter])
 
+  /* ⚠️ strategyAcc 선언은 반드시 **diagHoldings 보다 위**에 둔다.
+     아래로 내리면 렌더 중 TDZ ReferenceError 가 나서 분석 탭이 통째로 백지가 된다
+     (2026-11-02 실제 발생 — 배포 스모크가 잡았다. 빌드·테스트는 전부 통과한다).
+     같은 사고가 2026-08-24 strategyComputedAt 에서도 있었다. */
+  const [strategyAcc, setStrategyAcc] = useState('ALL')
+
   // 진단 대상 — 계좌 필터 적용본
   const diagHoldings = React.useMemo(() => (
     strategyAcc === 'ALL' ? allHoldings : allHoldings.filter(h => h.account === strategyAcc)
@@ -435,7 +441,6 @@ export default function AllocationTab() {
   const [strategyReport, setStrategyReport] = useState(null)
   const [strategyLoading, setStrategyLoading] = useState(false)
   const [strategyErr, setStrategyErr] = useState('')
-  const [strategyAcc, setStrategyAcc] = useState('ALL')
   const [strategyComputedAt, setStrategyComputedAt] = useState(0)  // epoch seconds
   // 리포트가 며칠 지났나 — 갱신 권장 표시용. 0 이면 '없음'.
   // ⚠️ 반드시 strategyComputedAt 선언 **뒤**에 둔다. 위로 올리면 렌더 중 TDZ

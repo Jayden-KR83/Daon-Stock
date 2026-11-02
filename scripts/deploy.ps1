@@ -31,6 +31,51 @@ if (-not (Test-Path (Join-Path $STATIC "index.html"))) {
 }
 Write-Host "[ 0/4 ] React 빌드 확인 OK" -ForegroundColor Green
 
+# ── 0b. 올리기 전에 로컬에서 띄워 본다 (2026-11-02 사고) ──
+# 그날 변수 선언 하나를 사용처 아래로 옮겼더니 분석 탭이 렌더 중 TDZ ReferenceError 로
+# 통째로 백지가 됐다. **빌드도 pytest 468건도 전부 통과했다** — 실행해야만 보이는 종류다.
+# 5단계 렌더 검사가 잡아 주긴 했지만, 그때는 이미 **운영에 올라간 뒤**였다.
+# 그래서 같은 검사를 올리기 **전에** 로컬 서버로 한 번 돌린다. 여기서 깨지면 배포를 안 한다.
+if (-not $env:DAON_SKIP_PRECHECK) {
+    Write-Host "[ 0b/4 ] 올리기 전 로컬 렌더 검사..." -ForegroundColor Yellow
+    $port = 8611
+    $py = Join-Path $APP_DIR "scripts\_predeploy_serve.py"
+    $proc = $null
+    try {
+        $proc = Start-Process -FilePath "python" -ArgumentList @($py, "$port") `
+                    -WorkingDirectory $BACKEND -PassThru -WindowStyle Hidden
+        $up = $false
+        foreach ($i in 1..30) {
+            Start-Sleep -Milliseconds 700
+            try {
+                $r = Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200) { $up = $true; break }
+            } catch { }
+        }
+        if (-not $up) {
+            Write-Host "  경고: 로컬 서버가 뜨지 않아 사전 검사를 건너뛴다" -ForegroundColor Yellow
+        } else {
+            Push-Location (Join-Path $APP_DIR 'frontend')
+            try {
+                $out = & node scripts\smoke-render.mjs "http://127.0.0.1:$port" 2>&1
+                $out | ForEach-Object { Write-Host "    $_" }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "  FAIL  올리기 전 검사에서 깨졌다 — 배포하지 않는다" -ForegroundColor Red
+                    Pop-Location
+                    if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+                    exit 1
+                }
+            } catch {
+                Write-Host "  경고: 사전 렌더 검사를 건너뛴다(playwright 미설치?)" -ForegroundColor Yellow
+            } finally { Pop-Location }
+        }
+    } finally {
+        if ($proc -and -not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 # ── 1. 서버 디렉터리 준비 ──
 Write-Host "[ 1/4 ] 서버 디렉터리 준비 중..." -ForegroundColor Yellow
 Invoke-Expression "$SSH $SERVER 'mkdir -p ~/portfolio/backend/static/assets'"
