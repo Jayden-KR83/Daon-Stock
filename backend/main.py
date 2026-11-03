@@ -3814,11 +3814,26 @@ def _sector_kr() -> list:
                             'weight': weight})
     return sorted(results, key=lambda x: -x['weight'])
 
+# 시장 탭 뉴스에 쓰는 대표 종목.
+# 2026-11-03 오너 지적: "왜 미국 기사만 있어? 국장은?" — 맞다. 미국 심볼
+# 네 개(QQQ·NVDA·MSFT·SPY)만 조회하고 있었다. 다온은 한·미를 같이 보는 앱인데
+# 시장 화면의 뉴스는 반쪽이었다.
+NEWS_US_SYMBOLS = ['QQQ', 'NVDA', 'MSFT', 'SPY']
+NEWS_KR_TICKERS = ['005930', '000660', '373220']   # 삼성전자·SK하이닉스·LG에너지솔루션
+
+
 @ttl_cache(3600)
 def _tech_news() -> list:
-    """야후 파이낸스 v1 search API 직접 호출 — yfinance 타임아웃 없는 hang 방지."""
-    news, seen = [], set()
-    for sym in ['QQQ', 'NVDA', 'MSFT', 'SPY']:
+    """시장 탭 뉴스 — **한국과 미국을 섞는다.**
+
+    미국은 야후 파이낸스 search API, 한국은 네이버 금융(`_naver_news`) 이다.
+    한쪽 소스가 죽어도 다른 쪽은 나오도록 각각 격리한다.
+    섞는 방식은 **번갈아**다 — 앞에서 자르면 한쪽이 통째로 밀린다.
+    `market` 필드로 어느 시장인지 밝혀 화면이 표시할 수 있게 한다.
+    """
+    us, kr, seen = [], [], set()
+
+    for sym in NEWS_US_SYMBOLS:
         try:
             url = (f'https://query1.finance.yahoo.com/v1/finance/search'
                    f'?q={sym}&quotesCount=0&newsCount=4&enableFuzzyQuery=false')
@@ -3831,48 +3846,78 @@ def _tech_news() -> list:
                 pub   = n.get('publisher', '')
                 if title and title not in seen and link:
                     seen.add(title)
-                    news.append({'title': title, 'link': link, 'publisher': pub})
+                    us.append({'title': title, 'link': link,
+                               'publisher': pub, 'market': 'US'})
         except Exception:
             pass
-    return news[:10]
 
-@ttl_cache(3600)
-@ttl_cache(900)  # 15분 캐시
+    for tkr in NEWS_KR_TICKERS:
+        try:
+            for n in (_naver_news(tkr) or []):
+                title = n.get('title', '')
+                link  = n.get('link', '')
+                if title and title not in seen and link:
+                    seen.add(title)
+                    kr.append({'title': title, 'link': link,
+                               'publisher': n.get('publisher', '') or '네이버 금융',
+                               'market': 'KR'})
+        except Exception:
+            pass
+
+    # 번갈아 담는다 — 한쪽이 비면 남은 쪽으로 채워진다
+    out = []
+    for i in range(max(len(kr), len(us))):
+        if i < len(kr):
+            out.append(kr[i])
+        if i < len(us):
+            out.append(us[i])
+    return out[:10]
+
+# 2026-11-03: 데코레이터가 **두 겹**이었다(@ttl_cache(3600) 위에 @ttl_cache(900)).
+# 바깥 1시간 캐시가 안쪽을 감싸 15분 캐시는 한 번도 일하지 않았고, 주석만
+# "15분"이라고 적혀 있었다 — 이름이 거짓말을 하면 아무도 의심하지 않는다.
+@ttl_cache(900)   # 15분
 def _naver_news(ticker: str) -> list:
-    """네이버 금융 종목 뉴스 스크래핑 — 한국 주식/ETF용 한국어 뉴스."""
+    """한국 종목 뉴스 — 네이버 **모바일 JSON API**.
+
+    2026-11-03: 옛 경로(`finance.naver.com/item/news_news.naver`)가 **HTTP 410 Gone**
+    이었다. 네이버가 폐지한 것이다. 함수는 예외를 삼키고 **빈 리스트**를 돌려줬고,
+    화면은 "뉴스 없음"으로 보였다 — 조용히 죽어 있었고 아무도 몰랐다.
+    (2026-10-30 의 거래량 목록과 **같은 종류의 고장**이다. 그때도 SPA 전환으로
+     스크래핑이 죽었고 모바일 JSON API 로 옮겨서 살렸다.)
+
+    ⚠ 코드는 **A접두 없이** 보내야 한다 — 'A005930' 으로 부르면 200 에 빈 배열이 온다.
+    """
     news = []
     try:
-        code = kr_code(ticker)
-        url = f'https://finance.naver.com/item/news_news.naver?code={code}&page=1&clusterId='
-        headers = {
-            'User-Agent': 'Mozilla/5.0',
-            'Referer': f'https://finance.naver.com/item/news.naver?code={code}',
-        }
-        r = _session.get(url, headers=headers, timeout=6)
+        code = kr_code(ticker)        # A접두 제거가 여기서 일어난다
+        url = (f'https://m.stock.naver.com/api/news/stock/{code}'
+               f'?pageSize=6&page=1')
+        r = _session.get(url, timeout=6)
         if r.status_code != 200:
             return news
-        r.encoding = 'euc-kr'
-        soup = BeautifulSoup(r.text, 'html.parser')
-        rows = soup.select('table.type5 tr')
-        for tr in rows:
-            a = tr.select_one('td.title a')
-            info_cells = tr.select('td.info')
-            date_cell  = tr.select_one('td.date')
-            if not a:
-                continue
-            title = a.get('title') or a.get_text(strip=True)
-            href  = a.get('href') or ''
-            if not title or not href:
-                continue
-            if not href.startswith('http'):
-                href = 'https://finance.naver.com' + href
-            publisher = info_cells[0].get_text(strip=True) if info_cells else '네이버 금융'
-            date_str = date_cell.get_text(strip=True)[:10].replace('.', '-') if date_cell else ''
-            if title in {x['title'] for x in news}:
-                continue
-            news.append({'title': title, 'link': href, 'publisher': publisher, 'date': date_str})
-            if len(news) >= 6:
-                break
+        data = r.json()
+        # 응답은 [{total, items:[...]}, ...] 묶음 형태다
+        groups = data if isinstance(data, list) else [data]
+        for g in groups:
+            for it in (g or {}).get('items', []):
+                title = (it.get('title') or '').strip()
+                office = it.get('officeId') or ''
+                art = it.get('articleId') or ''
+                if not title or not office or not art:
+                    continue
+                title = re.sub(r'<[^>]+>', '', title)      # 굵게 표시 태그 제거
+                if title in {x['title'] for x in news}:
+                    continue
+                dt = str(it.get('datetime') or '')
+                news.append({
+                    'title': title,
+                    'link': f'https://n.news.naver.com/mnews/article/{office}/{art}',
+                    'publisher': it.get('officeName') or '네이버 금융',
+                    'date': f'{dt[0:4]}-{dt[4:6]}-{dt[6:8]}' if len(dt) >= 8 else '',
+                })
+                if len(news) >= 6:
+                    return news
     except Exception:
         pass
     return news

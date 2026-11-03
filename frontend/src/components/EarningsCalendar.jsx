@@ -191,9 +191,11 @@ export default function EarningsCalendar() {
                                   ? ` · EPS 컨센 ${e.eps_estimate.toFixed(2)}` : ''}`}
                                 style={{ cursor: 'pointer', display: 'flex',
                                   flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                {/* 보유 표시용 색 테두리를 뺐다(2026-11-03 오너: "촌스러워").
+                                    잃는 정보는 없다 — 보유 여부는 **불투명도·글자색·툴팁**
+                                    세 가지가 이미 말하고 있다. */}
                                 <div style={{ lineHeight: 0, borderRadius: '50%',
-                                  border: e.held ? '2px solid var(--m-primary)' : '1.5px solid transparent',
-                                  opacity: e.held ? 1 : 0.7 }}>
+                                  opacity: e.held ? 1 : 0.55 }}>
                                   <LogoCircle ticker={e.ticker} size={sz} />
                                 </div>
                                 {showText && (
