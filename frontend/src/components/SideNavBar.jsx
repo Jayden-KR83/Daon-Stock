@@ -3,25 +3,24 @@ import { displayNameOf } from '../utils/userName'
 import { useStore } from '../store'
 import './SideNavBar.css'
 
-// 순서: 포트폴리오 · 분석 · 종목 · 관심 · 발굴 | 시장 · 등록 · 설정 · 가이드 · 여정
+/* 2026-11-03 네비 재편 — **하단 바(모바일)와 같은 구조**로 맞춘다.
+ *
+ * 전에는 여기만 옛 구조(포트폴리오·분석·종목…)로 남아 있었다. 오너가 PC 웹으로
+ * 보는데 모바일만 고쳐 놓고 "반영됐다"고 한 것이다 — 리스크 목록에 'SideNavBar 도
+ * 같이' 라고 적어 두고 빠뜨렸다.
+ *
+ * 주 5개: 계좌 · 관심 · 발굴 · 시장 · 설정
+ * 구분선 아래 '바로가기': 분석 · 종목 · 등록 · 가이드
+ *   — 모바일에서는 각자의 진입점(계좌의 분석 버튼, 설정의 등록 등)으로 들어가지만,
+ *     데스크톱은 폭이 넉넉하므로 길을 하나 더 열어 둔다. 숨기는 것이 목적이 아니라
+ *     **주/부를 가르는 것**이 목적이다.
+ */
 const SIDE_TABS = [
   {
-    label: '포트폴리오', idx: 0,
+    label: '계좌', idx: 0,
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="7" width="20" height="14" rx="1"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
       <line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/>
-    </svg>
-  },
-  {
-    label: '분석', idx: 2,
-    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>
-    </svg>
-  },
-  {
-    label: '종목', idx: 3,
-    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
     </svg>
   },
   {
@@ -37,17 +36,10 @@ const SIDE_TABS = [
       <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
     </svg>
   },
-  { type: 'divider' },
   {
     label: '시장', idx: 4,
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
-    </svg>
-  },
-  {
-    label: '등록', idx: 5,
-    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
     </svg>
   },
   {
@@ -57,12 +49,32 @@ const SIDE_TABS = [
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
     </svg>
   },
+  { type: 'divider' },
+  {
+    label: '분석', idx: 2,
+    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>
+    </svg>
+  },
+  {
+    label: '종목', idx: 3,
+    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+    </svg>
+  },
+  {
+    label: '등록', idx: 5,
+    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+    </svg>
+  },
   {
     label: '가이드', idx: 7,
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
     </svg>
   },
+  { type: 'divider' },
   {
     label: '여정', idx: 8, adminOnly: true,
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
