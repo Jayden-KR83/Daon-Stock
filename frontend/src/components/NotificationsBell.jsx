@@ -361,6 +361,7 @@ const KIND_META = {
   plunge: { label: '급락',   cls: 'sev-label is-high' },
   info:     { label: '안내', cls: 'sev-label is-med' },
   earnings: { label: '실적', cls: 'sev-label is-med' },   // 실적발표 전날 cron
+  strategy: { label: '분석', cls: 'sev-label is-med' },   // AI 전략 리포트 완료·실패
   midterm:  { label: '중기', cls: 'sev-label is-med' },   // 중기 국면이 바뀐 날만 — 방향이 아니라 '무엇이 바뀌면 생각을 바꾸나'를 말한다
 }
 

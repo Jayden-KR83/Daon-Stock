@@ -6418,6 +6418,46 @@ def _discovery_candidates_by_horizon(limit: int = 6) -> dict:
 _strategy_jobs = {}              # cache_key -> 'running' | {'error': msg}
 _strategy_jobs_lock = Lock()
 
+def _notify_strategy_done(user_id: str, scope: str, result, error: str | None = None):
+    """전략 리포트 생성이 끝났음을 알린다 (2026-11-03 오너 요청).
+
+    왜 필요한가: 이 작업은 **1~3분** 걸린다. 그 사이 사용자는 다른 탭으로 가거나
+    앱을 닫는다 — 돌아와서 화면을 열기 전에는 끝난 줄 모른다.
+    (서버는 백그라운드로 계속 만들고, 프런트의 strategyJob 이 폴링해 결과를 받지만,
+     **앱이 닫혀 있으면 받을 곳이 없다.** 그래서 알림이 필요하다.)
+
+    인앱 알림 + Web Push 둘 다. 전체를 격리한다 — 알림이 실패해도 리포트는 남는다.
+    """
+    try:
+        label = '전체 계좌' if (scope or 'ALL') == 'ALL' else scope
+        if error:
+            msg = f"[분석] {label} 전략 리포트 실패 — {error}"
+            title = '다온 AI 분석 실패'
+        else:
+            # 첫 문장을 미리 보여 준다 — 열지 않고도 무슨 얘긴지 안다.
+            head = ''
+            for k in ('expert_review', 'risk_diagnosis', 'diagnosis'):
+                v = (result or {}).get(k)
+                if isinstance(v, str) and v.strip():
+                    head = _first_sentence(v.strip())
+                    break
+            cut = ' (뒷부분 잘림)' if (result or {}).get('_truncated') else ''
+            msg = f"[분석] {label} 전략 리포트가 준비됐습니다{cut}."
+            if head:
+                msg += f"\n{head}"
+            title = '다온 AI 분석 완료'
+        now = time()
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO notifications (user_id, ticker, name, kind, message, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (user_id, '', 'AI 전략 분석', 'strategy', msg[:900], now))
+        # 같은 tag — 여러 번 돌려도 알림이 쌓이지 않고 마지막 것으로 교체된다
+        _send_push(user_id, title, msg.split('\n')[0][:110], '/', tag='strategy-done')
+    except Exception:
+        pass
+
+
 def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_meta, verified_facts,
                       discovery_horizon=None):
     try:
@@ -6458,6 +6498,7 @@ def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_me
             pass
         with _strategy_jobs_lock:
             _strategy_jobs.pop(cache_key, None)
+        _notify_strategy_done(user_id, scope, result)
     except Exception as e:
         # str(e) 만 쓰면 KeyError 가 'text' 처럼 한 단어로 화면에 뜬다(2026-10-11).
         # 사람이 읽고 조치할 수 있게 예외 종류를 같이 남긴다.
@@ -6466,6 +6507,10 @@ def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_me
             detail = f"{type(e).__name__}: {detail}" if detail else type(e).__name__
         with _strategy_jobs_lock:
             _strategy_jobs[cache_key] = {'error': (detail[:140] or 'AI 분석 실패')}
+        # 실패도 알린다 — 1~3분을 기다리는 기능이라, 조용히 끝나면 사용자는
+        # 언제까지 기다려야 하는지 알 수 없다.
+        _notify_strategy_done(user_id, scope, None,
+                              error=(detail[:140] or 'AI 분석 실패'))
 
 @app.get("/api/portfolio/strategy/poll")
 def portfolio_strategy_poll(fp: str, scope: str = 'ALL', cu: dict = Depends(get_current_user)):
