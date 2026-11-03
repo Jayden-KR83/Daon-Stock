@@ -138,9 +138,19 @@
 /* 이름이 두 줄까지 펴지려면 폭이 필요하다. 보조 식별자를 감춰 번 자리에 더해,
    스파크라인 칸을 조금 양보받아 이름 칸을 넓힌다(스파크라인은 추세만 보면 되므로
    폭이 줄어도 정보 손실이 작다). */
+/* 모바일(앱) 행은 **4열**이다 — 스파크라인 열을 접었다(2026-11-03).
+   실측(390px): 아바타 38 · 이름 94 · 스파크 40 · 값 124 · 액션 30.
+   이름이 94px 뿐이라 긴 종목명이 두 줄로 접히는데, 그 옆 40px 스파크라인은
+   **읽을 수 없는 크기**였다(원래 72px 를 요청하지만 0.55fr 로 눌린다).
+   게다가 같은 정보(오늘 등락)가 바로 아래 메타에 '오늘 +1.2%' 로 이미 글자로 있다.
+   → 접고 그 폭을 이름에 준다. 데스크톱은 폭이 넉넉하므로 그대로 둔다. */
 .app-mode-app .holding-row {
-  grid-template-columns: 38px minmax(0, 1.75fr) minmax(40px, 0.55fr) auto auto;
+  grid-template-columns: 38px minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "avatar identity value   actions"
+    "avatar meta     pnl     actions";
 }
+.app-mode-app .holding-row > .h-spark { display: none; }
 .app-mode-app .holding-row > .h-identity {
   display: block;          /* flex baseline 이면 줄바꿈 상자가 만들어지지 않는다 */
   overflow: hidden;
