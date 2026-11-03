@@ -14,6 +14,7 @@ export default function ManageTab() {
   const qc = useQueryClient()
   const usdKrw       = useStore(s => s.usdKrw)
   const currentUser  = useStore(s => s.currentUser)
+  const setActiveTab = useStore(s => s.setActiveTab)
   const setAuth      = useStore(s => s.setAuth)
   const { accounts: dynAccounts } = useAccounts()
 
@@ -34,6 +35,22 @@ export default function ManageTab() {
       {/* 2026-10-11: 관리자 기능(분석 관리·API 키·사용자 목록·관리자 모드)은 전부
           관리자 탭으로 옮겼다. 설정 탭은 '내 설정'만 담는다 — 두 탭에 같은 기능이
           흩어져 있으면 어디서 고쳐야 하는지 매번 헷갈린다(실측: 겹친 API 호출 3개). */}
+
+      {/* 종목 등록으로 가는 길 (2026-11-03 네비 재편 — '등록'을 설정에 합쳤다).
+          등록은 가끔 쓰는 기능이라 하단 바 한 칸을 차지할 이유가 없다.
+          단 **길이 사라지면 안 되므로** 설정 첫 줄에 둔다. */}
+      <button
+        onClick={() => setActiveTab(5)}
+        style={{
+          width: '100%', marginBottom: 12, padding: '12px 14px', borderRadius: 4,
+          border: '1px solid var(--clr-border)', background: 'var(--clr-surface)',
+          color: 'var(--clr-text-strong)', fontFamily: 'inherit',
+          fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+        <span>종목 등록 · 증권사 파일 가져오기</span>
+        <span style={{ color: 'var(--clr-accent)', fontSize: 12, fontWeight: 800 }}>›</span>
+      </button>
 
       {/* 2단계 인증 — 로그인 잠금(무차별 대입 차단)과 짝이 되는 계정 방어선 */}
       {currentUser && <TwoFactorCard />}

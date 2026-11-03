@@ -84,19 +84,36 @@ const icons = {
  * 이제 활성 탭이 바뀌면 스트립이 그 탭을 가운데로 스크롤해, 안 보였던 탭이 자연히 드러난다.
  * '전체' 버튼은 스크롤 밖에 고정해 5칸 고정이 노렸던 발견성도 유지한다. */
 // adminOnly 는 관리자만 노출
+/* 2026-11-03 네비 재편 (오너 안).
+ *
+ * **탭 번호(idx)는 절대 바꾸지 않는다.** RightPanel·SideNavBar·store 가 숫자를
+ * 하드코딩하고 있어서 순서를 바꾸면 조용히 다른 화면이 열린다. 바뀐 것은
+ * **라벨과 노출**뿐이다.
+ *
+ * nav:false = 하단 바에 **버튼을 두지 않는다**. 지워진 게 아니라,
+ *   · 분석(2)  ← 계좌 탭의 '종합 분석' 버튼으로 들어간다
+ *   · 종목(3)  ← 계좌·관심에서 종목을 눌러 들어간다
+ *   · 등록(5)  ← 설정 탭 안에서 들어간다
+ *   · 가이드(7) ← 화면 구석 책 버튼으로 연다
+ *   네 개 모두 '전체 메뉴'에도 그대로 남아 있다 — 길이 둘이어야 막히지 않는다.
+ */
 const ALL_TABS = [
-  { label: '포트폴리오', idx: 0, iconKey: 'holdings'   },
-  { label: '분석',       idx: 2, iconKey: 'allocation' },
-  { label: '종목',       idx: 3, iconKey: 'chart'      },
+  { label: '계좌',       idx: 0, iconKey: 'holdings'   },
   { label: '관심',       idx: 1, iconKey: 'watchlist'  },
   { label: '발굴',       idx: 10, iconKey: 'discover'  },
   { label: '시장',       idx: 4, iconKey: 'market'     },
-  { label: '등록',       idx: 5, iconKey: 'register'   },
   { label: '설정',       idx: 6, iconKey: 'settings'   },
-  { label: '가이드',     idx: 7, iconKey: 'guide'      },
+  { label: '분석',       idx: 2, iconKey: 'allocation', nav: false },
+  { label: '종목',       idx: 3, iconKey: 'chart',      nav: false },
+  { label: '등록',       idx: 5, iconKey: 'register',   nav: false },
+  { label: '가이드',     idx: 7, iconKey: 'guide',      nav: false },
   { label: '여정',       idx: 8, iconKey: 'journey', adminOnly: true },
   { label: '관리자',     idx: 9, iconKey: 'admin',   adminOnly: true },
 ]
+
+/** 하단 바에 실제로 서는 탭 */
+const NAV_TABS = (isAdmin) =>
+  ALL_TABS.filter(t => t.nav !== false && (!t.adminOnly || isAdmin))
 
 /* 스와이프 전환 순서 = 하단바에 보이는 순서. App.jsx가 이걸 그대로 쓰므로
    두 곳이 어긋날 수 없다(예전에는 배열을 각자 하드코딩해 동기화가 수동이었다). */
@@ -106,8 +123,17 @@ export function tabLabel(idx) {
   return t ? t.label : `#${idx}`
 }
 
+/** 스와이프 순서 — **하단 바에 선 탭만**.
+ *  숨은 탭(분석·종목 등)에 있을 때는 useSwipeNav 가 indexOf<0 으로 무시한다.
+ *  그 화면들은 '지나가는 곳'이 아니라 '들어간 곳'이라 스와이프로 나가지 않는다. */
 export function navTabOrder(isAdmin) {
-  return ALL_TABS.filter(t => !t.adminOnly || isAdmin).map(t => t.idx)
+  return NAV_TABS(isAdmin).map(t => t.idx)
+}
+
+/** 하단 바에 없는 탭인가 — 그 화면은 상단에 '돌아가기'를 보여 준다 */
+export function isDetailTab(idx) {
+  const t = ALL_TABS.find(x => x.idx === idx)
+  return !!t && t.nav === false
 }
 
 export default function BottomNav() {
@@ -145,7 +171,11 @@ export default function BottomNav() {
   function onNavPointerUp() { dragRef.current.on = false }
   const btnRefs  = useRef({})
 
-  const visible = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
+  // 하단 스트립에 서는 것과 '전체 메뉴'에 담기는 것을 **가른다**.
+  // 스트립은 5개로 줄이되, 전체 메뉴에는 숨은 탭까지 전부 남긴다 —
+  // 진입점이 하나뿐이면 그 길이 막히는 순간 도달 불가가 된다.
+  const stripTabs = NAV_TABS(isAdmin)
+  const allMenuTabs = ALL_TABS.filter(t => !t.adminOnly || isAdmin)
 
   // 활성 탭을 스트립 가운데로 — scrollIntoView는 페이지 전체를 함께 스크롤할 수 있어
   // 컨테이너 기준으로 직접 계산한다.
@@ -189,7 +219,7 @@ export default function BottomNav() {
                (실측: 숨은 폭 276px, 드래그해도 scrollLeft 0 고정)
                pan-y 도 같이 허용해 세로 스크롤은 그대로 통과시킨다. */
             style={{ touchAction: 'pan-x pan-y' }}>
-            {visible.map(tab => {
+            {stripTabs.map(tab => {
               const active = activeTab === tab.idx
               return (
                 <button key={tab.idx}
@@ -220,7 +250,7 @@ export default function BottomNav() {
             <div className="nav-sheet-handle" aria-hidden="true" />
             <div className="nav-sheet-title">전체 메뉴</div>
             <div className="nav-sheet-grid">
-              {visible.map(tab => {
+              {allMenuTabs.map(tab => {
                 const active = activeTab === tab.idx
                 return (
                   <button key={tab.idx}

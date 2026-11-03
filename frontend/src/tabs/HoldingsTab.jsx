@@ -318,6 +318,32 @@ export default function HoldingsTab() {
         </button>
       </div>
 
+      {/* 분석으로 가는 길 (2026-11-03 네비 재편).
+          '분석'을 하단 바에서 뺐다 — 매일 보는 화면이 아니라 **계좌를 보다가
+          궁금해질 때** 들어가는 곳이기 때문이다.
+          ⚠ 처음엔 목록 맨 아래에 뒀는데, 캡처해 보니 스크롤해야 보였다.
+             진입점이 안 보이면 길이 없는 것과 같다 → 목록 **위**로 올렸다.
+          강조색(--clr-accent)을 쓰는 첫 자리이기도 하다 — 초록·빨강은 등락
+          전용이라 '여기가 중요하다'를 말할 색이 그동안 없었다. */}
+      {allHoldings.length > 0 && (
+        <button
+          onClick={() => setActiveTab(2)}
+          style={{
+            width: '100%', marginBottom: 12,
+            padding: '11px 14px', borderRadius: 4,
+            border: '1px solid var(--clr-accent-line)',
+            background: 'var(--clr-accent-soft)',
+            color: 'var(--clr-accent)', fontFamily: 'inherit',
+            fontSize: 13, fontWeight: 800, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 8,
+          }}>
+          <span>보유 종목 종합 분석</span>
+          <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.8,
+            whiteSpace: 'nowrap' }}>진단 · 배당 ›</span>
+        </button>
+      )}
+
       {/* Holdings list */}
       {!portfolio ? (
         /* 포트폴리오 로딩 스켈레톤 */

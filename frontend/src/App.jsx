@@ -23,6 +23,8 @@ import changelog from './changelog.json'
 import { capturePnLSnapshot } from './api'
 import './App.css'
 import { useTabDwell } from './hooks/useTabDwell'
+import DetailTabHeader from './components/DetailTabHeader'
+import GuideFab from './components/GuideFab'
 
 // 나머지 9개 탭은 lazy — 클릭 시 청크 다운로드 (초기 번들 ↓)
 const WatchlistTab    = lazy(() => import('./tabs/WatchlistTab'))
@@ -331,6 +333,8 @@ export default function App() {
         style={{ minHeight: '100%' }}
       >
         <ErrorBoundary name={`Tab#${activeTab}`} key={`eb-${activeTab}`}>
+          {/* 하단 바에 없는 화면이면 '어디서 왔는지'를 한 줄로 말해 준다 */}
+          <DetailTabHeader />
           <Suspense fallback={<TabLoading />}>
             <TabComponent />
           </Suspense>
@@ -398,6 +402,9 @@ export default function App() {
       <Tour />
       <ChatPanel />
       <FeedbackButton />
+      {/* 가이드는 하단 바에서 뺐다(2026-11-03) — 구석 책 버튼으로 연다.
+          웹 모드에는 안 붙인다: 사이드 내비에 가이드가 그대로 있다. */}
+      <GuideFab />
     </div>
   )
 }
