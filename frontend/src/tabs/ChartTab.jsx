@@ -495,6 +495,19 @@ export default function ChartTab() {
     return result
   }, [portfolio])
 
+  /* 종목을 고르기 전에는 화면이 비어 있었다 — 보유가 있는데도 "차트가 없다"로 보인다
+     (2026-11-02 오너 지적). 첫 보유 종목을 자동으로 연다.
+     · activeTicker 가 **빈 경우에만** 건드린다 — 다른 탭에서 넘어온 선택을 덮지 않는다.
+     · 칩 목록의 첫 번째와 같은 종목을 고른다(allHoldings 순서 = 화면 순서).
+     ⚠ allHoldings 선언 **뒤**에 둬야 한다. 위로 올리면 렌더 중 TDZ 로 탭이 백지가 된다. */
+  useEffect(() => {
+    if (activeTicker) return
+    const first = allHoldings[0]?.ticker
+    if (!first) return
+    setActiveTicker(first)
+    setInputVal(first)
+  }, [allHoldings, activeTicker])
+
   // activeTicker 변경 시 캐시된 분석을 자동으로 미리 보여주기 (분석 트리거 안 함).
   // ⚠ portfolio 선언 이후에 위치해야 함 (TDZ 회피).
   // ⚠ 무한 루프 방지를 위해 deps는 *원시 값*만 사용. portfolio 객체를 deps에 넣으면
