@@ -206,11 +206,25 @@ if (-not $fail) {
     if ($urls.Count -eq 0) {
         Write-Host '  경고: sw.js 에서 프리캐시 목록을 읽지 못했다' -ForegroundColor Yellow
     } else {
+        # 2026-11-03: 여기가 **단발 요청**이라 멀쩡한 배포를 실패로 끝냈다.
+        # 재시작 직후 가장 큰 청크 3개(vendor-xlsx 425KB 등)가 20초 안에 안 왔다.
+        # 같은 URL 을 곧바로 curl 로 치면 200 에 크기도 정확했다 — 일시적이었다.
+        # Invoke-WebRequest 는 본문을 **전부** 받으므로 큰 파일에 약하다.
+        # 다른 검사들은 재시도를 하는데 이 루프만 안 했다 → 2회 시도 + 40초.
+        # 거짓 신고를 반복하는 검사기는 다음 사람이 지운다. 그게 더 큰 손해다.
         $bad = @()
         foreach ($u in $urls) {
             $probe = $BASE + '/' + $u.TrimStart('/')
             $ok = $false
-            try { if ((Invoke-WebRequest -Uri $probe -UseBasicParsing -TimeoutSec 20).StatusCode -eq 200) { $ok = $true } } catch { }
+            foreach ($try in 1..2) {
+                try {
+                    if ((Invoke-WebRequest -Uri $probe -UseBasicParsing -TimeoutSec 40).StatusCode -eq 200) {
+                        $ok = $true
+                        break
+                    }
+                } catch { }
+                Start-Sleep -Seconds 2
+            }
             if (-not $ok) { $bad += $u }
         }
         if ($bad.Count -gt 0) {
