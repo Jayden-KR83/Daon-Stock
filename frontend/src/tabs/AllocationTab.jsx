@@ -323,6 +323,9 @@ export default function AllocationTab() {
      (2026-11-02 실제 발생 — 배포 스모크가 잡았다. 빌드·테스트는 전부 통과한다).
      같은 사고가 2026-08-24 strategyComputedAt 에서도 있었다. */
   const [strategyAcc, setStrategyAcc] = useState('ALL')
+  /* 지금 보고 있는 장. 선언 위치는 strategyAcc 와 같은 자리 —
+     아래 JSX 보다 위여야 한다(TDZ 로 탭이 백지가 된 적이 두 번 있다). */
+  const [chapter, setChapter] = useState('1')
 
   // 진단 대상 — 계좌 필터 적용본
   const diagHoldings = React.useMemo(() => (
@@ -605,9 +608,177 @@ export default function AllocationTab() {
         <PortfolioSummaryBanner allHoldings={allHoldings} prices={prices} usdKrw={usdKrw} />
       )}
 
+      {/* ━━ 장 선택 (2026-11-03) ━━
+          전에는 Ⅰ·Ⅱ·Ⅲ·부록이 **한 스크롤에 전부** 있었다. 한 번에 하나만 읽게 한다.
+          ⚠ 상단 고정 목차(ChapterNav)는 2026-10-30 에 오너 요청으로 지운 패턴이라
+             되살리지 않았다. 이건 스크롤을 따라다니지 않는 **그 자리의 세그먼트**다.
+          AI 실행 버튼과 계좌 선택기는 **장 밖 공통 영역**에 둔다 —
+          탭 안에 두면 Ⅱ 로 들어온 사람이 "리포트 없음"만 보고 버튼은 다른 장에 있다. */}
+      {allHoldings.length > 0 && (
+        <div className="seg-ctrl" style={{ marginBottom: 10 }}>
+          {CHAPTERS.map(c => (
+            <button key={c.k} className={`seg-btn ${chapter === c.k ? 'active' : ''}`}
+              onClick={() => setChapter(c.k)}>{c.label}</button>
+          ))}
+        </div>
+      )}
+      {/* 장 설명 한 줄 — 예전 ChapterHeader 의 sub 가 하던 일.
+          헤더 자체는 지웠다: 세그먼트가 'Ⅰ 상태'라고 말한 바로 아래에서
+          '내 보유종목 상태'를 또 말하고 있었다(같은 말 두 번). */}
+      {allHoldings.length > 0 && (
+        <div className="ko-keep" style={{ fontSize: 11, marginBottom: 12,
+          color: 'var(--clr-text-muted)', fontWeight: 600 }}>
+          {(CHAPTERS.find(c => c.k === chapter) || {}).sub}
+        </div>
+      )}
+
+      {/* ━━ 분석 실행 ━━ Ⅰ장(입력)과 Ⅱ장(결과) 사이의 경계.
+          한 번 누르면 Ⅱ장 진단과 Ⅲ장 제안이 **동시에** 갱신된다 —
+          둘은 같은 리포트 객체(strategyReport)를 나눠 쓰기 때문이다. */}
+      {allHoldings.length > 0 && (
+        <>
+          <div className="tt-ai-widget" style={{ marginBottom: 12 }}>
+            {/* 로딩 중에만 BorderBeam — 일반 상태는 정적 */}
+            {strategyLoading && (
+              <BorderBeam
+                size={260}
+                duration={4}
+                colorFrom="#8B5CF6"
+                colorTo="#6366F1"
+              />
+            )}
+            <div className="tt-ai-content">
+              {/* AI POWERED + 타이틀 한 줄 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div className="tt-ai-badge">AI POWERED</div>
+                <div className="tt-ai-title">Portfolio Strategy Report</div>
+              </div>
+              <div className="tt-ai-desc" style={{ marginTop: 6 }}>
+                보유 종목 + 은퇴 타임라인을 결합해 5년 단위 자산배분·월배당 시뮬을 생성합니다. 소요 약 1~3분.
+              </div>
+
+              {/* 이 리포트가 '언제 기준'인지 — 버튼 바로 옆에 둔다.
+                  아래 결과만 보고는 며칠 전 것인지 알 수 없어 최신 여부를 판단할 수 없었다.
+                  AI 리포트는 생성 시점의 보유·시세를 그대로 굳혀 저장하므로,
+                  생성 시각이 곧 데이터 기준 시각(cut-off)이다. */}
+              <div className="tt-ai-desc ko-keep" style={{ marginTop: 8, fontSize: 11.5 }}>
+                {strategyReport && strategyComputedAt > 0 ? (
+                  <>
+                    <strong style={{ color: 'rgba(248,250,252,.85)' }}>
+                      {_fmtKstDateTime(strategyComputedAt)}
+                    </strong>
+                    {' 기준 · '}
+                    {strategyAcc === 'ALL' ? '전체 계좌' : (ACC_LABELS[strategyAcc] || strategyAcc)}
+                    {strategyStaleDays >= 7 && (
+                      <span style={{ color: '#FCD34D', fontWeight: 700 }}>
+                        {' · '}{strategyStaleDays}일 지남 — 갱신을 권장합니다
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>아직 생성된 리포트가 없습니다 — 아래 버튼을 눌러 시작하세요.</>
+                )}
+              </div>
+
+              {/* 은퇴 기간·월 납입은 위 '목표 기반 포트폴리오'에서 설정 → 여기선 그 값을 읽어 분석에만 반영 */}
+              <div className="tt-ai-desc" style={{ marginTop: 8, fontSize: 11, opacity: 0.75 }}>
+                은퇴까지 기간·매월 납입액은 위 <strong>목표 기반 포트폴리오</strong>에서 설정한 값을 사용합니다.
+                계좌를 고르면 <strong>그 계좌의 보유 종목만</strong>으로 분석하며, 결과는 계좌별로 따로 저장됩니다.
+              </div>
+
+              {/* 분석 대상(드롭다운 필터) + 실행 버튼 — 같은 줄 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8,
+                flexWrap: 'wrap', marginTop: 12 }}>
+                <select
+                  value={strategyAcc}
+                  onChange={e => setStrategyAcc(e.target.value)}
+                  aria-label="분석 대상 계좌"
+                  style={{
+                    appearance: 'none', WebkitAppearance: 'none',
+                    height: 36, padding: '0 30px 0 12px', borderRadius: 8,
+                    border: '1px solid rgba(148,163,184,.35)',
+                    background: 'rgba(15,23,42,.45)', color: '#F8FAFC',
+                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                    cursor: 'pointer', letterSpacing: '-.01em',
+                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23CBD5E1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")",
+                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 9px center',
+                  }}>
+                  {['ALL', ...ACCOUNTS].map(acc => (
+                    <option key={acc} value={acc} style={{ color: '#0F172A' }}>
+                      {acc === 'ALL'
+                        ? '전체 계좌'
+                        : `${ACC_LABELS[acc]} (${allHoldings.filter(h => h.account === acc).length})`}
+                    </option>
+                  ))}
+                </select>
+
+                <ShimmerButton
+                  variant="ai"
+                  disabled={strategyLoading || !hasAnthropicKey || !aiEnabled}
+                  onClick={() => runStrategy(!!strategyReport)}
+                  style={{ width: 'fit-content' }}>
+                  {strategyLoading ? (
+                    <><Spinner /> AI가 분석 중입니다...</>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                      </svg>
+                      {strategyReport ? '↻ 최신 정보로 업데이트' : 'AI 전략 분석 시작'}
+                    </>
+                  )}
+                </ShimmerButton>
+              </div>
+
+              {/* 저장된 분석 미리보기 박스 — 사용자 요청으로 비표시 (주석 보존, 2026-06-06)
+              {strategyReport && !strategyLoading && strategyComputedAt > 0 && (
+                <div style={{
+                  marginTop: 12, padding: '8px 12px', borderRadius: 8,
+                  background: 'rgba(99,102,241,.18)',
+                  border: '1px solid rgba(99,102,241,.35)',
+                  fontSize: 11, color: 'rgba(248,250,252,.85)', lineHeight: 1.5,
+                }}>
+                  <span style={{ fontWeight: 700, color: '#C7D2FE' }}>저장된 분석 미리보기</span>
+                  <span style={{ marginLeft: 6, opacity: 0.85 }}>
+                    · {formatRelativeKo(strategyComputedAt)}
+                  </span>
+                </div>
+              )} */}
+            </div>
+            {!hasAnthropicKey && (
+              <div className="tt-ai-nokey">⚠ API Key 미설정 — 관리 탭에서 설정하세요</div>
+            )}
+            {hasAnthropicKey && !aiEnabled && (
+              <div className="tt-ai-nokey" style={{ color: 'var(--clr-warn, #F59E0B)' }}>
+                🔒 AI 분석 권한이 비활성화되어 있습니다 — 관리자에게 사용 권한 요청을 부탁드립니다
+              </div>
+            )}
+          </div>
+
+          {strategyErr && (
+            <div style={{ padding: '10px 12px', borderRadius: 2,
+              border: '1px solid var(--m-negative)',
+              color: 'var(--m-negative)', fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
+              {strategyErr}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 중기 국면 카드는 **지웠다**(2026-11-02 오너 판단).
+          "구체적인 의미를 모르겠고 매일 보지도 않을 것 같다" — 맞는 말이다.
+          분석 탭은 이미 길고, 매일 볼 것이 아닌 카드가 길이를 더했다.
+          **알림은 남겼다** — 국면이 바뀐 날에만 오므로 화면을 늘리지 않고,
+          분기에 한두 번 올 신호라 소음이 되지 않는다.
+          되살리려면 MidtermRegimeCard 를 여기에 다시 걸면 된다(컴포넌트는 남겨 뒀다). */}
+
+      {chapter === '1' && (
+        /* data-chapter: 검사기가 '이 장이 비었는가'를 추측하지 않고 재는 표식.
+           처음엔 .mono-card 개수로 셌는데 부록은 카드를 안 써서 거짓 신고했다. */
+        <div data-chapter="1">
       {/* ━━ Ⅰ. 내 보유종목 상태 ━━
           현황만 담는다. 문제 제기(Ⅱ)·실행(Ⅲ)과 섞지 않는다. */}
-      <ChapterHeader id="ch-1" n="Ⅰ" title="내 보유종목 상태" sub="자산 추이 · 비중 구성" />
 
       {/* Net Worth 추이 */}
       <NetWorthChart />
@@ -851,155 +1022,19 @@ export default function AllocationTab() {
         </>
       )}
 
-      {/* ━━ 분석 실행 ━━ Ⅰ장(입력)과 Ⅱ장(결과) 사이의 경계.
-          한 번 누르면 Ⅱ장 진단과 Ⅲ장 제안이 **동시에** 갱신된다 —
-          둘은 같은 리포트 객체(strategyReport)를 나눠 쓰기 때문이다. */}
-      {allHoldings.length > 0 && (
-        <>
-          <div className="tt-ai-widget" style={{ marginBottom: 12 }}>
-            {/* 로딩 중에만 BorderBeam — 일반 상태는 정적 */}
-            {strategyLoading && (
-              <BorderBeam
-                size={260}
-                duration={4}
-                colorFrom="#8B5CF6"
-                colorTo="#6366F1"
-              />
-            )}
-            <div className="tt-ai-content">
-              {/* AI POWERED + 타이틀 한 줄 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <div className="tt-ai-badge">AI POWERED</div>
-                <div className="tt-ai-title">Portfolio Strategy Report</div>
-              </div>
-              <div className="tt-ai-desc" style={{ marginTop: 6 }}>
-                보유 종목 + 은퇴 타임라인을 결합해 5년 단위 자산배분·월배당 시뮬을 생성합니다. 소요 약 1~3분.
-              </div>
-
-              {/* 이 리포트가 '언제 기준'인지 — 버튼 바로 옆에 둔다.
-                  아래 결과만 보고는 며칠 전 것인지 알 수 없어 최신 여부를 판단할 수 없었다.
-                  AI 리포트는 생성 시점의 보유·시세를 그대로 굳혀 저장하므로,
-                  생성 시각이 곧 데이터 기준 시각(cut-off)이다. */}
-              <div className="tt-ai-desc ko-keep" style={{ marginTop: 8, fontSize: 11.5 }}>
-                {strategyReport && strategyComputedAt > 0 ? (
-                  <>
-                    <strong style={{ color: 'rgba(248,250,252,.85)' }}>
-                      {_fmtKstDateTime(strategyComputedAt)}
-                    </strong>
-                    {' 기준 · '}
-                    {strategyAcc === 'ALL' ? '전체 계좌' : (ACC_LABELS[strategyAcc] || strategyAcc)}
-                    {strategyStaleDays >= 7 && (
-                      <span style={{ color: '#FCD34D', fontWeight: 700 }}>
-                        {' · '}{strategyStaleDays}일 지남 — 갱신을 권장합니다
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <>아직 생성된 리포트가 없습니다 — 아래 버튼을 눌러 시작하세요.</>
-                )}
-              </div>
-
-              {/* 은퇴 기간·월 납입은 위 '목표 기반 포트폴리오'에서 설정 → 여기선 그 값을 읽어 분석에만 반영 */}
-              <div className="tt-ai-desc" style={{ marginTop: 8, fontSize: 11, opacity: 0.75 }}>
-                은퇴까지 기간·매월 납입액은 위 <strong>목표 기반 포트폴리오</strong>에서 설정한 값을 사용합니다.
-                계좌를 고르면 <strong>그 계좌의 보유 종목만</strong>으로 분석하며, 결과는 계좌별로 따로 저장됩니다.
-              </div>
-
-              {/* 분석 대상(드롭다운 필터) + 실행 버튼 — 같은 줄 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8,
-                flexWrap: 'wrap', marginTop: 12 }}>
-                <select
-                  value={strategyAcc}
-                  onChange={e => setStrategyAcc(e.target.value)}
-                  aria-label="분석 대상 계좌"
-                  style={{
-                    appearance: 'none', WebkitAppearance: 'none',
-                    height: 36, padding: '0 30px 0 12px', borderRadius: 8,
-                    border: '1px solid rgba(148,163,184,.35)',
-                    background: 'rgba(15,23,42,.45)', color: '#F8FAFC',
-                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
-                    cursor: 'pointer', letterSpacing: '-.01em',
-                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23CBD5E1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")",
-                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 9px center',
-                  }}>
-                  {['ALL', ...ACCOUNTS].map(acc => (
-                    <option key={acc} value={acc} style={{ color: '#0F172A' }}>
-                      {acc === 'ALL'
-                        ? '전체 계좌'
-                        : `${ACC_LABELS[acc]} (${allHoldings.filter(h => h.account === acc).length})`}
-                    </option>
-                  ))}
-                </select>
-
-                <ShimmerButton
-                  variant="ai"
-                  disabled={strategyLoading || !hasAnthropicKey || !aiEnabled}
-                  onClick={() => runStrategy(!!strategyReport)}
-                  style={{ width: 'fit-content' }}>
-                  {strategyLoading ? (
-                    <><Spinner /> AI가 분석 중입니다...</>
-                  ) : (
-                    <>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                        strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                      </svg>
-                      {strategyReport ? '↻ 최신 정보로 업데이트' : 'AI 전략 분석 시작'}
-                    </>
-                  )}
-                </ShimmerButton>
-              </div>
-
-              {/* 저장된 분석 미리보기 박스 — 사용자 요청으로 비표시 (주석 보존, 2026-06-06)
-              {strategyReport && !strategyLoading && strategyComputedAt > 0 && (
-                <div style={{
-                  marginTop: 12, padding: '8px 12px', borderRadius: 8,
-                  background: 'rgba(99,102,241,.18)',
-                  border: '1px solid rgba(99,102,241,.35)',
-                  fontSize: 11, color: 'rgba(248,250,252,.85)', lineHeight: 1.5,
-                }}>
-                  <span style={{ fontWeight: 700, color: '#C7D2FE' }}>저장된 분석 미리보기</span>
-                  <span style={{ marginLeft: 6, opacity: 0.85 }}>
-                    · {formatRelativeKo(strategyComputedAt)}
-                  </span>
-                </div>
-              )} */}
-            </div>
-            {!hasAnthropicKey && (
-              <div className="tt-ai-nokey">⚠ API Key 미설정 — 관리 탭에서 설정하세요</div>
-            )}
-            {hasAnthropicKey && !aiEnabled && (
-              <div className="tt-ai-nokey" style={{ color: 'var(--clr-warn, #F59E0B)' }}>
-                🔒 AI 분석 권한이 비활성화되어 있습니다 — 관리자에게 사용 권한 요청을 부탁드립니다
-              </div>
-            )}
-          </div>
-
-          {strategyErr && (
-            <div style={{ padding: '10px 12px', borderRadius: 2,
-              border: '1px solid var(--m-negative)',
-              color: 'var(--m-negative)', fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
-              {strategyErr}
-            </div>
-          )}
-        </>
+        </div>
       )}
 
-      {/* 중기 국면 카드는 **지웠다**(2026-11-02 오너 판단).
-          "구체적인 의미를 모르겠고 매일 보지도 않을 것 같다" — 맞는 말이다.
-          분석 탭은 이미 길고, 매일 볼 것이 아닌 카드가 길이를 더했다.
-          **알림은 남겼다** — 국면이 바뀐 날에만 오므로 화면을 늘리지 않고,
-          분기에 한두 번 올 신호라 소음이 되지 않는다.
-          되살리려면 MidtermRegimeCard 를 여기에 다시 걸면 된다(컴포넌트는 남겨 뒀다). */}
-
+      {chapter === '2' && (
+        /* data-chapter: 검사기가 '이 장이 비었는가'를 추측하지 않고 재는 표식.
+           처음엔 .mono-card 개수로 셌는데 부록은 카드를 안 써서 거짓 신고했다. */
+        <div data-chapter="2">
       {/* ━━ Ⅱ. 진단 ━━
           결정론(룰 엔진) 경고를 먼저, AI 진단을 그다음에.
           백테스트는 삭제했다 — 지금 보유한 종목은 이미 살아남은 종목이라 과거 성과가
           구조적으로 과대평가되고(생존 편향), '내 실제 성과'는 Ⅰ장 자산 추이가 이미 보여준다. */}
       {allHoldings.length > 0 && (
         <>
-          <ChapterHeader id="ch-2" n="Ⅱ" title="진단"
-            sub="종합 진단 · 위험 요소 · 리밸런싱 경고" />
 
           {/* 진단 범위 — 계좌 단위로 좁혀 볼 수 있다 */}
           <div className="seg-ctrl" style={{ marginBottom: 8 }}>
@@ -1022,14 +1057,16 @@ export default function AllocationTab() {
               예전엔 룰 엔진 경고가 맨 위였다. 경고는 "무엇이 걸렸나"만 알 뿐 **왜 문제인지**를
               모른다 — 그걸 먼저 읽어야 아래 경고가 해석된다. 사람이 진단서를 읽는 순서와도 같다:
               소견 → 위험 인자 → 조치 항목.
-              AI 리포트 생성 버튼은 Ⅰ장 끝에 있다(입력 → 실행 → 결과 Ⅱ·Ⅲ). */}
+              AI 리포트 생성 버튼은 **장 밖 공통 영역**(세그먼트 바로 아래)에 있다.
+              2026-11-03 이전에는 Ⅰ장 끝에 있었는데, 장을 가르면서 올렸다 —
+              Ⅱ 로 들어온 사람이 '리포트 없음'만 보고 버튼은 다른 장에 있으면 길을 잃는다. */}
           {strategyReport ? (
             <DaonAIReport data={strategyReport} computedAt={strategyComputedAt} part="diagnosis" />
           ) : (
             <div className="mono-card ko-keep" style={{ marginBottom: 12, fontSize: 11.5,
               color: 'var(--m-text-tertiary)', lineHeight: 1.6 }}>
               <div>AI 리스크 진단은 아직 없습니다.</div>
-              <div>위 Ⅰ장 끝의 <strong>AI 전략 분석</strong>을 실행하면 여기에 표시됩니다.</div>
+              <div>위의 <strong>AI 전략 분석 시작</strong>을 누르면 여기에 표시됩니다.</div>
             </div>
           )}
 
@@ -1051,9 +1088,14 @@ export default function AllocationTab() {
         </>
       )}
 
+        </div>
+      )}
+
+      {chapter === '3' && (
+        /* data-chapter: 검사기가 '이 장이 비었는가'를 추측하지 않고 재는 표식.
+           처음엔 .mono-card 개수로 셌는데 부록은 카드를 안 써서 거짓 신고했다. */
+        <div data-chapter="3">
       {/* ━━ Ⅲ. 제안 ━━ */}
-      <ChapterHeader id="ch-3" n="Ⅲ" title="제안"
-        sub="목표 · 자산배분 · 배당 · 추천 액션" />
       <GoalsCard />
 
       {/* 목표 배당 시뮬 — 목표 기반 포트폴리오 바로 아래. 둘 다 "목표를 넣으면 이렇게"라
@@ -1063,7 +1105,7 @@ export default function AllocationTab() {
       )}
 
 
-      {/* AI 전략 리포트의 자산배분 — 실행 버튼은 Ⅰ장 끝에 있다.
+      {/* AI 전략 리포트의 자산배분 — 실행 버튼은 장 밖 공통 영역에 있다.
           결과가 Ⅱ·Ⅲ 두 곳에 나뉘어 붙으므로, 버튼을 둘 중 하나에 두면
           "왜 저기서 눌렀는데 여기가 바뀌지"가 된다(2026-10-11 오너 지적). */}
       {allHoldings.length > 0 && (
@@ -1100,10 +1142,22 @@ export default function AllocationTab() {
         </div>
       )}
 
-      {/* ━━ 부록 ━━ 자주 쓰지 않는 도구는 맨 아래로 */}
-      {allHoldings.length > 0 && (
-        <ChapterHeader id="ch-x" n="부록" title="3자 검증 (원할 시)" sub="다른 LLM에 교차검증을 맡길 때" />
+        </div>
       )}
+
+      {chapter === 'x' && (
+        /* data-chapter: 검사기가 '이 장이 비었는가'를 추측하지 않고 재는 표식.
+           처음엔 .mono-card 개수로 셌는데 부록은 카드를 안 써서 거짓 신고했다. */
+        <div data-chapter="x">
+      {/* ━━ 부록 ━━ 자주 쓰지 않는 도구. 2026-11-03 부터 네 번째 장이다. */}
+      {/* 이 장은 리포트가 없으면 버튼 하나뿐이라 허전하다 —
+          그 사실을 화면이 먼저 말한다(빈 화면을 고장으로 오해하지 않도록). R6: 문장마다 줄바꿈. */}
+      <div className="ko-keep" style={{ fontSize: 11.5, lineHeight: 1.7, marginBottom: 10,
+        color: 'var(--clr-text-sub)', whiteSpace: 'pre-line' }}>
+        {['지금까지의 분석을 마크다운 파일로 내려받습니다.',
+          '다른 AI에게 같은 자료를 주고 교차검증을 맡길 때 씁니다.',
+          'AI 전략 분석을 먼저 실행하면 진단·제안까지 함께 담깁니다.'].join('\n')}
+      </div>
       {allHoldings.length > 0 && (
         <div style={{ display: 'flex', justifyContent: 'flex-end',
           marginTop: 8, marginBottom: 12 }}>
@@ -1117,6 +1171,9 @@ export default function AllocationTab() {
           </button>
         </div>
       )}
+        </div>
+      )}
+
     </div>
   )
 }
@@ -1329,24 +1386,6 @@ function breakSentences(text) {
    챕터 목록을 코드에 적지 않고 DOM([data-chapter])에서 읽는 이유:
    Ⅱ장·부록은 보유 종목이 없으면 렌더되지 않는다. 하드코딩하면 없는 챕터로
    점프하는 죽은 버튼이 생긴다. */
-function ChapterHeader({ n, title, sub, id }) {
-  return (
-    /* id/data-chapter 는 바깥(앱 바로가기·검색)에서 챕터를 집을 때 쓰는 단서다.
-       2026-10-30 에 목차 바를 없앴지만 속성은 남긴다 — 비용이 없고,
-       지우면 그걸 쓰는 곳이 생겼을 때 말없이 깨진다. */
-    <div id={id} data-chapter={title} data-chapter-num={n}
-      style={{ margin: '20px 0 10px', borderTop: '2px solid var(--m-text)', paddingTop: 8,
-        scrollMarginTop: 56 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12, fontWeight: 900, color: 'var(--m-primary)' }}>{n}</span>
-        <span style={{ fontSize: 15, fontWeight: 900, color: 'var(--m-text)',
-          letterSpacing: '-.02em' }}>{title}</span>
-      </div>
-      {sub && <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-tertiary)',
-        marginTop: 2 }}>{sub}</div>}
-    </div>
-  )
-}
 
 /* 강조 렌더러(NumHighlight·HighlightedText)는 components/report.jsx 로 옮겼다.
    종목 분석과 같은 표현 체계를 쓰기 위해서다 — 한 곳에서만 정의한다. */
@@ -1618,6 +1657,14 @@ function LensViews({ lens }) {
     </div>
   )
 }
+
+/* 분석 탭의 장. 라벨은 짧게 — 세그먼트가 좁다. */
+const CHAPTERS = [
+  { k: '1', label: 'Ⅰ 상태', sub: '자산 추이 · 비중 구성' },
+  { k: '2', label: 'Ⅱ 진단', sub: '종합 진단 · 위험 요소 · 리밸런싱 경고' },
+  { k: '3', label: 'Ⅲ 제안', sub: '무엇을 어떻게 바꿀까' },
+  { k: 'x', label: '부록',   sub: '내보내기 · 다른 LLM 교차검증' },
+]
 
 function DaonAIReport({ data, computedAt = 0, part = 'diagnosis' }) {
   const priorityMeta = {
