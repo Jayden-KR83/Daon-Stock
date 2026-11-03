@@ -1722,9 +1722,21 @@ STOCK_ANALYZE_FREE_QUOTA = 30
 #     (max_tokens 는 상한일 뿐 생성한 만큼만 과금되므로 올려둬도 비용이 늘지 않는다).
 #   ⚠ Sonnet 5 는 temperature/top_p/top_k/budget_tokens 를 받으면 400 이다.
 #     현재 _call_claude 는 이들을 보내지 않는다 — 추가하지 말 것.
-MODEL_ANALYSIS = "claude-sonnet-5"
+# ── 2026-11-03 모델 갱신 ────────────────────────────────────────────
+# 가격(1M 토큰, 입력/출력): Opus 5.5 $4/$20 · Sonnet 5.5 $2/$10 · Haiku 5.5 $0.10/$0.50
+#   · Sonnet 5 → 5.5 : **가격이 같다**. 안 바꿀 이유가 없다.
+#   · Haiku 4.5 → 5.5: $1/$5 → $0.10/$0.50 — **10배 저렴**하고 컨텍스트도 200K→1M.
+#   · 전략 리포트만 Opus 5.5 (오너 결정: "월 $2은 가치있는 투자").
+# ⚠ 셋 다 temperature/top_p/top_k/budget_tokens 를 받으면 400 이다.
+#   _call_claude 는 이들을 보내지 않는다 — 추가하지 말 것.
+MODEL_ANALYSIS = "claude-sonnet-5-5"
+# MODEL_DEEP: 전략 리포트 전용. 보유 전체를 한 번에 읽고 5년 배분까지 쓰는 자리라
+# 품질 차이가 결과물에 그대로 남는다. 다른 곳에 쓰지 말 것 — 단가가 2배다.
+# ⚠ Opus 5.5 는 **사고(thinking)를 끌 수 없고** 그 토큰이 출력으로 과금된다.
+#   그래서 단순 "2배"보다 더 나올 수 있다 → effort 를 명시하고 사용량을 기록한다.
+MODEL_DEEP     = "claude-opus-5-5"
 # MODEL_LIGHT: 요약·분류·짧은 판정 — 정확도보다 응답속도·단가가 중요한 자리.
-MODEL_LIGHT    = "claude-haiku-4-5"
+MODEL_LIGHT    = "claude-haiku-5-5"
 
 def _month_start_epoch() -> float:
     """이번 달 1일 0시(로컬)의 epoch — 월 단위 쿼터 리셋 기준."""
@@ -2851,7 +2863,8 @@ def _anthropic_post(payload: dict, api_key: str, timeout: int) -> requests.Respo
 
 
 def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout: int,
-                 return_meta: bool = False, system: str | None = None):
+                 return_meta: bool = False, system: str | None = None,
+                 effort: str | None = None):
     """Claude API 호출 — system 프롬프트로 순수 JSON 반환 강제. 429/529는 1회 자동 재시도.
 
     return_meta=True 면 (text, {'stop_reason': ...}) 를 준다.
@@ -2875,6 +2888,10 @@ def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout
         ),
         "messages": [{"role": "user", "content": prompt}],
     }
+    # Opus 5.5 는 effort 기본이 medium 이다(Sonnet 계열은 high). 품질이 결과물인
+    # 자리에서는 명시해야 한다 — 안 적으면 조용히 한 단계 낮게 돈다.
+    if effort:
+        payload["output_config"] = {"effort": effort}
     resp = _anthropic_post(payload, api_key, timeout)
     if resp.status_code != 200:
         body_excerpt = ""
@@ -2920,7 +2937,9 @@ def _call_claude_with_search(api_key: str, model: str, prompt: str,
         "model": model,
         "max_tokens": max_tokens,
         "tools": [{
-            "type": "web_search_20250305",
+            # 2026-11-03: 모델을 Sonnet 5.5 로 올리며 신형 변종으로. 구형도 동작하지만
+            # 신형은 동적 필터링이 들어 있다. (Haiku 계열은 신형 미지원 — 거긴 웹 검색을 안 쓴다.)
+            "type": "web_search_20260209",
             "name": "web_search",
             "max_uses": max_searches,
         }],
@@ -6464,8 +6483,8 @@ def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_me
         # 모델 상수는 MODEL_ANALYSIS 한 곳에서만 정한다(파일 상단 주석 참조).
         # max_tokens 9000 → 16000 (2026-11-01). 상한일 뿐 생성한 만큼만 과금된다.
         # 9000 에서 실제로 잘렸다 — 리포트가 한국어라 토큰을 많이 먹는다.
-        text, meta = _call_claude(api_key, MODEL_ANALYSIS, prompt, 16000, 180,
-                                  return_meta=True)
+        text, meta = _call_claude(api_key, MODEL_DEEP, prompt, 16000, 240,
+                                  return_meta=True, effort='high')
         try:
             result = _parse_claude_json(text)
         except ValueError as e:
@@ -6484,9 +6503,25 @@ def _run_strategy_job(cache_key, user_id, scope, fp, prompt, api_key, summary_me
         # 어느 모델이 쓴 리포트인지 같이 남긴다. 내보내기 문서가 모델명을 손으로
         # 적어 두었다가 **틀린 채 굳었고**(claude-sonnet-5 를 'Claude Haiku' 로),
         # 외부 검증이 그 라벨을 근거로 잘못된 진단을 내놓았다(2026-10-27).
-        result['model'] = MODEL_ANALYSIS
+        result['model'] = MODEL_DEEP
         if discovery_horizon:
             result['discovery_horizon'] = discovery_horizon
+        # 실제 토큰 사용량을 기록한다. Opus 5.5 는 사고 토큰이 출력으로 과금되므로
+        # "2배" 라는 추정이 맞는지는 **돌려 봐야** 안다(🟥 숫자는 재서 말한다).
+        try:
+            u = (meta or {}).get('usage') or {}
+            result['_usage'] = {
+                'model': MODEL_DEEP,
+                'input': u.get('input_tokens'),
+                'output': u.get('output_tokens'),
+                'cache_read': u.get('cache_read_input_tokens'),
+                # 2026-11-03 단가(1M 토큰). 바뀌면 여기만 고친다.
+                'est_usd': round(
+                    (u.get('input_tokens') or 0) / 1e6 * 4.0
+                    + (u.get('output_tokens') or 0) / 1e6 * 20.0, 4),
+            }
+        except Exception:
+            pass
         _set_ai_cache(cache_key, result)
         try:
             with _db() as conn:
@@ -11461,7 +11496,7 @@ def chat_send(req: ChatReq, cu: dict = Depends(require_approved)):
         "stream": True,
     }
     if req.use_search:
-        payload["tools"] = [{"type": "web_search_20250305", "name": "web_search",
+        payload["tools"] = [{"type": "web_search_20260209", "name": "web_search",
                              "max_uses": 3}]
 
     def gen():

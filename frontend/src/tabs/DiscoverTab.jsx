@@ -391,7 +391,11 @@ function DetailPanel({ row, onPick }) {
   return (
     <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '10px 6px 4px', alignItems: 'flex-start' }}>
       {/* 레이더 인포그래픽 */}
-      <div style={{ flex: '0 0 200px', maxWidth: 220 }}>
+      {/* 2026-11-03: `flex: 0 0 200px` 은 **줄어들지 않는다**. 옆 지표 열의
+          minWidth 240 과 합쳐 최소 454px 이 필요해, 390px 폰에서는 줄바꿈 대신
+          표를 밀어내 가로 스크롤이 생겼다(오너: "가로 스크롤시 보여. 불편하잖아").
+          → 줄어들 수 있게 바꾼다. 넓은 화면에서는 maxWidth 가 지금 모습을 지킨다. */}
+      <div style={{ flex: '1 1 180px', maxWidth: 220, minWidth: 0 }}>
         <ResponsiveContainer width="100%" height={170}>
           <RadarChart data={radarData} outerRadius="68%">
             <PolarGrid stroke="var(--m-outline-variant)" />
@@ -421,8 +425,12 @@ function DetailPanel({ row, onPick }) {
         </div>
       </div>
       {/* 밸류에이션 + 메타 */}
-      <div style={{ flex: '1 1 280px', minWidth: 240 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '9px 10px' }}>
+      {/* minWidth 240 → 0. 이 값이 flex-wrap 을 무력화시킨 장본인이다. */}
+      <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+        <div style={{ display: 'grid',
+        /* repeat(4, 1fr) 고정이라 좁은 화면에서 열당 60px 로 눌려 숫자가 넘쳤다.
+           auto-fit + minmax 로 바꾸면 들어갈 만큼만 한 줄에 놓고 나머지는 접는다. */
+        gridTemplateColumns: 'repeat(auto-fit, minmax(86px, 1fr))', gap: '9px 10px' }}>
           {kv('현재가', fmtPrice(row.current_price, row.market))}
           {kv('목표가', fmtPrice(row.target_price, row.market), '애널리스트 평균 목표주가')}
           {kv('상승여력', <span className={row.analyst_upside > 0 ? 'num-pos' : row.analyst_upside < 0 ? 'num-neg' : ''}>{fmtPct(row.analyst_upside)}</span>, '목표가 대비 현재가 상승여력')}
@@ -501,7 +509,10 @@ function EtfDetail({ row, onPick }) {
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11.5, marginBottom: 9 }}>
         {fac('추세', row.pct_momentum)} {fac('저비용', row.pct_value)} {fac('규모', row.pct_quality)}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '9px 10px' }}>
+      <div style={{ display: 'grid',
+        /* repeat(4, 1fr) 고정이라 좁은 화면에서 열당 60px 로 눌려 숫자가 넘쳤다.
+           auto-fit + minmax 로 바꾸면 들어갈 만큼만 한 줄에 놓고 나머지는 접는다. */
+        gridTemplateColumns: 'repeat(auto-fit, minmax(86px, 1fr))', gap: '9px 10px' }}>
         {kv('현재가', fmtPrice(row.current_price, row.market))}
         {kv('6개월 수익률', <span className={row.ret_6m > 0 ? 'num-pos' : row.ret_6m < 0 ? 'num-neg' : ''}>{fmtPct(row.ret_6m)}</span>, '최근 6개월 가격 수익률')}
         {kv('보수율', row.expense_ratio == null ? '—' : row.expense_ratio + '%', 'ETF 연간 운용보수')}
@@ -530,7 +541,11 @@ function InnovDetail({ row, onPick }) {
   const exch = EXCH[row.exchange] || row.exchange || mktKo(row.market)
   return (
     <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '10px 6px 4px', alignItems: 'flex-start' }}>
-      <div style={{ flex: '0 0 200px', maxWidth: 220 }}>
+      {/* 2026-11-03: `flex: 0 0 200px` 은 **줄어들지 않는다**. 옆 지표 열의
+          minWidth 240 과 합쳐 최소 454px 이 필요해, 390px 폰에서는 줄바꿈 대신
+          표를 밀어내 가로 스크롤이 생겼다(오너: "가로 스크롤시 보여. 불편하잖아").
+          → 줄어들 수 있게 바꾼다. 넓은 화면에서는 maxWidth 가 지금 모습을 지킨다. */}
+      <div style={{ flex: '1 1 180px', maxWidth: 220, minWidth: 0 }}>
         <ResponsiveContainer width="100%" height={170}>
           <RadarChart data={radarData} outerRadius="68%">
             <PolarGrid stroke="var(--m-outline-variant)" />
@@ -549,8 +564,12 @@ function InnovDetail({ row, onPick }) {
           })}
         </div>
       </div>
-      <div style={{ flex: '1 1 280px', minWidth: 240 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '9px 10px' }}>
+      {/* minWidth 240 → 0. 이 값이 flex-wrap 을 무력화시킨 장본인이다. */}
+      <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+        <div style={{ display: 'grid',
+        /* repeat(4, 1fr) 고정이라 좁은 화면에서 열당 60px 로 눌려 숫자가 넘쳤다.
+           auto-fit + minmax 로 바꾸면 들어갈 만큼만 한 줄에 놓고 나머지는 접는다. */
+        gridTemplateColumns: 'repeat(auto-fit, minmax(86px, 1fr))', gap: '9px 10px' }}>
           {kv('현재가', fmtPrice(row.current_price, row.market))}
           {kv('PSR', row.psr == null ? '—' : Number(row.psr).toFixed(1) + '배', '주가매출비율 — 적자기업 밸류(이익이 없어 PER 대신)')}
           {kv('R&D집중도', fmtRnd(row.rnd_intensity), '연구개발비 ÷ 매출 — 파이프라인 투자 강도')}
