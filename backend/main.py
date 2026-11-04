@@ -433,6 +433,10 @@ def _init_db():
             gate_pass         INTEGER NOT NULL DEFAULT 0,
             gate_fail_reason  TEXT NOT NULL DEFAULT '',
             data_completeness INTEGER NOT NULL DEFAULT 0,-- 5축 중 데이터 확보 축 수 (0~5)
+            -- 2026-11-04 제3자 검증 수용 3종
+            num_analysts      INTEGER,                  -- 목표가를 낸 애널리스트 수 (US). 3 미만이면 목표가 자체를 안 만든다
+            pct_sector        REAL,                     -- **같은 섹터 안에서의** 백분위 (시장 내 백분위와 별개)
+            risk_flags        TEXT NOT NULL DEFAULT '', -- 쉼표 구분 위험 플래그. 점수에 섞지 않는다
             computed_at       REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_discovery_score ON discovery_scores(gate_pass DESC, composite_score DESC);
@@ -443,6 +447,7 @@ def _init_db():
             market          TEXT NOT NULL,
             sector          TEXT NOT NULL DEFAULT '',
             composite_score REAL NOT NULL DEFAULT 0,
+            price           REAL,                     -- 스냅샷 시점 종가. **추적은 이 값이 쌓인 날부터** 가능하다
             gate_pass       INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(snapshot_date, ticker)        -- 일자별 랭킹 스냅샷 → 포워드테스트 토대
         );
@@ -520,9 +525,17 @@ def _migrate_schema():
                           ('profit_margin', 'REAL'), ('exchange', "TEXT NOT NULL DEFAULT ''"),
                           ('quote_type', "TEXT NOT NULL DEFAULT ''"),
                           ('expense_ratio', 'REAL'), ('aum', 'REAL'), ('ret_6m', 'REAL'),
-                          ('psr', 'REAL'), ('rnd_intensity', 'REAL'), ('runway_years', 'REAL')):
+                          ('psr', 'REAL'), ('rnd_intensity', 'REAL'), ('runway_years', 'REAL'),
+                          # 2026-11-04 제3자 검증 수용: 목표가 신뢰도·섹터 내 순위·위험 플래그
+                          ('num_analysts', 'INTEGER'), ('pct_sector', 'REAL'),
+                          ('risk_flags', "TEXT NOT NULL DEFAULT ''")):
             if ds_cols and col not in ds_cols:
                 conn.execute(f"ALTER TABLE discovery_scores ADD COLUMN {col} {decl}")
+        # 발굴 추적: 스냅샷 시점 가격. 이게 있어야 "그때 상위였던 종목이 그 뒤 어땠나"를
+        # 뒤늦게라도 계산할 수 있다. 없는 날은 계산 대상에서 빠진다(추정하지 않는다).
+        dh_cols = {row['name'] for row in conn.execute("PRAGMA table_info(discovery_history)").fetchall()}
+        if dh_cols and 'price' not in dh_cols:
+            conn.execute("ALTER TABLE discovery_history ADD COLUMN price REAL")
         # 수동 기준가: 외부 시세 미조회 종목(한국 비상장 펀드 등)에 사용자가 직접 입력한 참고가
         pf_cols = {row['name'] for row in conn.execute("PRAGMA table_info(portfolios)").fetchall()}
         if pf_cols and 'manual_price' not in pf_cols:
@@ -4361,7 +4374,62 @@ def _garp_score(rows: list) -> list:
             # 결측 패널티: 5요소 중 부족분만큼 감점(×완성도/5). 한 축(예: 저평가 99)만으로
             # 상위에 오르는 것 차단 — 데이터 충실한 종목이 우선되도록(권위 확보).
             r['composite_score'] = round(base * (r['data_completeness'] / 5.0), 2)
+
+        # ── 2차 패스: 섹터 내 백분위 ──────────────────────────────────
+        # 2026-11-04 수용. 시장 내 백분위만 주면 "에너지가 강한 해라서 높은 건지,
+        # 그 에너지 회사가 잘해서 높은 건지"를 가를 수 없다. 두 수를 나란히 둔다.
+        # 같은 섹터 종목이 3개 미만이면 의미가 없으므로 아예 만들지 않는다(None).
+        by_sector: dict = {}
+        for r in group:
+            by_sector.setdefault(r.get('sector', '') or '기타', []).append(r)
+        for srows in by_sector.values():
+            vals = [r['composite_score'] for r in srows]
+            for r in srows:
+                r['pct_sector'] = (None if len(srows) < 3
+                                   else _pct_rank(vals, r['composite_score'], True))
+
+        # ── 2차 패스: 위험 플래그 ────────────────────────────────────
+        for r in group:
+            r['risk_flags'] = ','.join(_risk_flags(r))
     return rows
+
+
+# 위험 플래그 — **점수에 섞지 않는다.**
+# 2026-11-04 제3자 검증 3곳이 "리스크 축을 점수에 넣어라"고 했지만, ChatGPT 의
+# 단서가 맞다: 기회 점수와 위험을 한 숫자로 합치면 둘 다 안 보인다.
+# 그래서 별도 플래그로만 띄운다. 그리고 **무엇을 못 재는지도 같이 적는다** —
+# 유동성·회계품질·지배구조는 수집하는 데이터가 아예 없다. 없는 것을 있는 척하지 않는다.
+RISK_FLAG_KO = {
+    'leverage':  '고부채',
+    'loss':      '적자',
+    'thin_data': '데이터 부족',
+    'stretched': '52주 고점 근접',
+    'no_peg':    'PEG 없음',
+    'few_analysts': '애널리스트 소수',
+}
+RISK_UNMEASURED = ('유동성(거래대금·호가 스프레드)', '회계 품질', '지배구조', '소송·규제 이벤트')
+
+
+def _risk_flags(r: dict) -> list:
+    # 가진 데이터로만 판정. 기준은 전부 여기 한 곳에만 쓴다(화면은 이 값을 받아 쓴다).
+    out = []
+    dte = r.get('debt_to_equity')
+    if dte is not None and dte >= 200:          # 부채비율 200% = 자기자본의 2배
+        out.append('leverage')
+    pm = r.get('profit_margin')
+    if pm is not None and pm < 0:
+        out.append('loss')
+    if (r.get('data_completeness') or 0) < 5:
+        out.append('thin_data')
+    n52 = r.get('near_52w_high')
+    if n52 is not None and n52 >= 0.98:         # 고점의 98% 이상
+        out.append('stretched')
+    if r.get('peg') is None:
+        out.append('no_peg')
+    na = r.get('num_analysts')
+    if na is not None and na < 5:
+        out.append('few_analysts')
+    return out
 
 
 def _discovery_universe() -> list:
@@ -4482,6 +4550,7 @@ def _discovery_raw_metrics(ticker: str, market: str) -> dict:
             if cur and hi and hi > 0:
                 m['near_52w_high'] = round(cur / hi, 4)
             tgt = full.get('target_mean'); na = full.get('num_analysts') or 0
+            m['num_analysts'] = int(na) or None
             if cur and tgt and na >= 3:
                 m['target_price'] = round(float(tgt), 2)
                 m['analyst_upside'] = round((tgt - cur) / cur * 100, 2)
@@ -8895,7 +8964,7 @@ def _store_discovery_rows(conn, rows: list, now: float):
             "ticker, market, name, sector, peg, rel_per, eps_growth, rev_growth, "
             "roe, debt_to_equity, near_52w_high, analyst_upside, pct_value, pct_growth, "
             "pct_quality, pct_momentum, pct_sentiment, composite_score, gate_pass, "
-            "gate_fail_reason, data_completeness, computed_at, "
+            "gate_fail_reason, data_completeness, num_analysts, pct_sector, risk_flags, computed_at, "
             "current_price, target_price, trailing_pe, forward_pe, profit_margin, "
             "exchange, quote_type, expense_ratio, aum, ret_6m, "
             "psr, rnd_intensity, runway_years) "
@@ -8906,7 +8975,8 @@ def _store_discovery_rows(conn, rows: list, now: float):
              r.get('analyst_upside'), r.get('pct_value'), r.get('pct_growth'),
              r.get('pct_quality'), r.get('pct_momentum'), r.get('pct_sentiment'),
              r.get('composite_score', 0), r.get('gate_pass', 0),
-             r.get('gate_fail_reason', ''), r.get('data_completeness', 0), now,
+             r.get('gate_fail_reason', ''), r.get('data_completeness', 0),
+             r.get('num_analysts'), r.get('pct_sector'), r.get('risk_flags', ''), now,
              r.get('current_price'), r.get('target_price'), r.get('trailing_pe'),
              r.get('forward_pe'), r.get('profit_margin'),
              r.get('exchange', ''), r.get('quote_type', ''),
@@ -8914,10 +8984,10 @@ def _store_discovery_rows(conn, rows: list, now: float):
              r.get('psr'), r.get('rnd_intensity'), r.get('runway_years')))
         conn.execute(
             "INSERT OR REPLACE INTO discovery_history "
-            "(snapshot_date, ticker, market, sector, composite_score, gate_pass) "
-            "VALUES (?,?,?,?,?,?)",
+            "(snapshot_date, ticker, market, sector, composite_score, gate_pass, price) "
+            "VALUES (?,?,?,?,?,?,?)",
             (snap_date, r['ticker'], r['market'], r.get('sector', ''),
-             r.get('composite_score', 0), r.get('gate_pass', 0)))
+             r.get('composite_score', 0), r.get('gate_pass', 0), r.get('current_price')))
 
 
 def _do_discover_scan() -> dict:
@@ -9011,6 +9081,83 @@ def discover_rescan(cu: dict = Depends(require_approved)):
     import threading
     threading.Thread(target=_do_discover_scan, daemon=True).start()
     return {'status': 'started'}
+
+
+TRACK_BASIS = {
+    'what': '과거 스냅샷에서 점수 구간별로, 그 뒤 현재까지의 가격 변화율 평균',
+    'price_basis': '스냅샷 당일 종가 → 가장 최근 스캔의 현재가. 배당·환율 미반영',
+    'limits': [
+        '생존편향 — 지금 발굴 대상에서 빠진 종목은 계산에 안 들어간다',
+        '시점 정합성 없음 — 당시 재무 발표일 기준으로 점수를 재구성한 것이 아니다',
+        '표본이 작다 — 구간당 종목 수를 함께 보고, 적으면 읽지 마라',
+        '이것은 백테스트가 아니라 추적이다. 전략의 성과가 아니라 점수의 사후 동행 여부만 본다',
+    ],
+}
+
+# 점수 구간 — 상위 몇 %가 아니라 **점수 절대 구간**으로 가른다.
+# 상위 %로 가르면 스냅샷마다 경계가 달라져 구간끼리 비교가 안 된다.
+TRACK_BUCKETS = ((70, 101, '70점 이상'), (60, 70, '60~70'), (50, 60, '50~60'), (0, 50, '50 미만'))
+
+
+@app.get("/api/discover/track")
+def get_discover_track(days: int = 90):
+    """발굴 점수가 그 뒤 수익률과 같이 움직였나 — **추적**(백테스트 아님).
+
+    2026-11-04 제3자 검증 3곳이 공통으로 "점수가 유효한지 검증할 장치가 없다"고 했다.
+    맞는 지적이다. 다만 제대로 된 백테스트는 **시점 정합 데이터**(당시 발표된 재무만
+    쓰기)가 있어야 하는데 우리는 그걸 갖고 있지 않다. 가진 것은 `discovery_history`
+    일별 스냅샷뿐이다. 그래서 할 수 있는 것만 한다 — 그리고 **할 수 없는 것을
+    할 수 있는 척하지 않는다**(limits 를 응답에 같이 싣는 이유).
+    """
+    days = max(7, min(int(days or 90), 730))
+    cutoff = strftime('%Y-%m-%d', gmtime(time() - days * 86400 + 9 * 3600))
+    with _db() as conn:
+        # 기준일: cutoff 이전의 가장 최근 스냅샷 중 **가격이 있는** 날
+        row = conn.execute(
+            "SELECT snapshot_date FROM discovery_history "
+            "WHERE price IS NOT NULL AND snapshot_date <= ? "
+            "ORDER BY snapshot_date DESC LIMIT 1", (cutoff,)).fetchone()
+        if not row:
+            first = conn.execute(
+                "SELECT MIN(snapshot_date) d FROM discovery_history WHERE price IS NOT NULL"
+            ).fetchone()
+            return {'ok': False, 'reason': 'not_enough_history',
+                    'tracking_since': (first['d'] if first else None),
+                    'basis': TRACK_BASIS,
+                    'note': '가격이 함께 저장된 스냅샷이 아직 그만큼 쌓이지 않았습니다.'}
+        base_date = row['snapshot_date']
+        hist = conn.execute(
+            "SELECT ticker, market, composite_score, price FROM discovery_history "
+            "WHERE snapshot_date = ? AND price IS NOT NULL AND price > 0", (base_date,)).fetchall()
+        cur = {r['ticker']: r['current_price'] for r in conn.execute(
+            "SELECT ticker, current_price FROM discovery_scores "
+            "WHERE current_price IS NOT NULL AND current_price > 0").fetchall()}
+
+    buckets = []
+    all_rets = []
+    for lo, hi, label in TRACK_BUCKETS:
+        rets = []
+        for h in hist:
+            sc = h['composite_score'] or 0
+            if not (lo <= sc < hi):
+                continue
+            c = cur.get(h['ticker'])
+            if not c:
+                continue                      # 지금 발굴 대상이 아님 → 뺀다(생존편향, limits 에 명시)
+            rets.append((c - h['price']) / h['price'] * 100)
+        all_rets += rets
+        buckets.append({
+            'label': label, 'n': len(rets),
+            'avg_return': (round(sum(rets) / len(rets), 2) if rets else None),
+            'median_return': (round(_median(rets), 2) if rets else None),
+        })
+    return {
+        'ok': True, 'base_date': base_date, 'days': days,
+        'universe_n': len(all_rets),
+        'universe_avg': (round(sum(all_rets) / len(all_rets), 2) if all_rets else None),
+        'buckets': buckets,
+        'basis': TRACK_BASIS,
+    }
 
 
 @app.get("/api/discover")

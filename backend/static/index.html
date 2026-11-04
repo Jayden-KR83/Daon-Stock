@@ -10,6 +10,16 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <!-- 한글 폰트 Pretendard (2026-11-04) — 제3자 검증 3곳 공통 권고.
+         Manrope 에는 한글 글리프가 없어 지금까지 OS 기본 한글 폰트로 떨어졌다.
+         종목명(한글) + 티커(영문) + 숫자가 한 줄에 섞이는 화면에서 글자 높낮이와
+         굵기가 어긋났다. dynamic-subset 은 **쓰는 글자만** 내려받는다.
+         ⚠ 폰트 교체는 모든 폭·줄바꿈을 바꾼다 — 먼저 만든
+           scripts/check-layout-baseline.mjs 로 회귀를 재고 넣었다.
+         ⚠ CDN 이 막히면 지금과 같은 OS 기본 한글 폰트로 돌아간다(기능 손실 없음). -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="stylesheet" as="style" crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- 웹폰트는 렌더 블로킹에서 제외 — media=print 로 받아 onload 시 적용.
@@ -40,15 +50,15 @@
       })
     </script>
     <title>다온 포트폴리오</title>
-    <script type="module" crossorigin src="/assets/index-BqUU0d2c.js"></script>
+    <script type="module" crossorigin src="/assets/index-1zOQSWSv.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-react-DHH8-g4D.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-query-D70luTMH.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-zustand-CRKzPH-O.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-DkGha1B4.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-motion-bKYe-4lK.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CxvXRx4B.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-DL8n65Ew.css">
   <link rel="manifest" href="/manifest.webmanifest"></head>
   <body>
-    <div id="root"></div>
+    <div id="root"></div>
   </body>
 </html>

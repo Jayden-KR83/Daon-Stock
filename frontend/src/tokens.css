@@ -49,6 +49,21 @@
      하나도 없었다. 그래서 모든 카드가 같은 무게로 보였다("딱딱하다"의 원인).
      쓰는 곳: 활성 탭 · 섹션 제목 강조 · AI 영역 배지 · 주요 포커스.
      쓰지 않는 곳: 수익률·시세 등락(그건 초록/빨강 전용이다). */
+  /* ── 타이포 사다리 (2026-11-04) ────────────────────────────────
+     인라인 fontSize 가 852곳·24단계로 번져 있다. **한 번에 치환하지 않는다** —
+     11px 미만 269곳을 11px 로 올리는 실험에서 360px 기준 넘침이 +6 났다.
+     통과가 아니라 비용이다.
+     그래서 순서를 뒤집는다: 사다리를 먼저 세우고, `check-typography-steps.mjs`
+     래칫으로 **새 인라인 값이 느는 것만 막는다.** 기존 것은 손대는 화면부터 줄인다.
+     🟥 --fs-micro 는 차트 축·캡슐 배지 전용이다. 본문에 쓰지 말 것. */
+  --fs-micro:     9px;
+  --fs-caption:  11px;
+  --fs-body-sm: 12.5px;
+  --fs-body:     14px;
+  --fs-subtitle: 16px;
+  --fs-title:    18px;
+  --fs-display:  22px;
+
   --clr-accent:       #2563EB;   /* 코발트 블루 */
   --clr-accent-dark:  #1D4ED8;   /* hover·강조 */
   --clr-accent-soft:  #EFF6FF;   /* 배지·활성 탭 배경 */
@@ -103,7 +118,10 @@
   /* ──────────────────────────────────────────
      Typography
      ────────────────────────────────────────── */
-  --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* Manrope 가 **먼저**다 — 라틴·숫자는 Manrope 가 가진 글리프를 쓰고,
+     한글은 글리프가 없어 다음 폰트로 자동으로 넘어간다(글자 단위 폴백).
+     순서를 뒤집으면 숫자까지 Pretendard 로 그려져 지금 자릿수 정렬이 틀어진다. */
+  --font-sans: 'Manrope', 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   /* ──────────────────────────────────────────
      Border Radius (4px 그리드)
@@ -235,9 +253,14 @@
    Pro Theme — 정제된 미드나잇 + 티얼/시안 (GitHub Dark + 금융 터미널 정밀도)
    ════════════════════════════════════════════════════════════ */
 :root[data-theme='pro'] {
-  /* 배경: 미드나잇 차콜 — 푸른 기 살짝, 따뜻함 거의 없음 */
-  --clr-bg:       #0D1117;
-  --clr-surface:  #161B22;
+  /* 2026-11-04 — 제3자 검증 3곳이 공통으로 "dark 와 pro 가 눈으로 구분이 안 된다"고
+     했다(배경 ΔE 7.0, 본문 ΔE 2.6). 사실이다.
+     합치는 대신 **용도를 갈랐다**: dark = 일반 야간, pro = 고대비·OLED.
+       배경을 순흑으로 내려 dark(#0B1120) 와의 거리를 ΔE 25 이상으로 벌리고,
+       본문 글자를 올려 대비를 높인다(장시간 숫자 읽기용).
+     되돌리려면 이 블록의 배경 3색만 이전 값(#0D1117/#161B22)으로 돌리면 된다. */
+  --clr-bg:       #000000;
+  --clr-surface:  #0A0A0A;
 
   /* 강조색 — 다크와 구분되도록 한 단 더 차갑게(시안 지적: 두 테마가 거의 같다) */
   --clr-accent:       #388BFD;
@@ -245,13 +268,15 @@
   --clr-accent-soft:  #0D2440;
   --clr-accent-line:  #1F4B7F;
 
-  --clr-border:        #21262D;
-  --clr-border-md:     #30363D;
-  --clr-border-strong: #484F58;
-  --clr-text-muted:    #7D8590;
-  --clr-text-sub:      #9198A1;
-  --clr-text-mid:      #B1BAC4;
-  --clr-text:          #C9D1D9;
+  /* 순흑 배경에서는 같은 회색이 더 어둡게 읽힌다 — 경계선·본문을 한 단씩 올린다.
+     dark 테마와 숫자가 같으면 '고대비 모드'라는 말이 거짓이 된다. */
+  --clr-border:        #262626;
+  --clr-border-md:     #3A3A3A;
+  --clr-border-strong: #525252;
+  --clr-text-muted:    #8B949E;
+  --clr-text-sub:      #A3ACB7;
+  --clr-text-mid:      #C4CCD4;
+  --clr-text:          #DDE3E9;
   --clr-text-dark:     #E6EDF3;
   --clr-text-strong:   #F0F6FC;   /* 깨끗한 화이트 — 가독성 우선 */
 

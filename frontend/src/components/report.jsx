@@ -161,3 +161,31 @@ export function ReportFootnote({ children }) {
     </div>
   )
 }
+
+/* 산출 기준 — **기준 한 줄은 늘 보이고, 긴 설명만 접힌다** (2026-11-04).
+ *
+ * 제3자 검증 3곳이 공통으로 "각주가 본문보다 긴 카드"를 지적했다. 다만 각주를
+ * 통째로 접으면 이 앱이 지켜 온 것을 잃는다 — **숫자에는 기준을 붙인다**는 규약.
+ * 기간·분모·가정이 안 보이면 숫자가 혼자 돌아다닌다.
+ *
+ * 그래서 두 층으로 나눈다:
+ *   label  — 기간·분모·가정. 접히지 않는다. (예: "1년 일별 종가 · 무위험 4% 가정")
+ *   children — 계산식·출처·예외. 눌러야 열린다.
+ *
+ * R1: 좌측 색띠 없이 4면 hairline. 삼각형은 브라우저 기본 마커를 그대로 쓴다.
+ */
+export function Basis({ label, title = '산출 근거', children, style }) {
+  return (
+    <details className="ko-keep" style={{
+      marginTop: 10, padding: '7px 11px', borderRadius: 4,
+      border: '1px solid var(--clr-border-md)', background: 'var(--clr-bg)',
+      fontSize: 10, color: 'var(--clr-text-muted)', lineHeight: 1.7, ...style,
+    }}>
+      <summary style={{ cursor: 'pointer', listStyle: 'revert' }}>
+        <span style={{ fontWeight: 700, color: 'var(--clr-text-sub)' }}>{title}</span>
+        {label && <span style={{ marginLeft: 6 }}>{label}</span>}
+      </summary>
+      <div style={{ marginTop: 6 }}>{children}</div>
+    </details>
+  )
+}

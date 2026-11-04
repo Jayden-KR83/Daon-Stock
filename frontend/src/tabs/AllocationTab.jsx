@@ -6,7 +6,7 @@ import { getPortfolio, getPricesBatch, getPortfolioMetrics, getPortfolioMetricsC
 import { useStore } from '../store'
 import { usePrivacy, maskText } from '../utils/privacy'
 import SharedBulletList from '../components/BulletList'
-import { HighlightedText, ReportLabel } from '../components/report'
+import { Basis, HighlightedText, ReportLabel } from '../components/report'
 import LogoCircle from '../components/LogoCircle'
 import InfoTip from '../components/InfoTip'
 import BorderBeam from '../components/BorderBeam'
@@ -1376,12 +1376,11 @@ function MetricsResult({ data, holdings }) {
         </table>
       </div>
 
-      {/* 범례 + 계산 근거·출처 (R6: 문장마다 줄바꿈) */}
-      <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--clr-bg)', borderRadius: 4,
-        border: '1px solid var(--clr-border-md)',
-        fontSize: 10, color: 'var(--clr-text-muted)', lineHeight: 1.8 }}>
-        <strong style={{ color: 'var(--clr-text-sub)' }}>지표 해석 가이드</strong>
-        <span style={{ marginLeft: 4, opacity: 0.7 }}>(각 지표 라벨에 마우스를 올리면 상세 설명)</span><br />
+      {/* 2026-11-04: 11줄짜리 각주가 본문보다 길었다(제3자 검증 3곳 공통 지적).
+          통째로 접지는 않는다 — **기준(기간·분모·가정)은 늘 보여야 한다.**
+          접는 것은 계산식·출처·예외뿐. */}
+      <Basis title="지표 해석 · 산출 근거"
+        label="최근 1년 일별 종가 · 무위험 4% 가정 · Yahoo Finance">
         수익률: 평균단가 기준 현재 손익률 — (현재가 − 내 평균단가) ÷ 평균단가<br />
         MDD: 1년 내 최고점 대비 최대 낙폭 — 낮을수록 안정적 (10% 이하 ✅, 25% 초과 ⚠️)<br />
         샤프: 위험 대비 초과수익 — 1 이상 우수, 0 미만 비효율 (무위험률 4% 적용)<br />
@@ -1391,8 +1390,9 @@ function MetricsResult({ data, holdings }) {
         샤프 = (연율화 수익률 − 무위험 4%) ÷ 연율화 변동성 (일간 등락 기준, 연율화 계수 252일).<br />
         무위험수익률 4%는 고정 가정값이며, 실제 국채 금리 변동은 반영되지 않습니다.<br />
         수익률만 내 평균단가 기준이라 사람마다 다르고, 나머지 두 지표는 모두에게 동일합니다.<br />
-        방법론: 샤프지수(Sharpe, 1966) · 최대낙폭(MDD)은 표준 정의를 따릅니다.
-      </div>
+        방법론: 샤프지수(Sharpe, 1966) · 최대낙폭(MDD)은 표준 정의를 따릅니다.<br />
+        각 지표 라벨에 마우스를 올리면 상세 설명이 나옵니다.
+      </Basis>
     </div>
   )
 }

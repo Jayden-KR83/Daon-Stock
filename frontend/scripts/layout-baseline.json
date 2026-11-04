@@ -1,0 +1,45 @@
+{
+  "at": "2026-11-04",
+  "measured": {
+    "390:계좌": {
+      "clipped": 0,
+      "height": 1693,
+      "docOverflow": false
+    },
+    "390:관심": {
+      "clipped": 0,
+      "height": 1100,
+      "docOverflow": false
+    },
+    "390:발굴": {
+      "clipped": 0,
+      "height": 1411,
+      "docOverflow": false
+    },
+    "390:시장": {
+      "clipped": 0,
+      "height": 3077,
+      "docOverflow": false
+    },
+    "1440:계좌": {
+      "clipped": 0,
+      "height": 1412,
+      "docOverflow": false
+    },
+    "1440:관심": {
+      "clipped": 0,
+      "height": 1100,
+      "docOverflow": false
+    },
+    "1440:발굴": {
+      "clipped": 0,
+      "height": 1252,
+      "docOverflow": false
+    },
+    "1440:시장": {
+      "clipped": 0,
+      "height": 2421,
+      "docOverflow": false
+    }
+  }
+}

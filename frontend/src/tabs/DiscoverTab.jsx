@@ -5,8 +5,9 @@ import WatchStar from '../components/WatchStar'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { useStore } from '../store'
-import { getDiscover, rescanDiscover, getCachedAnalysis } from '../api'
+import { getDiscover, getDiscoverTrack, rescanDiscover, getCachedAnalysis } from '../api'
 import InfoTip from '../components/InfoTip'
+import { Basis } from '../components/report'
 
 /* 신규 종목 발굴 (GARP) — 표 + 종목별 레이더 인포그래픽(확장).
  * 행 클릭 → 5요소 레이더 + 밸류에이션(현재가·목표가·상승여력·PER·PEG·순이익률) + 메타 펼침.
@@ -385,6 +386,106 @@ function CachedAI({ ticker, name, onPick }) {
 
    🟥 라벨 폭을 고정한다. 가변 길이 라벨을 flex 로 늘어놓으면 막대 시작 x 가
    줄마다 달라져 "어느 축이 긴가"를 눈으로 못 센다(= 비교 기능이 죽는다). */
+/* 위험 플래그 — backend `RISK_FLAG_KO` 와 **같은 키**를 쓴다. 어긋나면 화면이 조용히 빈다.
+   🟥 점수에 섞지 않는다. 기회 점수와 위험을 한 숫자로 합치면 둘 다 안 보인다.
+   🟥 "측정하지 않는 것"을 같이 적는다 — 플래그가 없다는 말이 안전하다는 뜻이 아니다. */
+const RISK_FLAG_KO = {
+  leverage: '고부채', loss: '적자', thin_data: '데이터 부족',
+  stretched: '52주 고점 근접', no_peg: 'PEG 없음', few_analysts: '애널리스트 소수',
+}
+const RISK_FLAG_WHY = {
+  leverage: '부채비율 200% 이상 — 자기자본의 2배를 넘는 빚',
+  loss: '순이익률이 음수',
+  thin_data: '5개 축 중 비어 있는 축이 있음 (점수에 감점 반영됨)',
+  stretched: '현재가가 52주 고점의 98% 이상',
+  no_peg: '성장 대비 밸류(PEG)를 계산할 수 없음',
+  few_analysts: '목표가를 낸 애널리스트가 5명 미만 — 평균이 흔들리기 쉬움',
+}
+const RISK_UNMEASURED = '유동성(거래대금·호가) · 회계 품질 · 지배구조 · 소송·규제'
+
+function RiskFlags({ flags }) {
+  const list = String(flags || '').split(',').map(x => x.trim()).filter(Boolean)
+  return (
+    <div className="ko-keep" style={{ marginTop: 9, fontSize: 10,
+      color: 'var(--m-text-tertiary)', lineHeight: 1.6 }}>
+      <span style={{ fontWeight: 700, color: 'var(--m-text-secondary)' }}>위험 플래그</span>{' '}
+      {list.length === 0 ? <span>해당 없음</span> : list.map(f => (
+        <span key={f} title={RISK_FLAG_WHY[f] || ''}
+          style={{ display: 'inline-block', marginRight: 4, padding: '0 5px', borderRadius: 2,
+            border: '1px solid var(--m-negative)', color: 'var(--m-negative)',
+            fontWeight: 700, cursor: 'help' }}>{RISK_FLAG_KO[f] || f}</span>
+      ))}
+      <br />
+      <span>이 목록은 <b>측정 가능한 것만</b> 봅니다. 재지 않는 위험: {RISK_UNMEASURED}.</span>
+    </div>
+  )
+}
+
+/* 점수 추적 — "점수가 높았던 종목이 그 뒤 어땠나".
+   백테스트가 아니다(시점 정합 데이터가 없다). 그래서 한계를 같이 싣는다. */
+function ScoreTrackCard() {
+  const { data } = useQuery({
+    queryKey: ['discover-track', 90], queryFn: () => getDiscoverTrack(90),
+    staleTime: 6 * 60 * 60 * 1000, retry: false,
+  })
+  if (!data) return null
+  if (!data.ok) {
+    return (
+      <div className="mono-card ko-keep" style={{ marginTop: 10, fontSize: 11,
+        color: 'var(--m-text-tertiary)', lineHeight: 1.6 }}>
+        <b style={{ color: 'var(--m-text-secondary)' }}>점수 추적</b> — {data.note}
+        {data.tracking_since && <> 기록 시작: {data.tracking_since}.</>}
+        {!data.tracking_since && <> 오늘부터 가격이 함께 쌓입니다.</>}
+      </div>
+    )
+  }
+  const rows = (data.buckets || []).filter(b => b.n > 0)
+  if (!rows.length) return null
+  return (
+    <div className="mono-card" style={{ marginTop: 10 }}>
+      <div className="mono-section-title is-accent" style={{ marginBottom: 4 }}>점수 추적</div>
+      <div className="ko-keep" style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)',
+        marginBottom: 8, lineHeight: 1.55 }}>
+        {data.base_date} 스냅샷의 점수 구간별로, 그 뒤 지금까지의 가격 변화율입니다.
+        <b> 백테스트가 아니라 추적입니다</b> — 아래 한계를 먼저 읽으세요.
+      </div>
+      {/* 고정폭 라벨 — 구간 이름 길이가 달라도 숫자 열이 한 줄로 선다 */}
+      <div style={{ display: 'grid', gap: 5 }}>
+        {rows.map(b => (
+          <div key={b.label} style={{ display: 'grid',
+            gridTemplateColumns: '72px 1fr 64px 52px', gap: 8, alignItems: 'baseline', fontSize: 11 }}>
+            <span style={{ fontWeight: 700, color: 'var(--m-text-secondary)' }}>{b.label}</span>
+            <span style={{ color: 'var(--m-text-tertiary)', fontSize: 10 }}>{b.n}종</span>
+            <b className={b.avg_return > 0 ? 'num-pos' : b.avg_return < 0 ? 'num-neg' : ''}
+              style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {b.avg_return == null ? '—' : (b.avg_return > 0 ? '+' : '') + b.avg_return + '%'}</b>
+            <span style={{ textAlign: 'right', fontSize: 10, color: 'var(--m-text-tertiary)',
+              fontVariantNumeric: 'tabular-nums' }}>
+              중앙 {b.median_return == null ? '—' : b.median_return + '%'}</span>
+          </div>
+        ))}
+        {data.universe_avg != null && (
+          <div style={{ display: 'grid', gridTemplateColumns: '72px 1fr 64px 52px', gap: 8,
+            alignItems: 'baseline', fontSize: 11, borderTop: '1px solid var(--m-outline-variant)',
+            paddingTop: 5, marginTop: 2 }}>
+            <span style={{ fontWeight: 700, color: 'var(--m-text-tertiary)' }}>전체 평균</span>
+            <span style={{ color: 'var(--m-text-tertiary)', fontSize: 10 }}>{data.universe_n}종</span>
+            <b style={{ textAlign: 'right', color: 'var(--m-text-tertiary)',
+              fontVariantNumeric: 'tabular-nums' }}>
+              {(data.universe_avg > 0 ? '+' : '') + data.universe_avg}%</b>
+            <span />
+          </div>
+        )}
+      </div>
+      <Basis title="이 숫자의 한계" label={data.basis?.price_basis || ''}>
+        <ul style={{ margin: 0, paddingLeft: 15 }}>
+          {(data.basis?.limits || []).map(l => <li key={l}>{l}</li>)}
+        </ul>
+      </Basis>
+    </div>
+  )
+}
+
 function AxisBars({ items }) {
   return (
     <div style={{ display: 'grid', gap: 7 }}>
@@ -538,13 +639,19 @@ function DetailPanel({ row, onPick }) {
            auto-fit + minmax 로 바꾸면 들어갈 만큼만 한 줄에 놓고 나머지는 접는다. */
         gridTemplateColumns: 'repeat(auto-fit, minmax(86px, 1fr))', gap: '9px 10px' }}>
           {kv('현재가', fmtPrice(row.current_price, row.market))}
-          {kv('목표가', fmtPrice(row.target_price, row.market), '애널리스트 3인 이상 평균 목표주가 (자체 산출 아님)')}
+          {kv('목표가', fmtPrice(row.target_price, row.market), row.num_analysts ? `애널리스트 ${row.num_analysts}명 평균 목표주가 (자체 산출 아님)` : '애널리스트 3인 이상 평균 목표주가 (자체 산출 아님)')}
           {kv('상승여력', <span className={row.analyst_upside > 0 ? 'num-pos' : row.analyst_upside < 0 ? 'num-neg' : ''}>{fmtPct(row.analyst_upside)}</span>, '애널리스트 평균 목표가 ÷ 현재가 - 1. 다온이 추정한 적정가가 아닙니다')}
           {kv('순이익률', row.profit_margin == null ? '—' : Math.round(row.profit_margin) + '%', '매출 중 순이익 비율')}
           {kv('PER', fmtPe(row.trailing_pe), '후행 주가수익비율 — 낮을수록 쌈')}
           {kv('선행PER', fmtPe(row.forward_pe), '추정이익 기준 PER')}
           {kv('PEG', row.peg == null ? '—' : Number(row.peg).toFixed(2), '성장 대비 밸류 — 1 이하 저평가')}
           {kv('데이터', `${row.data_completeness}/5`, '5개 요소 중 평가에 쓰인 수')}
+          {/* 섹터 내 백분위 — 시장 내 순위만 주면 '업황이 좋은 해라서'인지
+              '그 회사가 잘해서'인지 가를 수 없다(2026-11-04 검증 수용). */}
+          {kv('섹터 내', row.pct_sector == null ? '—' : '상위 ' + Math.max(1, Math.round(100 - row.pct_sector)) + '%',
+            '같은 섹터 종목들 사이에서의 종합점수 순위. 같은 섹터가 3종 미만이면 만들지 않습니다')}
+          {kv('애널리스트', row.num_analysts == null ? '—' : row.num_analysts + '명',
+            '목표가를 낸 애널리스트 수. 적을수록 평균 목표가가 흔들립니다')}
         </div>
         <div className="ko-keep" style={{ fontSize: 11, color: 'var(--m-text-secondary)', marginTop: 9, lineHeight: 1.5 }}>
           💡 {valNote(row)}
@@ -553,6 +660,7 @@ function DetailPanel({ row, onPick }) {
           <span>{mktKo(row.market)} · {exch}</span><span>·</span><span>{type}</span><span>·</span><span>{row.sector}</span>
           {!row.gate_pass && <span style={{ color: 'var(--m-negative)' }}>· 기준 미달: {FAIL_KO[row.gate_fail_reason] || row.gate_fail_reason}</span>}
         </div>
+        <RiskFlags flags={row.risk_flags} />
       </div>
     </div>
       <CachedAI ticker={row.ticker} name={row.name} onPick={onPick} />
@@ -1009,6 +1117,7 @@ export default function DiscoverTab() {
             </tbody>
           </table>
         </div>
+        <ScoreTrackCard />
         </>
       )}
 
