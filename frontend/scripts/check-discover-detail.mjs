@@ -63,16 +63,26 @@ for (const W of [390, 700, 1000, 1440]) {
         : Math.abs(block.getBoundingClientRect().top - sib.getBoundingClientRect().top) > 20
       const bars = panel.querySelectorAll('[data-disc-score-block] b').length
       const doc = document.documentElement
-      return { pw, bw: Math.round(bw), wrapped, bars,
+      // 세로 빈칸: 2열일 때 짧은 열 아래가 통째로 비는가 (웹 모드 L자 여백)
+      const h1 = block ? Math.round(block.getBoundingClientRect().height) : 0
+      const h2 = sib ? Math.round(sib.getBoundingClientRect().height) : 0
+      return { pw, bw: Math.round(bw), wrapped, bars, h1, h2,
         overflow: doc.scrollWidth > doc.clientWidth + 2 }
     })
     if (!r) { console.log(`  —   ${W}px: 상세가 안 열렸다 — 건너뜀`); continue }
     checked++
 
+    /* 🟥 2026-11-04 2차 — 가로 여백을 고쳤더니 **세로 여백**이 생겼다.
+       오너: "모바일은 개선됐으나 웹모드는 여백이 생겨버렸어."
+       2열일 때 두 열 높이가 크게 어긋나면 짧은 쪽 아래가 L자로 비어 보인다.
+       여백은 가로로만 생기는 게 아니다 — 양쪽 다 센다. */
+    const tall = Math.max(r.h1, r.h2), short = Math.min(r.h1, r.h2)
     if (r.overflow) fail(`${W}px: 문서가 가로로 넘친다`)
     else if (r.wrapped && r.bw < r.pw * 0.92)
       fail(`${W}px: 줄바꿈됐는데 점수 열이 ${r.bw}px / 패널 ${r.pw}px — 오른쪽 ${r.pw - r.bw}px 가 빈다`)
-    else ok(`${W}px ${r.wrapped ? '(줄바꿈)' : '(2열)'} — 점수 열 ${r.bw}px / 패널 ${r.pw}px, 빈 여백 없음`)
+    else if (!r.wrapped && tall > 0 && short < tall * 0.62)
+      fail(`${W}px: 2열 높이가 ${short} vs ${tall} — 짧은 열 아래 ${tall - short}px 가 세로로 빈다`)
+    else ok(`${W}px ${r.wrapped ? '(줄바꿈)' : `2열 높이 ${r.h1}/${r.h2}`} — 점수 열 ${r.bw}px / 패널 ${r.pw}px`)
   } catch (e) {
     fail(`${W}px 예외: ${String(e.message).slice(0, 160)}`)
   } finally {

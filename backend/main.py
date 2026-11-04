@@ -6455,11 +6455,17 @@ def _notify_strategy_done(user_id: str, scope: str, result, error: str | None = 
         else:
             # 첫 문장을 미리 보여 준다 — 열지 않고도 무슨 얘긴지 안다.
             head = ''
-            for k in ('expert_review', 'risk_diagnosis', 'diagnosis'):
-                v = (result or {}).get(k)
-                if isinstance(v, str) and v.strip():
-                    head = _first_sentence(v.strip())
-                    break
+            # headline.risk 가 있으면 그것부터 — 이 한 줄이 '가장 큰 리스크'라고
+            # 명시적으로 생성된 문장이다. 총평 첫 문장보다 알림에 적합하다.
+            hl = (result or {}).get('headline')
+            if isinstance(hl, dict) and isinstance(hl.get('risk'), str) and hl['risk'].strip():
+                head = _first_sentence(hl['risk'].strip())
+            if not head:
+                for k in ('expert_review', 'risk_diagnosis', 'diagnosis'):
+                    v = (result or {}).get(k)
+                    if isinstance(v, str) and v.strip():
+                        head = _first_sentence(v.strip())
+                        break
             cut = ' (뒷부분 잘림)' if (result or {}).get('_truncated') else ''
             msg = f"[분석] {label} 전략 리포트가 준비됐습니다{cut}."
             if head:
@@ -6814,6 +6820,11 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
 
 다음 JSON만 응답하세요 (다른 텍스트 없이). 문자열 값 안에 큰따옴표(")를 절대 쓰지 말고 작은따옴표(')를 쓰세요.
 {{
+  "headline": {{
+    "risk": "지금 가장 큰 리스크 한 가지 (1문장)",
+    "evidence": "그 판단의 근거가 된 수치 (1문장, 입력 데이터의 값만)",
+    "choice": "오너가 지금 확인해 볼 선택지 (1문장)"
+  }},
   "expert_review": "전문가 총평 — 포트폴리오 전반 진단·강약점 (3-4문장)",
   "lens_views": {{
     "aggressive": {{"premise": "이 관점의 전제 (1문장)", "reading": "같은 수치를 이 관점으로 읽으면 (2-3문장)", "watch": "이 관점에서 지켜볼 것 (1문장)"}},
@@ -6835,6 +6846,20 @@ def portfolio_strategy(req: StrategyReq, cu: dict = Depends(require_ai_enabled))
   "macro_view": "글로벌 매크로 환경과 이 포트폴리오 포지셔닝 평가 (2문장)",
   "edge_notes": "마이크로캡 격리·환율 등 예외 처리 코멘트 (해당 없으면 빈 문자열)"
 }}
+
+[절대 규칙 — 핵심 3줄 (headline)]
+2026-11-04 제3자 검증 3곳이 **따로따로** 같은 말을 했다: 리포트가 길어서
+"결론이 무엇인지 / 근거가 무엇인지 / 지금 뭘 볼지"를 찾으려면 전부 훑어야 한다.
+headline 은 그 세 질문에만 답하는 **맨 위 3줄**이다. 요약이 아니다.
+1. risk 는 **한 가지만** 쓴다. 둘을 '그리고'로 잇지 마라 — 그 순간 1순위가 사라진다.
+2. evidence 에는 **반드시 숫자가 들어가야 한다.** 위 입력 데이터에 있는 값만 쓴다.
+   숫자 없는 evidence 는 근거가 아니라 다른 말로 쓴 결론이다.
+3. choice 는 **판정이 아니라 선택지**다. "~하십시오"가 아니라
+   "~를 확인해 보실 수 있습니다" / "~인지 먼저 보셔야 합니다" 로 쓴다.
+   고르는 것은 사용자다(lens_views 와 같은 원칙).
+4. 세 줄은 아래 본문과 **모순되면 안 된다.** headline 은 본문에서 뽑는 것이지
+   따로 생각해 내는 것이 아니다.
+5. 각 줄은 1문장. 별표 강조(**)는 risk 에만 1회 허용한다.
 
 [절대 규칙 — 3렌즈 해석 (lens_views)]
 **같은 수치를 세 가지 투자 관점으로 각각 읽어라.** 권고가 아니라 해석이다.

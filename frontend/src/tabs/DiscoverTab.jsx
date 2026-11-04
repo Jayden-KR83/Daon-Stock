@@ -485,7 +485,14 @@ function DetailPanel({ row, onPick }) {
   const exch = EXCH[row.exchange] || row.exchange || mktKo(row.market)
   const type = row.quote_type === 'ETF' ? 'ETF' : '개별종목'
   return (
-    <div data-disc-detail style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '10px 6px 4px', alignItems: 'flex-start' }}>
+    /* 2026-11-04 2차 — 오너: "모바일은 개선됐으나 웹모드는 여백이 생겨버렸어."
+       가로 여백을 고쳤더니 세로 여백이 생겼다. 원인: AI 심층이 오른쪽 열 안에
+       묶여 있어 두 열 높이가 213 vs 633 으로 벌어졌고, 짧은 왼쪽 열 아래가
+       420px 통째로 L자로 비었다(운영 실측).
+       → 위는 **짧은 것끼리** 2열(점수 해부 | 밸류에이션), AI 는 **전폭으로 아래**.
+         좁은 화면에선 어차피 세로로 쌓이므로 순서가 그대로 유지된다. */
+    <div data-disc-detail style={{ padding: '10px 6px 4px' }}>
+    <div data-disc-cols style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
       {/* 레이더 인포그래픽 */}
       {/* 2026-11-03: `flex: 0 0 200px` 은 **줄어들지 않는다**. 옆 지표 열의
           minWidth 240 과 합쳐 최소 454px 이 필요해, 390px 폰에서는 줄바꿈 대신
@@ -546,8 +553,9 @@ function DetailPanel({ row, onPick }) {
           <span>{mktKo(row.market)} · {exch}</span><span>·</span><span>{type}</span><span>·</span><span>{row.sector}</span>
           {!row.gate_pass && <span style={{ color: 'var(--m-negative)' }}>· 기준 미달: {FAIL_KO[row.gate_fail_reason] || row.gate_fail_reason}</span>}
         </div>
-        <CachedAI ticker={row.ticker} name={row.name} onPick={onPick} />
       </div>
+    </div>
+      <CachedAI ticker={row.ticker} name={row.name} onPick={onPick} />
     </div>
   )
 }

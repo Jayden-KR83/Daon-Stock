@@ -82,14 +82,67 @@ function iconFor(name, type) {
   return '📊'
 }
 
+/* 핵심 3줄 — 긴 리포트의 맨 앞에 두는 '먼저 읽을 것'.
+   2026-11-04 제3자 검증 3곳이 **따로따로** 같은 것을 1순위로 꼽았다:
+   결론·근거·다음 행동이 산문 속에 섞여 있어 매번 전부 훑어야 한다는 것.
+   ⚠ 요약 카드가 아니다. 요약은 본문을 짧게 쓴 것이고, 이건 **세 질문에만**
+     답한다 — 무엇이 위험한가 / 근거 숫자는 무엇인가 / 지금 뭘 볼 것인가.
+   ⚠ 장(chapter) 밖에 둔다. 어느 장을 보고 있든 보여야 하는 세 줄이다.
+   R1: 좌측 색띠 없이 4면 hairline. 번호는 이모지가 아니라 숫자. */
+function HeadlineCard({ headline }) {
+  const hl = headline
+  if (!hl || typeof hl !== 'object') return null
+  const lines = [
+    ['가장 큰 리스크', hl.risk],
+    ['근거 수치', hl.evidence],
+    ['지금 확인할 것', hl.choice],
+  ].filter(([, v]) => typeof v === 'string' && v.trim())
+  if (!lines.length) return null
+  return (
+    <div className="mono-card" style={{ marginBottom: 12, padding: '12px 14px' }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.04em',
+        color: 'var(--clr-accent)', marginBottom: 8 }}>핵심 3줄</div>
+      {/* 고정폭 번호 열 — 라벨 길이가 달라도 본문 시작 x 가 한 줄로 선다. */}
+      <div style={{ display: 'grid', gap: 7 }}>
+        {lines.map(([label, text], i) => (
+          <div key={label} style={{ display: 'grid', gridTemplateColumns: '18px minmax(0,1fr)', gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--clr-accent)',
+              fontVariantNumeric: 'tabular-nums', lineHeight: 1.6 }}>{i + 1}</span>
+            <span className="ko-keep" style={{ minWidth: 0, fontSize: 12.5, lineHeight: 1.6,
+              color: 'var(--m-text)' }}>
+              <b style={{ color: 'var(--m-text-secondary)', fontWeight: 700 }}>{label}</b>
+              {' — '}<HighlightedText text={text} />
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="ko-keep" style={{ fontSize: 10, color: 'var(--m-text-tertiary)',
+        marginTop: 9, lineHeight: 1.5 }}>
+        아래 Ⅱ 진단·Ⅲ 제안이 이 세 줄의 근거입니다. 세 줄은 본문에서 뽑은 것이고,
+        <b> 판정이 아니라 지금 볼 곳</b>을 가리킵니다.
+      </div>
+    </div>
+  )
+}
+
 /* ── 분석 리포트 MD 빌더 (타 LLM 교차검증용) ── */
 function _won(n) { return '₩' + Math.round(n || 0).toLocaleString() }
 function _pct(v, t) { return t > 0 ? (v / t * 100) : 0 }
 function _strategyToMd(s) {
   if (!s || typeof s !== 'object')
     return '_AI 전략 리포트가 아직 생성되지 않았습니다 — 분석 탭에서 "다온 AI 전략 리포트"를 생성한 뒤 다시 내보내면 포함됩니다._'
-  const skip = new Set(['_cached', '_computed_at', 'cached', 'computed_at', 'fingerprint', 'scope', 'model', 'lens_views'])
+  const skip = new Set(['_cached', '_computed_at', 'cached', 'computed_at', 'fingerprint', 'scope', 'model', 'lens_views', 'headline'])
   const out = []
+  /* 핵심 3줄은 JSON 덩어리로 내보내면 읽는 쪽(타 LLM)도 똑같이 훑어야 한다.
+     화면과 같은 순서·같은 라벨로 맨 위에 둔다. */
+  const hl = s.headline
+  if (hl && typeof hl === 'object' && (hl.risk || hl.evidence || hl.choice)) {
+    out.push('**핵심 3줄**\n')
+    if (hl.risk) out.push(`1. 가장 큰 리스크 — ${hl.risk}`)
+    if (hl.evidence) out.push(`2. 근거 수치 — ${hl.evidence}`)
+    if (hl.choice) out.push(`3. 지금 확인할 것 — ${hl.choice}`)
+    out.push('')
+  }
   for (const [k, v] of Object.entries(s)) {
     if (skip.has(k) || v == null) continue
     if (typeof v === 'string' && v.trim()) out.push(`**${k}**\n\n${v}\n`)
@@ -763,6 +816,10 @@ export default function AllocationTab() {
               {strategyErr}
             </div>
           )}
+
+          {/* 핵심 3줄 — 장 밖. 어느 장을 보고 있든 먼저 읽을 세 줄이다.
+              예전 리포트(headline 없음)면 아무것도 그리지 않는다. */}
+          <HeadlineCard headline={strategyReport?.headline} />
         </>
       )}
 
