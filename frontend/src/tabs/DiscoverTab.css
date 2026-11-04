@@ -67,10 +67,33 @@
 /* 2026-11-03: 기준을 640 → 820 으로 올렸다. 앱(폰) 모드는 폭이 640 을 넘는
    기기에서도 쓰인다(폴더블 펼침·큰 폰·좁은 창). 그 구간에서 표가 520px 최소폭을
    유지해 펼친 상세까지 함께 밀려났다 — 사용자는 '잘린 화면'으로 본다. */
+/* 🟥 2026-11-04 — **폭으로 판정하기를 그만둔다.**
+   640 → 820 으로 올려도 오너 화면은 여전히 잘렸다. 캡처에서 국가·섹터 열이
+   그대로 보였다 = 미디어쿼리가 **안 걸렸다** = 그 기기의 CSS 폭이 820 을 넘는다.
+   폭을 몇으로 잡아야 맞는지는 기기마다 다르고, 나는 그것을 추측하고 있었다.
+
+   앱(폰) 레이아웃이면 **폭과 무관하게** 좁은 표로 간다. `.app-mode-app` 은
+   App.jsx 가 앱 레이아웃일 때만 붙이는 클래스라 추측이 끼어들 자리가 없다.
+   (미디어쿼리도 남긴다 — 웹 모드로 창을 좁힌 경우를 덮는다.) */
+.app-mode-app .disc-table { min-width: 0 !important; }
+/* 티커 열은 남긴다 — 거기 관심 담기(★) 버튼이 있다. 지우면 기능이 사라진다. */
+.app-mode-app .disc-col-market,
+.app-mode-app .disc-col-sector { display: none; }
+.app-mode-app .disc-sticky .mono-section-sub { display: none; }
+
 @media (max-width: 820px) {
   .disc-table { min-width: 0 !important; }
-  /* 티커 열은 남긴다 — 거기 관심 담기(★) 버튼이 있다. 지우면 기능이 사라진다. */
   .disc-col-market,
   .disc-col-sector { display: none; }
   .disc-sticky .mono-section-sub { display: none; }   /* 설명문은 고정 줄에서 뺀다 */
+}
+
+/* 안전망 — 표가 그래도 가로로 넘치는 날이 오면, **펼친 상세만은** 화면 안에 둔다.
+   상세는 표의 한 셀(colspan)이라 표가 밀리면 같이 밀려 나간다. sticky 로 왼쪽에
+   붙여 두면 가로 스크롤과 무관하게 늘 보인다. 잘린 본문을 읽으려고 옆으로 미는
+   일이 없어진다. */
+.app-mode-app .disc-table td[colspan] > * {
+  position: sticky;
+  left: 0;
+  max-width: calc(100vw - 28px);
 }
