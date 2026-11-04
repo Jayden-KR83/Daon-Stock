@@ -11,7 +11,8 @@
     "check:parser": "node scripts/check-broker-parser.mjs",
     "check:motion": "node ../scripts/check-motion.mjs",
     "check": "npm run check:tokens && npm run check:motion && npm run check:parser",
-    "prebuild": "npm run check"
+    "prebuild": "npm run check",
+    "check:discover": "node scripts/check-discover-detail.mjs"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",

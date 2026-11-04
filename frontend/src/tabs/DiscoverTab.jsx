@@ -378,8 +378,104 @@ function CachedAI({ ticker, name, onPick }) {
   )
 }
 
+/* 축별 점수 막대 — 레이더가 "모양"이라면 이쪽은 "숫자·기여도·결측".
+   2026-11-04 제3자 검증 3곳(Gemini·ChatGPT·Perplexity)이 **따로따로** 같은 말을 했다:
+   레이더만으로는 ① 축 간 점수 차 비교 ② 결측 축 식별 ③ 종합점수 기여도를 못 읽는다.
+   레이더를 없애는 대신 **옆에 붙인다** — 비어 있던 오른쪽이 정보로 찬다.
+
+   🟥 라벨 폭을 고정한다. 가변 길이 라벨을 flex 로 늘어놓으면 막대 시작 x 가
+   줄마다 달라져 "어느 축이 긴가"를 눈으로 못 센다(= 비교 기능이 죽는다). */
+function AxisBars({ items }) {
+  return (
+    <div style={{ display: 'grid', gap: 7 }}>
+      {items.map(it => (
+        <div key={it.key}>
+          <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0,1fr) 24px',
+            gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--m-text-secondary)' }}>{it.label}</span>
+            <span style={{ height: 6, borderRadius: 3, background: 'var(--m-outline-variant)',
+              position: 'relative', overflow: 'hidden', display: 'block' }}>
+              {it.v != null && <span style={{ position: 'absolute', top: 0, bottom: 0, left: 0,
+                width: Math.max(2, Math.min(100, it.v)) + '%', background: 'var(--clr-accent)', borderRadius: 3 }} />}
+            </span>
+            <b style={{ fontSize: 11, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+              color: it.v == null ? 'var(--m-text-tertiary)' : 'var(--m-text)' }}>{it.v == null ? '—' : Math.round(it.v)}</b>
+          </div>
+          {/* 들여쓰기 50 = 라벨 44 + gap 6. 부제 시작 x 를 막대 시작 x 와 맞춘다. */}
+          <div className="ko-keep" style={{ fontSize: 9, color: 'var(--m-text-tertiary)',
+            marginTop: 1, paddingLeft: 50, lineHeight: 1.35 }}>
+            {it.w != null && <>가중치 {it.w}%</>}
+            {/* 기여도 = 가중치 ÷ 가용가중치합 × 점수 × 완성도/5.
+                backend `_garp_score` 와 같은 식이다(재정규화 + 결측 감점).
+                합치면 종합점수가 된다 — 어느 축이 점수를 끌어올렸는지 눈으로 센다. */}
+            {it.contrib != null && <> → 종합에 <b style={{ color: 'var(--m-text-secondary)' }}>+{it.contrib.toFixed(1)}</b></>}
+            {' · '}{it.crit}
+            {it.v == null && <b style={{ color: 'var(--m-negative)' }}> · 데이터 없음</b>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* 섹터 쏠림 공시 — 2026-11-04 제3자 검증 3곳이 **따로따로** 같은 것을 짚었다:
+   상위 15종 중 에너지가 8종. 개별 점수는 높아도 그대로 담으면 한 사이클에
+   전부 묶인다.
+
+   🟥 다만 **상한을 걸어 가리지는 않는다.** 점수가 높은 종목을 섹터 쿼터로
+   잘라내면 "왜 안 보이는지" 알 수 없게 되고, 그건 이 앱이 하지 않기로 한
+   '대신 판정하기'다. 대신 **사실만 띄운다** — 쏠려 있다는 것을 알고 고르게.
+   (섹터 필터는 이미 위에 있으니 걸러내는 건 오너 몫.) */
+function SectorConcentration({ rows }) {
+  const top = React.useMemo(() => {
+    if (rows.length < 5) return null
+    const cnt = new Map()
+    for (const r of rows) {
+      const k = r.sector || '기타'
+      cnt.set(k, (cnt.get(k) || 0) + 1)
+    }
+    const sorted = [...cnt.entries()].sort((a, b) => b[1] - a[1])
+    const [name, n] = sorted[0]
+    // 1/3 미만이면 쏠림이라 부를 수 없다 — 경고 피로를 만들지 않는다.
+    if (n / rows.length < 1 / 3) return null
+    return { name, n, total: rows.length, pct: Math.round(n / rows.length * 100), second: sorted[1] }
+  }, [rows])
+  if (!top) return null
+  return (
+    <div className="ko-keep" style={{ marginBottom: 10, padding: '8px 11px', borderRadius: 4,
+      border: '1px solid var(--m-outline-variant)', background: 'var(--m-surface-variant)',
+      fontSize: 11, color: 'var(--m-text-secondary)', lineHeight: 1.55 }}>
+      <b style={{ color: 'var(--m-text)' }}>섹터 쏠림</b> — 지금 보이는 {top.total}종 중{' '}
+      <b style={{ color: 'var(--m-text)' }}>{top.name} {top.n}종({top.pct}%)</b>
+      {top.second && top.second[1] > 1 && <> · {top.second[0]} {top.second[1]}종</>}.
+      <br />
+      점수는 종목별로 매기므로 같은 업황에 묶인 종목이 함께 올라올 수 있습니다.
+      그대로 담으면 분산이 아니라 <b>한 사이클에 집중</b>하는 것이 됩니다.
+    </div>
+  )
+}
+
 function DetailPanel({ row, onPick }) {
   const radarData = AXES.map(ax => ({ axis: ax.label, v: axVal(row, ax) }))
+  /* 축별 종합 기여도 — backend `_garp_score` 와 **같은 식**으로 계산한다.
+       base = Σ(w·pct) / Σ(w 가용)       ← 가용 축만 재정규화
+       종합 = base × (완성도/5)           ← 결측 감점
+     따라서 한 축의 기여 = w·pct / Σ(w 가용) × (완성도/5). 다 더하면 종합이 된다.
+     🟥 식이 둘로 갈라지면 화면이 거짓말을 한다 — backend 가 바뀌면 여기도 고칠 것. */
+  const axisItems = React.useMemo(() => {
+    const kr = row.market === 'KR'
+    const ws = AXES.map(ax => AXIS_WEIGHT[ax.key]?.[kr ? 1 : 0] ?? 0)
+    let den = 0
+    AXES.forEach((ax, i) => { if (axVal(row, ax) != null) den += ws[i] })
+    const factor = (row.data_completeness ?? 0) / 5
+    return AXES.map((ax, i) => {
+      const v = axVal(row, ax)
+      return {
+        key: ax.key, label: ax.label, crit: ax.crit, v, w: ws[i] || null,
+        contrib: (v == null || den <= 0) ? null : (ws[i] * v / den) * factor,
+      }
+    })
+  }, [row])
   const kv = (label, value, hint) => (
     <div title={hint || ''} style={{ minWidth: 0 }}>
       <div style={{ fontSize: 9.5, color: 'var(--m-text-tertiary)', fontWeight: 700 }}>{label}</div>
@@ -389,39 +485,42 @@ function DetailPanel({ row, onPick }) {
   const exch = EXCH[row.exchange] || row.exchange || mktKo(row.market)
   const type = row.quote_type === 'ETF' ? 'ETF' : '개별종목'
   return (
-    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '10px 6px 4px', alignItems: 'flex-start' }}>
+    <div data-disc-detail style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '10px 6px 4px', alignItems: 'flex-start' }}>
       {/* 레이더 인포그래픽 */}
       {/* 2026-11-03: `flex: 0 0 200px` 은 **줄어들지 않는다**. 옆 지표 열의
           minWidth 240 과 합쳐 최소 454px 이 필요해, 390px 폰에서는 줄바꿈 대신
           표를 밀어내 가로 스크롤이 생겼다(오너: "가로 스크롤시 보여. 불편하잖아").
           → 줄어들 수 있게 바꾼다. 넓은 화면에서는 maxWidth 가 지금 모습을 지킨다. */}
-      <div style={{ flex: '1 1 180px', maxWidth: 220, minWidth: 0 }}>
-        <ResponsiveContainer width="100%" height={170}>
-          <RadarChart data={radarData} outerRadius="68%">
-            <PolarGrid stroke="var(--m-outline-variant)" />
-            <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: 'var(--m-text-secondary)' }} />
-            <Radar dataKey="v" stroke="#1F4FD3" fill="#1F4FD3" fillOpacity={0.22}
-              connectNulls isAnimationActive={false} />
-          </RadarChart>
-        </ResponsiveContainer>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 10.5, marginTop: 6 }}>
-          {AXES.map(ax => {
-            const v = axVal(row, ax)
-            const w = AXIS_WEIGHT[ax.key]?.[row.market === 'KR' ? 1 : 0]
-            return <div key={ax.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-              <span style={{ minWidth: 0 }}>
-                <span style={{ color: 'var(--m-text-secondary)', fontWeight: 700 }}>{ax.label}</span>
-                {w != null && <span style={{ color: 'var(--m-text-tertiary)', fontSize: 9, marginLeft: 4 }}>가중치 {w}%</span>}
-                <br /><span style={{ color: 'var(--m-text-tertiary)', fontSize: 9.5 }}>{ax.crit}</span>
-              </span>
-              <b style={{ flexShrink: 0, color: v == null ? 'var(--m-text-tertiary)' : 'var(--m-text)', fontVariantNumeric: 'tabular-nums' }}>{v == null ? '—' : Math.round(v)}</b>
-            </div>
-          })}
+      {/* 2026-11-04 오너: "빈 여백 어떻게 없애고 UI 개선해봐".
+          원인은 `maxWidth: 220` 이었다. 좁은 화면에서 두 열이 줄바꿈되면 이 열만
+          220px 로 남고 오른쪽 150px 가 통째로 비었다 — 레이더가 왼쪽에 치우쳐
+          **고장난 것처럼** 보인 이유다.
+          → 줄바꿈되면 폭 전체를 쓰게 하고(maxWidth 는 넓은 화면 전용 상한),
+            비던 자리에 축별 막대를 넣는다. 여백이 정보로 바뀐다. */}
+      <div data-disc-score-block style={{ flex: '1 1 320px', maxWidth: 520, minWidth: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,146px) minmax(0,1fr)',
+          gap: 10, alignItems: 'center' }}>
+          <ResponsiveContainer width="100%" height={146}>
+            <RadarChart data={radarData} outerRadius="62%">
+              <PolarGrid stroke="var(--m-outline-variant)" />
+              <PolarAngleAxis dataKey="axis" tick={{ fontSize: 9, fill: 'var(--m-text-secondary)' }} />
+              <Radar dataKey="v" stroke="#1F4FD3" fill="#1F4FD3" fillOpacity={0.22}
+                connectNulls isAnimationActive={false} />
+            </RadarChart>
+          </ResponsiveContainer>
+          <AxisBars items={axisItems} />
         </div>
         <div className="ko-keep" style={{ fontSize: 9.5, color: 'var(--m-text-tertiary)', marginTop: 8, lineHeight: 1.5,
           borderTop: '1px solid var(--m-outline-variant)', paddingTop: 7 }}>
           <b style={{ color: 'var(--m-text-secondary)' }}>종합 {Math.round(row.composite_score)}</b> = 5축 <b>가중합 × 완성도({row.data_completeness}/5)</b>.
-          단순 평균이 아니라, 각 축을 <b>같은 시장 내 백분위</b>로 환산 후 위 가중치로 합산하고 결측을 감점합니다.
+          단순 평균이 아니라, 각 축을 <b>같은 시장 내 백분위</b>로 환산 후 위 가중치로 합산합니다.
+          {/* 제3자 검증 3곳이 공통으로 "결측 축을 재정규화만 하면 점수가 부풀려진다"고
+              지적했는데, 실제 구현은 그 위에 ×완성도/5 감점을 이미 건다(backend `_garp_score`).
+              문서에 안 적혀 있어서 생긴 오해다 → 화면에 수치로 못 박는다. */}
+          {row.data_completeness < 5 && <>
+            {' '}이 종목은 <b style={{ color: 'var(--m-negative)' }}>{5 - row.data_completeness}개 축이 비어</b>
+            {' '}점수에 <b>×{(row.data_completeness / 5).toFixed(1)}</b> 감점이 이미 적용된 값입니다.
+          </>}
         </div>
       </div>
       {/* 밸류에이션 + 메타 */}
@@ -432,8 +531,8 @@ function DetailPanel({ row, onPick }) {
            auto-fit + minmax 로 바꾸면 들어갈 만큼만 한 줄에 놓고 나머지는 접는다. */
         gridTemplateColumns: 'repeat(auto-fit, minmax(86px, 1fr))', gap: '9px 10px' }}>
           {kv('현재가', fmtPrice(row.current_price, row.market))}
-          {kv('목표가', fmtPrice(row.target_price, row.market), '애널리스트 평균 목표주가')}
-          {kv('상승여력', <span className={row.analyst_upside > 0 ? 'num-pos' : row.analyst_upside < 0 ? 'num-neg' : ''}>{fmtPct(row.analyst_upside)}</span>, '목표가 대비 현재가 상승여력')}
+          {kv('목표가', fmtPrice(row.target_price, row.market), '애널리스트 3인 이상 평균 목표주가 (자체 산출 아님)')}
+          {kv('상승여력', <span className={row.analyst_upside > 0 ? 'num-pos' : row.analyst_upside < 0 ? 'num-neg' : ''}>{fmtPct(row.analyst_upside)}</span>, '애널리스트 평균 목표가 ÷ 현재가 - 1. 다온이 추정한 적정가가 아닙니다')}
           {kv('순이익률', row.profit_margin == null ? '—' : Math.round(row.profit_margin) + '%', '매출 중 순이익 비율')}
           {kv('PER', fmtPe(row.trailing_pe), '후행 주가수익비율 — 낮을수록 쌈')}
           {kv('선행PER', fmtPe(row.forward_pe), '추정이익 기준 PER')}
@@ -726,7 +825,7 @@ export default function DiscoverTab() {
                 ? <>ETF를 <b>추세 50% · 저비용 25% · 규모 25%</b>로 점수화. 행을 누르면 6개월 수익률·보수율·순자산 상세가 펼쳐집니다. 한국 ETF는 보수율·AUM 미제공이라 추세·거래량 위주예요.</>
                 : isInnov
                 ? <>아직 적자인 <b>AI·바이오 혁신/턴어라운드</b> 종목을 이익(PEG)이 아니라 <b>저평가(PSR÷R&D) · 파이프라인 · 바닥다지기 · 생존력</b>으로 점수화한 <b>저점 후보</b>입니다. 변동성이 큰 <b>고위험 위성(satellite)</b>이라 소액 분산이 원칙이에요. 미국 혁신주 큐레이션 한정.</>
-                : <>성장하면서도 저평가된 종목을 5요소로 점수화. <b>행을 누르면</b> 5요소 레이더와 목표가·상승여력·PER 등 상세가 펼쳐집니다.</>}
+                : <>성장하면서도 저평가된 종목을 5요소로 점수화. <b>행을 누르면</b> 5요소 레이더·막대와 목표가·상승여력·PER 등 상세가 펼쳐집니다.</>}
               {' '}점수는 상승 확률이 아니라 같은 그룹 내 상대 순위예요.
             </div>
           </div>
@@ -810,6 +909,8 @@ export default function DiscoverTab() {
           아직 발굴 결과가 없습니다. 매일 장 마감 후 자동 갱신됩니다.{!includeFailed && ' (등급 필터를 「전체」로 바꿔 보세요.)'}
         </div>
       ) : (
+        <>
+        <SectorConcentration rows={view} />
         <div className="mono-card" style={{ padding: '4px 6px', overflowX: 'auto' }}>
           <table className="disc-table" style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', borderSpacing: 0 }}>
             <thead>
@@ -900,6 +1001,7 @@ export default function DiscoverTab() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <div className="ko-keep" style={{ fontSize: 10, color: 'var(--m-text-tertiary)', marginTop: 9, lineHeight: 1.5 }}>
