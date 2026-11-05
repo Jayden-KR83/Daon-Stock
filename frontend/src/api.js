@@ -159,8 +159,13 @@ export const getCorrelation = (body) =>
 
 // B안-B4 실적 캘린더
 export const getMarketBrief = () => api.get('/market/brief').then(r => r.data)
+/* 생성은 즉시 반환하고 뒤에서 돈다(백엔드 _macro_jobs). 그래도 기본 20초
+   타임아웃보다는 여유를 준다 — 스레드를 띄우기 전 DB 조회가 있다. */
 export const runMacroBrief  = (force = false) =>
-  api.post('/admin/macro_brief/run', null, { params: { force } }).then(r => r.data)
+  api.post('/admin/macro_brief/run', null, { params: { force }, timeout: 30_000 })
+     .then(r => r.data)
+export const macroBriefStatus = () =>
+  api.get('/admin/macro_brief/status').then(r => r.data)
 export const getEarningsCalendar = (body) =>
   api.post('/earnings/calendar', body, { timeout: 30_000 }).then(r => r.data)
 

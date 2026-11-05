@@ -2961,7 +2961,8 @@ def _call_claude(api_key: str, model: str, prompt: str, max_tokens: int, timeout
 
 def _call_claude_with_search(api_key: str, model: str, prompt: str,
                              max_tokens: int = 8192, max_searches: int = 4,
-                             timeout: int = 180) -> tuple[str, list]:
+                             timeout: int = 180,
+                             errors_out: list | None = None) -> tuple[str, list]:
     """Claude API 호출 + web_search 도구 사용. (마지막 텍스트 블록, 인용 출처 리스트) 반환.
 
     중요: web_search를 쓰면 응답에 thinking-text 블록이 여러 개 포함됨.
@@ -2977,6 +2978,14 @@ def _call_claude_with_search(api_key: str, model: str, prompt: str,
             "type": "web_search_20260209",
             "name": "web_search",
             "max_uses": max_searches,
+            # 🟥 2026-11-05: `_20260209` 는 `allowed_callers` 기본값이
+            #   ["code_execution_20260120"] 다 — 검색이 **코드 실행 안에서** 돌며
+            #   결과를 걸러 준다(동적 필터링). 그 경로가 provisioning 에 실패하면
+            #   검색 자체가 에러 블록으로 돌아온다. 실제로 시황 브리핑이
+            #   "검색 도구 오류"를 본문에 적어 내보냈다.
+            #   우리는 CPI·기준금리 같은 **짧은 사실 3개**만 찾는다. 결과를 걸러 줄
+            #   만큼 양이 많지 않아 동적 필터링의 이득이 없다. 직접 호출로 고정한다.
+            "allowed_callers": ["direct"],
         }],
         "system": (
             "You are a senior equity research analyst writing in KOREAN.\n"
@@ -3004,6 +3013,7 @@ def _call_claude_with_search(api_key: str, model: str, prompt: str,
     text_blocks: list[str] = []   # 모든 text 블록 순서대로
     citations: list[dict] = []
     seen_urls: set[str] = set()
+    search_errors: list[str] = []   # web_search 가 in-band 로 돌려주는 오류 코드
 
     for block in data.get("content", []):
         btype = block.get("type")
@@ -3020,7 +3030,21 @@ def _call_claude_with_search(api_key: str, model: str, prompt: str,
                             "snippet": (cit.get("cited_text") or "")[:240],
                         })
         elif btype == "web_search_tool_result":
-            for r in (block.get("content") or []):
+            # 🟥 검색이 실패하면 content 가 **리스트가 아니라 객체**로 온다
+            #   ({"type": "web_search_tool_result_error", "error_code": ...}).
+            #   예전 코드는 그냥 `for r in content` 를 돌았다 — dict 를 순회하면
+            #   키 문자열이 나오고 `r.get` 에서 조용히 넘어간다. 그래서 검색이
+            #   통째로 실패해도 **아무 데도 기록되지 않았고**, 유일한 흔적은
+            #   모델이 본문에 쓴 "검색 도구 오류" 한 줄이었다(2026-11-05).
+            #   HTTP 는 200 이라 예외도 안 난다.
+            _c = block.get("content")
+            if isinstance(_c, dict):
+                if _c.get("type") == "web_search_tool_result_error":
+                    search_errors.append(_c.get("error_code") or "unknown")
+                continue
+            for r in (_c or []):
+                if not isinstance(r, dict):
+                    continue
                 if r.get("type") == "web_search_result":
                     url = r.get("url", "")
                     if url and url not in seen_urls:
@@ -3042,6 +3066,18 @@ def _call_claude_with_search(api_key: str, model: str, prompt: str,
             final_text = matches[-1].group()
         else:
             final_text = merged   # 최후의 수단 — 파서에서 처리
+
+    # 검색 오류를 **호출부에 돌려준다.** 반환 튜플을 늘리면 기존 호출부가 전부
+    # 깨지므로 선택적 출력 리스트로 받는다(넘기지 않은 호출부는 그대로 동작).
+    # 🟥 로그에도 남긴다 — 넘기지 않은 호출부에서 검색이 죽어도 흔적은 남아야 한다.
+    if search_errors:
+        if errors_out is not None:
+            errors_out.extend(search_errors)
+        try:
+            _log_event('__ai__', 'web_search_error',
+                       {'model': model, 'codes': search_errors[:5]})
+        except Exception:
+            pass
 
     return final_text, citations
 
@@ -5721,9 +5757,11 @@ def _gen_macro_brief(session: str, snap: list) -> dict:
     try:
         # views 5칸이 늘면서 출력이 길어졌다. 상한에 걸려 잘리면 JSON 이 깨지고
         # **브리핑 전체가 사라진다**(부분 복구가 안 된다). 넉넉히 준다.
+        search_errs: list = []
         if is_pre:
             text, _src = _call_claude_with_search(
-                api_key, MODEL_ANALYSIS, prompt, max_tokens=4500, max_searches=3, timeout=240)
+                api_key, MODEL_ANALYSIS, prompt, max_tokens=4500, max_searches=3,
+                timeout=240, errors_out=search_errs)
         else:
             text = _call_claude(api_key, MODEL_ANALYSIS, prompt, 4000, 150)
         data = _parse_claude_json(text)
@@ -5734,7 +5772,11 @@ def _gen_macro_brief(session: str, snap: list) -> dict:
 
     data['ok'] = True
     data['session'] = session
-    data['searched'] = bool(is_pre)
+    # 🟥 '검색을 **요청**했다'와 '검색이 **됐다**'는 다른 사실이다.
+    #   예전에는 is_pre 만 보고 화면에 "웹 검색 1회 포함"이라고 적었다. 검색이
+    #   실패한 날에도 그렇게 적혔고, 사실 확인이 된 것처럼 보였다.
+    data['searched'] = bool(is_pre) and not search_errs
+    data['search_error'] = (search_errs[0] if search_errs else None)
     data['quotes'] = snap
     data['unmeasured'] = list(MACRO_UNMEASURED)
     data['model'] = MODEL_ANALYSIS
@@ -5858,55 +5900,109 @@ def _gen_user_macro_note(uid: str, brief: dict, links: list) -> str | None:
         return None
 
 
+# 시황 생성은 **길다** — 웹 검색 3회 + Sonnet 4,500토큰이라 40~120초가 보통이다.
+# 그런데 프런트 axios 기본 타임아웃은 20초다(api.js). 2026-11-05 오너 화면:
+#   "실패: timeout of 20000ms exceeded"
+# 🟥 그런데 **서버는 끝까지 만들어 저장했다.** 즉 성공한 작업을 실패로 보여 줬고,
+#    오너는 당연히 '다시 만들기'를 눌렀다 — 누를 때마다 돈이 또 나간다.
+#    조용한 실패보다 나쁜 것이 **성공을 실패로 보여 주는 것**이다.
+#
+# 그래서 전략 리포트와 같은 모양으로 바꾼다(_strategy_jobs 패턴):
+#   POST 는 스레드를 띄우고 **즉시** 반환 → 프런트가 /api/market/brief 를 폴링.
+# 같은 세션 작업이 이미 돌고 있으면 새로 띄우지 않는다 — 연타 재과금 차단.
+_macro_jobs = {}                 # session_key -> 'running' | {'error': msg}
+_macro_jobs_lock = Lock()
+
+
+def _run_macro_brief_job(session: str, uid: str, is_demo: bool):
+    """백그라운드 생성. 예외는 전부 삼켜 잡 상태로만 남긴다 —
+    스레드에서 터진 예외는 아무도 보지 못한다."""
+    try:
+        snap  = _macro_snapshot()
+        brief = _gen_macro_brief(session, snap)
+        if not brief.get('ok'):
+            with _macro_jobs_lock:
+                _macro_jobs[session] = {'error': (brief.get('reason') or 'failed')}
+            _log_event('__admin__', 'admin_macro_brief_failed',
+                       {'session': session, 'reason': brief.get('reason')})
+            return
+        _save_macro_brief(session, brief)
+
+        if not is_demo:
+            try:
+                links = _user_macro_links(uid, snap)
+                note  = _gen_user_macro_note(uid, brief, links)
+                if note:
+                    with _db() as conn:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO macro_brief_user"
+                            "(user_id, session_key, created_at, payload_json) VALUES(?,?,?,?)",
+                            (uid, session, time(),
+                             json.dumps({'note': note}, ensure_ascii=False)))
+            except Exception:
+                pass
+        _log_event(uid, 'admin_macro_brief', {'session': session})
+        with _macro_jobs_lock:
+            _macro_jobs.pop(session, None)
+    except Exception as e:
+        with _macro_jobs_lock:
+            _macro_jobs[session] = {'error': str(e)[:140] or '생성 실패'}
+
+
 @app.post("/api/admin/macro_brief/run")
 def admin_run_macro_brief(force: bool = False, cu: dict = Depends(require_admin)):
-    """관리자가 지금 바로 시황을 만든다.
+    """관리자가 지금 바로 시황을 만든다. **즉시 반환**하고 뒤에서 만든다.
 
     왜 필요한가: 생성은 cron 이 하는데, cron 은 하루 2번뿐이다. 기능을 새로
     올린 날이나 cron 이 실패한 날에는 **기다리는 것 말고 할 수 있는 일이 없었다.**
     그리고 cron 을 손으로 부르려면 cron_secret 이 있어야 하는데, 그 값을
     꺼내 쓰는 과정 자체가 유출 경로다(2026-10 화면 캡처로 노출된 전례).
 
-    같은 세션을 이미 만들었으면 다시 만들지 않는다 — 버튼을 연타해도 돈이
-    한 번만 나간다.
-
-    force=1 은 그 보호를 **의도적으로** 끈다. 프롬프트를 고친 날에는 이미 있는
-    글이 옛 프롬프트 결과라서, 다시 만들지 못하면 다음 cron(최대 9시간 뒤)까지
-    고친 것을 볼 수 없다. 돈이 한 번 더 나가므로 화면에서도 그렇게 적는다.
+    돈이 두 번 나가지 않게 하는 장치가 **셋** 있다:
+      1) 같은 세션 글이 이미 있으면 안 만든다 (force 로만 해제)
+      2) 같은 세션 작업이 **이미 돌고 있으면** 새로 띄우지 않는다 (연타 방어)
+      3) force 는 화면에서 '다시 만들기'로만 눌리고, 비용을 툴팁에 적는다
     """
     session = _macro_session_key()
+
+    with _macro_jobs_lock:
+        if _macro_jobs.get(session) == 'running':
+            return {'ok': True, 'session': session, 'status': 'running',
+                    'note': '이미 만드는 중입니다'}
+
     with _db() as conn:
         exists = conn.execute(
             "SELECT 1 FROM macro_brief WHERE session_key=?", (session,)).fetchone()
     if exists and not force:
         return {'ok': True, 'session': session, 'skipped': 'already_exists'}
 
-    snap  = _macro_snapshot()
-    brief = _gen_macro_brief(session, snap)
-    if not brief.get('ok'):
-        return {'ok': False, 'session': session, 'reason': brief.get('reason'),
-                'error': brief.get('error')}
-    _save_macro_brief(session, brief)
+    with _macro_jobs_lock:
+        _macro_jobs[session] = 'running'
+    # 이 파일은 상단에서 Lock 만 import 한다(`from threading import Lock`).
+    # 다른 비동기 지점(전략·발굴 스캔)도 같은 방식으로 지역 import 한다.
+    import threading
+    threading.Thread(target=_run_macro_brief_job,
+                     args=(session, cu['user_id'], _is_demo(cu)), daemon=True).start()
+    return {'ok': True, 'session': session, 'status': 'running'}
 
-    uid = cu['user_id']
-    note_made = False
-    if not _is_demo(cu):
-        try:
-            links = _user_macro_links(uid, snap)
-            note  = _gen_user_macro_note(uid, brief, links)
-            if note:
-                with _db() as conn:
-                    conn.execute(
-                        "INSERT OR REPLACE INTO macro_brief_user"
-                        "(user_id, session_key, created_at, payload_json) VALUES(?,?,?,?)",
-                        (uid, session, time(), json.dumps({'note': note}, ensure_ascii=False)))
-                note_made = True
-        except Exception:
-            pass
 
-    _log_event(uid, 'admin_macro_brief', {'session': session})
-    return {'ok': True, 'session': session, 'searched': brief.get('searched'),
-            'note': note_made}
+@app.get("/api/admin/macro_brief/status")
+def admin_macro_brief_status(cu: dict = Depends(require_admin)):
+    """생성 상태. running | error | idle.
+
+    결과 자체는 /api/market/brief 가 준다 — 상태와 내용을 두 곳에서 주면
+    둘이 어긋난다. 여기서는 **'아직 도는가'** 만 답한다.
+    """
+    session = _macro_session_key()
+    with _macro_jobs_lock:
+        job = _macro_jobs.get(session)
+    if job == 'running':
+        return {'status': 'running', 'session': session}
+    if isinstance(job, dict) and job.get('error'):
+        with _macro_jobs_lock:
+            _macro_jobs.pop(session, None)       # 한 번 읽으면 비운다
+        return {'status': 'error', 'session': session, 'error': job['error']}
+    return {'status': 'idle', 'session': session}
 
 
 class MacroBriefReq(BaseModel):

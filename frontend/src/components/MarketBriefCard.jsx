@@ -1,6 +1,6 @@
 import React from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getMarketBrief, runMacroBrief } from '../api'
+import { getMarketBrief, runMacroBrief, macroBriefStatus } from '../api'
 import { useStore } from '../store'
 import { Basis } from './report'
 
@@ -119,13 +119,40 @@ function RunButton({ exists }) {
   const [msg, setMsg]   = React.useState('')
   if (!isAdmin) return null
 
+  /* 🟥 2026-11-05: 전에는 생성이 끝날 때까지 **한 요청으로 기다렸다.**
+     생성은 웹 검색 3회 + Sonnet 4,500토큰이라 40~120초가 걸리는데 axios 기본
+     타임아웃은 20초다. 그래서 화면에 "실패: timeout of 20000ms exceeded" 가 떴다 —
+     **그런데 서버는 끝까지 만들어 저장했다.** 성공한 작업을 실패로 보여 줬고,
+     당연히 다시 누르게 되고, 누를 때마다 돈이 나갔다.
+     조용한 실패보다 나쁜 것이 **성공을 실패로 보여 주는 것**이다.
+
+     → 서버가 즉시 반환하고, 여기서 상태를 폴링한다. 중간에 탭을 떠나도
+       생성은 계속된다(서버 스레드). 돌아와서 새로고침하면 결과가 있다. */
   const run = async (force) => {
-    setBusy(true); setMsg('')
+    setBusy(true); setMsg('만드는 중…')
     try {
       const r = await runMacroBrief(force)
-      setMsg(r.skipped === 'already_exists' ? '이미 있음'
-        : r.ok ? '생성됨' : `실패: ${r.reason || ''}`)
-      await qc.invalidateQueries({ queryKey: ['market-brief'] })
+      if (r.skipped === 'already_exists') {
+        setMsg('이미 있음'); setBusy(false); return
+      }
+      // 최대 4분. 웹 검색이 느린 날에도 이 안에 끝난다(서버 타임아웃 240초).
+      const until = Date.now() + 4 * 60 * 1000
+      while (Date.now() < until) {
+        await new Promise(res => setTimeout(res, 4000))
+        let st
+        try { st = await macroBriefStatus() } catch { continue }
+        if (st.status === 'error') { setMsg('실패: ' + (st.error || '')); break }
+        if (st.status !== 'running') {
+          setMsg('생성됨')
+          await qc.invalidateQueries({ queryKey: ['market-brief'] })
+          break
+        }
+      }
+      if (Date.now() >= until) {
+        // 포기하는 것은 **화면뿐**이다. 서버는 계속 만든다 — 그렇게 적는다.
+        setMsg('오래 걸립니다 — 뒤에서 계속 만듭니다. 잠시 후 새로고침하세요')
+        await qc.invalidateQueries({ queryKey: ['market-brief'] })
+      }
     } catch (e) {
       setMsg('실패: ' + (e.response?.data?.detail || e.message || ''))
     } finally { setBusy(false) }
@@ -303,8 +330,12 @@ export default function MarketBriefCard() {
 
       <QuoteGrid quotes={b.quotes} />
 
+      {/* '검색을 요청했다'와 '검색이 됐다'는 다른 사실이다. 실패한 날에도
+          "웹 검색 포함"이라고 적으면, 확인되지 않은 값을 확인된 것처럼 보이게 한다. */}
       <Basis title="이 글의 한계"
-        label={`${b.searched ? '웹 검색 1회 포함' : '시세만 사용(검색 없음)'} · 모델 ${b.model || '—'}`}>
+        label={`${b.searched ? '웹 검색 포함'
+          : b.search_error ? `웹 검색 실패(${b.search_error}) — 발표값은 확인 필요`
+          : '시세만 사용(검색 없음)'} · 모델 ${b.model || '—'}`}>
         <ul style={{ margin: 0, paddingLeft: 15 }}>
           {(data.unmeasured || []).map(u => <li key={u}>{u}</li>)}
           <li>이 글은 시장 해설이며 <b>매수·매도 권유가 아닙니다</b>.</li>

@@ -335,3 +335,95 @@ def test_frontend_reads_the_same_keys():
         assert key in jsx, f'화면이 {key} 를 안 읽는다'
     # 세 층을 섞지 않았는가 — 서버 계산분에 'AI 가 아니라'가 적혀 있어야 한다
     assert 'AI 가 아니라' in jsx
+
+
+# ── 긴 작업을 한 요청으로 기다리지 않는다 (2026-11-05) ─────────────
+def test_admin_run_returns_immediately():
+    """🟥 생성은 40~120초 걸리는데 프런트 axios 기본 타임아웃은 20초다.
+
+    전에는 끝날 때까지 한 요청으로 기다렸다. 화면에는
+    "실패: timeout of 20000ms exceeded" 가 떴는데 **서버는 끝까지 만들어
+    저장했다.** 성공한 작업을 실패로 보여 줬고, 당연히 다시 누르게 되고,
+    누를 때마다 돈이 나갔다.
+
+    조용한 실패보다 나쁜 것이 **성공을 실패로 보여 주는 것**이다.
+    """
+    i = SRC.index('def admin_run_macro_brief')
+    body = SRC[i:SRC.index('\n@app.get("/api/admin/macro_brief/status")')]
+    assert 'Thread(' in body, '동기로 기다린다 — 20초 타임아웃에 걸린다'
+    # 생성 함수를 요청 스레드에서 직접 부르면 안 된다
+    assert '_gen_macro_brief' not in body, '요청 스레드에서 직접 생성한다'
+
+
+def test_double_click_does_not_double_charge():
+    """연타 방어. '실패'로 보이면 사람은 반드시 다시 누른다 —
+    그때 두 번째 호출이 또 돈을 쓰면 안 된다."""
+    i = SRC.index('def admin_run_macro_brief')
+    body = SRC[i:SRC.index('\n@app.get("/api/admin/macro_brief/status")')]
+    assert "_macro_jobs.get(session) == 'running'" in body, '진행 중 중복 실행 방어가 없다'
+    assert body.index('_macro_jobs.get(session)') < body.index('threading.Thread'), \
+        '중복 검사가 스레드 생성보다 뒤에 있다'
+
+
+def test_status_endpoint_does_not_also_return_content():
+    """상태와 내용을 두 곳에서 주면 둘이 어긋난다. 상태만 답한다."""
+    i = SRC.index('def admin_macro_brief_status')
+    body = SRC[i:i + 1200]
+    assert 'headline' not in body and 'quotes' not in body
+
+
+def test_background_job_swallows_exceptions():
+    """스레드에서 터진 예외는 아무도 보지 못한다 — 잡 상태로 남겨야 한다."""
+    i = SRC.index('def _run_macro_brief_job')
+    body = SRC[i:SRC.index('\n@app.post("/api/admin/macro_brief/run")')]
+    assert 'except Exception as e:' in body
+    assert "_macro_jobs[session] = {'error'" in body
+
+
+def test_frontend_polls_instead_of_waiting():
+    from pathlib import Path as _P
+    jsx = (_P(__file__).resolve().parents[2] / 'frontend' / 'src' /
+           'components' / 'MarketBriefCard.jsx').read_text(encoding='utf-8')
+    assert 'macroBriefStatus' in jsx, '프런트가 폴링하지 않는다'
+    assert 'running' in jsx
+    # 포기할 때 "실패"라고 하지 않는다 — 서버는 계속 만들고 있다
+    assert '뒤에서 계속 만듭니다' in jsx
+
+
+# ── 웹 검색 실패를 숨기지 않는다 (2026-11-05) ──────────────────────
+def test_search_errors_are_read_not_swallowed():
+    """🟥 검색이 실패하면 `web_search_tool_result.content` 가 **리스트가 아니라
+    객체**로 온다. 예전 코드는 그냥 `for r in content` 를 돌았다 — dict 순회는
+    키 문자열을 주고 `r.get` 에서 조용히 넘어간다. HTTP 는 200 이라 예외도 없다.
+    그래서 검색이 통째로 죽어도 유일한 흔적은 모델이 본문에 쓴
+    "검색 도구 오류" 한 줄이었다."""
+    i = SRC.index('def _call_claude_with_search')
+    body = SRC[i:SRC.index('\ndef _parse_claude_json')]
+    assert 'web_search_tool_result_error' in body, '오류 블록을 읽지 않는다'
+    assert 'isinstance(_c, dict)' in body, 'content 가 객체로 올 수 있음을 모른다'
+    assert 'web_search_error' in body, '오류를 로그에 남기지 않는다'
+
+
+def test_searched_flag_means_it_actually_worked():
+    """'검색을 요청했다'와 '검색이 됐다'는 다른 사실이다.
+    실패한 날에도 화면에 '웹 검색 포함'이라고 적으면, 확인되지 않은 값을
+    확인된 것처럼 보이게 한다."""
+    i = SRC.index('def _gen_macro_brief')
+    body = SRC[i:SRC.index('\ndef _save_macro_brief')]
+    assert "data['searched'] = bool(is_pre) and not search_errs" in body
+    assert "data['search_error']" in body
+
+
+def test_frontend_shows_search_failure():
+    from pathlib import Path as _P
+    jsx = (_P(__file__).resolve().parents[2] / 'frontend' / 'src' /
+           'components' / 'MarketBriefCard.jsx').read_text(encoding='utf-8')
+    assert 'search_error' in jsx, '화면이 검색 실패를 표시하지 않는다'
+
+
+def test_web_search_tool_avoids_code_execution_path():
+    """`_20260209` 의 allowed_callers 기본값은 코드 실행 경로다. 우리는 짧은
+    사실 3개만 찾으므로 동적 필터링의 이득이 없고, provisioning 실패 위험만 있다."""
+    i = SRC.index('def _call_claude_with_search')
+    body = SRC[i:SRC.index('\ndef _parse_claude_json')]
+    assert '"allowed_callers": ["direct"]' in body
