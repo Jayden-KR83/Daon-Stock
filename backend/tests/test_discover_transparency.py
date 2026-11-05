@@ -185,3 +185,43 @@ def test_new_columns_are_actually_saved():
 
 def test_history_price_column_exists():
     assert 'ALTER TABLE discovery_history ADD COLUMN price REAL' in SRC
+
+
+# ── 축별 기여도 합 == 종합점수 (2026-11-05, ChatGPT 2차 검증 #2 수용) ──
+def test_axis_contributions_sum_to_the_composite_score():
+    """🟥 상세 화면이 축마다 '종합에 +n.n' 을 찍는다. 그 합이 종합점수와 다르면
+    사용자는 **검산할 수 없는 숫자**를 보게 된다.
+
+    프런트(DiscoverTab.axisItems)와 백엔드(_garp_score)가 같은 식을 **각자**
+    구현하고 있다. 같은 식을 두 곳에 적으면 반드시 어긋난다 — 그 어긋남은
+    화면에서 티가 안 난다(둘 다 그럴듯한 숫자라서). 그래서 불변식으로 묶는다.
+
+        contrib_i = (w_i x v_i / den) x (완성도/5)
+        sum(contrib) = (sum(w_i x v_i) / den) x factor = base x factor = composite
+    """
+    rows = main._garp_score([
+        _row(ticker='A', market='US', roe=30, peg=0.8),
+        _row(ticker='B', market='US', roe=10, peg=2.0, debt_to_equity=180),
+        _row(ticker='C', market='KR', roe=20, sector='금융', peg=None),
+        _row(ticker='D', market='KR', roe=5,  sector='금융', profit_margin=-2),
+        _row(ticker='E', market='KR', roe=15, sector='금융', near_52w_high=None),
+    ])
+    AX = ('value', 'growth', 'quality', 'momentum', 'sentiment')
+    for r in rows:
+        w = (main.GARP_WEIGHTS_KR if r['market'] == 'KR' else main.GARP_WEIGHTS)
+        den = sum(w[a] for a in AX if r.get('pct_' + a) is not None)
+        if den <= 0:
+            continue
+        factor = r['data_completeness'] / 5.0
+        total = sum((w[a] * r['pct_' + a] / den) * factor
+                    for a in AX if r.get('pct_' + a) is not None)
+        assert abs(total - r['composite_score']) < 0.02, (
+            f"{r['ticker']}: 기여도 합 {total:.2f} != 종합 {r['composite_score']}")
+
+
+def test_contribution_formula_matches_the_frontend():
+    """프런트가 같은 식을 쓰는지 — 식이 갈리면 화면 숫자만 조용히 틀어진다."""
+    jsx = (Path(__file__).resolve().parents[2] / 'frontend' / 'src' / 'tabs' /
+           'DiscoverTab.jsx').read_text(encoding='utf-8')
+    assert '(ws[i] * v / den) * factor' in jsx, '프런트 기여도 식이 바뀌었다'
+    assert 'data_completeness ?? 0) / 5' in jsx, '프런트 완성도 배율이 바뀌었다'

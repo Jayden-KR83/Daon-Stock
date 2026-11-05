@@ -112,29 +112,39 @@ function MyLinks({ links, basis }) {
    cron 은 하루 2번만 돈다. 기능을 새로 올린 날이나 cron 이 실패한 날에
    **기다리는 것 말고 할 수 있는 일이 없으면** 그 기능은 고칠 수도 없다.
    같은 세션은 서버가 건너뛰므로 연타해도 돈이 한 번만 나간다. */
-function RunButton() {
+function RunButton({ exists }) {
   const qc = useQueryClient()
   const isAdmin = useStore(st => !!st.currentUser?.is_admin)
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg]   = React.useState('')
   if (!isAdmin) return null
+
+  const run = async (force) => {
+    setBusy(true); setMsg('')
+    try {
+      const r = await runMacroBrief(force)
+      setMsg(r.skipped === 'already_exists' ? '이미 있음'
+        : r.ok ? '생성됨' : `실패: ${r.reason || ''}`)
+      await qc.invalidateQueries({ queryKey: ['market-brief'] })
+    } catch (e) {
+      setMsg('실패: ' + (e.response?.data?.detail || e.message || ''))
+    } finally { setBusy(false) }
+  }
+
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
       {msg && <span className="ko-keep" style={{ fontSize: 'var(--fs-micro)',
         color: 'var(--m-text-tertiary)' }}>{msg}</span>}
+      {/* 이미 글이 있으면 '다시 만들기'. 프롬프트를 고친 날에는 기존 글이 옛
+          결과라서, 덮어쓰지 못하면 다음 cron(최대 9시간 뒤)까지 고친 것을 볼 수
+          없다. 돈이 한 번 더 나가므로 **버튼 이름과 툴팁에 그렇게 적는다** —
+          조용히 과금되는 버튼을 만들지 않는다. */}
       <button className="mono-pill" disabled={busy} style={{ cursor: 'pointer' }}
-        title="이번 세션(장 전/장 후) 시황을 지금 생성합니다. 이미 있으면 건너뜁니다."
-        onClick={async () => {
-          setBusy(true); setMsg('')
-          try {
-            const r = await runMacroBrief()
-            setMsg(r.skipped === 'already_exists' ? '이미 있음'
-              : r.ok ? '생성됨' : `실패: ${r.reason || ''}`)
-            await qc.invalidateQueries({ queryKey: ['market-brief'] })
-          } catch (e) {
-            setMsg('실패: ' + (e.response?.data?.detail || e.message || ''))
-          } finally { setBusy(false) }
-        }}>{busy ? '만드는 중…' : '지금 만들기'}</button>
+        title={exists
+          ? '지금 글을 버리고 다시 만듭니다 — API 비용이 한 번 더 듭니다(약 $0.05)'
+          : '이번 세션(장 전/장 후) 시황을 지금 생성합니다'}
+        onClick={() => run(!!exists)}>
+        {busy ? '만드는 중…' : exists ? '다시 만들기' : '지금 만들기'}</button>
     </span>
   )
 }
@@ -165,7 +175,7 @@ export default function MarketBriefCard() {
       <div className="mono-card ko-keep" style={{ marginBottom: 12 }}>
         <div className="mono-section-header" style={{ marginBottom: 4 }}>
           <div className="mono-section-title is-accent">오늘의 시황</div>
-          <RunButton />
+          <RunButton exists={false} />
         </div>
         <div style={{ fontSize: 'var(--fs-body-sm)', color: 'var(--m-text-tertiary)',
           lineHeight: 1.6 }}>
@@ -192,7 +202,7 @@ export default function MarketBriefCard() {
             )}
           </div>
         </div>
-        <RunButton />
+        <RunButton exists />
       </div>
 
       {/* ① 거시 해설 — AI */}
@@ -216,6 +226,40 @@ export default function MarketBriefCard() {
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 자산군별 시선 — 2026-11-05 오너: "빅테크나 채권 비트 코인 등 주의 사항이나
+          조언을 해주는 내용이 있어야지."
+          칸을 만들어 두지 않으면 글은 늘 지수 이야기로 수렴한다.
+          라벨 폭을 92px 로 고정한다 — '빅테크·성장주'와 '채권·금리'의 길이가 달라
+          풀어 두면 본문 시작 x 가 줄마다 흔들린다. */}
+      {Array.isArray(b.views) && b.views.length > 0 && (
+        <div style={{ marginTop: 11, paddingTop: 9,
+          borderTop: '1px solid var(--m-outline-variant)' }}>
+          <div style={{ fontSize: 'var(--fs-caption)', fontWeight: 800,
+            color: 'var(--m-text)', marginBottom: 6 }}>자산군별로 보면</div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {b.views.map((v, i) => (
+              <div key={i} style={{ display: 'grid',
+                gridTemplateColumns: '92px minmax(0,1fr)', gap: 8 }}>
+                <span className="ko-keep" style={{ fontSize: 'var(--fs-micro)',
+                  fontWeight: 800, color: 'var(--m-text-secondary)',
+                  lineHeight: 1.6, paddingTop: 1 }}>{v.asset}</span>
+                <div className="ko-keep" style={{ minWidth: 0,
+                  fontSize: 'var(--fs-caption)', lineHeight: 1.65,
+                  color: 'var(--m-text-secondary)' }}>
+                  {v.stance}
+                  {v.caution && (
+                    <div style={{ marginTop: 2 }}>
+                      <b style={{ color: 'var(--m-negative)' }}>주의</b>{' '}
+                      <span>{v.caution}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

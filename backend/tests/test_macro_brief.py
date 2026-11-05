@@ -250,9 +250,45 @@ def test_demo_user_gets_no_personal_note():
 
 
 # ── 프롬프트 규약 ───────────────────────────────────────────────────
-@pytest.mark.parametrize('rule', ['숫자', '확인 필요', '상관', '추천'])
+@pytest.mark.parametrize('rule', ['확인 필요', '상관', '추천'])
 def test_brief_rules_cover_the_house_style(rule):
     assert rule in main.MACRO_BRIEF_RULES, rule
+
+
+def test_rules_forbid_reciting_quotes():
+    """🟥 2026-11-05 오너: "그냥 숫자 등락에 대한 나열 밖에 없네?"
+
+    원인은 **내 프롬프트**였다. 1차 규칙 1번이 "모든 문장에 숫자가 들어가야
+    합니다" 였고, 숫자를 넣는 가장 쉬운 길은 시세를 옮겨 적는 것이다.
+    모델은 규칙대로 했다. **규칙이 결과를 만든다 — 그래서 규칙을 테스트한다.**
+    """
+    r = main.MACRO_BRIEF_RULES
+    assert '시세를 옮겨 적지' in r, '시세 나열을 금지하는 규칙이 없다'
+    assert '그래서 무엇을' in r, '결론의 방향을 지시하는 규칙이 없다'
+    assert '조건을 붙이세요' in r, '주의사항에 조건을 요구하는 규칙이 없다'
+    # 역행 방지: 1차의 "모든 문장에 숫자" 규칙이 되살아나면 실패한다
+    assert '모든 문장에 **숫자**' not in r, '숫자 나열을 부르던 규칙이 되살아났다'
+
+
+def test_views_cover_the_asset_classes_owner_named():
+    """오너가 이름을 댄 것: 빅테크 · 채권 · 비트코인(가상자산).
+    칸이 없으면 모델은 지수 이야기만 하고 끝낸다 — 섹션을 강제한다."""
+    t = main.MACRO_BRIEF_SCHEMA
+    for a in ('빅테크', '채권', '가상자산', '원자재', '한국 증시'):
+        assert a in t, f'{a} 칸이 스키마에 없다'
+    assert 'caution' in t and 'stance' in t
+    assert '모두' in main.MACRO_BRIEF_SHAPE
+
+
+def test_max_tokens_grew_with_the_schema():
+    """views 5칸이 늘었는데 출력 상한이 그대로면 잘린다. 잘린 JSON 은 부분
+    복구가 안 되므로 **브리핑이 통째로 사라진다**(화면엔 빈 카드만 남는다)."""
+    i = SRC.index('def _gen_macro_brief')
+    body = SRC[i:SRC.index('\ndef _save_macro_brief')]
+    nums = [int(x) for x in re.findall(r'max_tokens=(\d+)', body)]
+    nums += [int(x) for x in re.findall(r'MODEL_ANALYSIS, prompt, (\d+),', body)]
+    assert nums, '출력 상한을 못 찾았다'
+    assert min(nums) >= 4000, f'출력 상한이 작다: {nums}'
 
 
 def test_brief_schema_is_valid_json_shape():
@@ -260,7 +296,7 @@ def test_brief_schema_is_valid_json_shape():
     txt = main.MACRO_BRIEF_SCHEMA
     assert txt.strip().startswith('{') and txt.strip().endswith('}')
     assert txt.count('{') == txt.count('}')
-    for key in ('headline', 'movers', 'actions', 'watch', 'facts'):
+    for key in ('headline', 'movers', 'views', 'actions', 'watch', 'facts'):
         assert f'"{key}"' in txt
 
 
@@ -294,7 +330,8 @@ def test_frontend_reads_the_same_keys():
     """백엔드 키와 화면 키가 어긋나면 **빈 칸이 조용히 생긴다**(에러가 안 난다)."""
     jsx = (Path(__file__).resolve().parents[2] / 'frontend' / 'src' /
            'components' / 'MarketBriefCard.jsx').read_text(encoding='utf-8')
-    for key in ('headline', 'movers', 'actions', 'watch', 'quotes', 'links', 'note'):
+    for key in ('headline', 'movers', 'views', 'actions', 'watch', 'quotes',
+                'links', 'note'):
         assert key in jsx, f'화면이 {key} 를 안 읽는다'
     # 세 층을 섞지 않았는가 — 서버 계산분에 'AI 가 아니라'가 적혀 있어야 한다
     assert 'AI 가 아니라' in jsx

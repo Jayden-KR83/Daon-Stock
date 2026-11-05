@@ -92,6 +92,73 @@ try {
     }
   }
 
+  /* 🟥 상단 바 컨트롤이 서로 겹치지 않는가 — 2026-11-05 신설.
+     오너 캡처: 알림 종의 '99+' 배지가 옆 테마 버튼 위에 올라타 있었다.
+     원인 둘 — ① `.top-nav-app-btn` 이 **34px 정사각 고정**인데 테마 버튼에
+     글자를 넣어 내용이 넘쳤다 ② 배지가 버튼 밖으로 4px 나오는데 gap 이 6px.
+     코드만 읽으면 둘 다 안 보인다. 실제 사각형을 재야 보인다. */
+  const hdr = await page.evaluate(() => {
+    const box = document.querySelector('.top-nav-right')
+    if (!box) return null
+    const kids = [...box.children].map(el => {
+      const b = el.getBoundingClientRect()
+      // 배지처럼 밖으로 나온 자식까지 포함한 실제 점유 영역
+      let L = b.left, R = b.right, T = b.top, B = b.bottom
+      for (const d of el.querySelectorAll('*')) {
+        const r = d.getBoundingClientRect()
+        if (!r.width) continue
+        L = Math.min(L, r.left); R = Math.max(R, r.right)
+        T = Math.min(T, r.top);  B = Math.max(B, r.bottom)
+      }
+      return { tag: (el.getAttribute('aria-label') || el.className || el.tagName)
+                     .toString().slice(0, 28), L, R, T, B, w: Math.round(b.width) }
+    })
+    const hits = []
+    for (let i = 0; i < kids.length; i++)
+      for (let j = i + 1; j < kids.length; j++) {
+        const a = kids[i], c = kids[j]
+        if (Math.min(a.R, c.R) - Math.max(a.L, c.L) > 0.5 &&
+            Math.min(a.B, c.B) - Math.max(a.T, c.T) > 0.5)
+          hits.push(`${a.tag} × ${c.tag}`)
+      }
+    /* 내용이 넘쳐 폭이 모자란 버튼.
+       🟥 `scrollWidth` 를 쓰면 안 된다 — **자손이 밖으로 나간 것까지 센다.**
+         알림 종의 '99+' 배지는 `position:absolute; top:-4; right:-4` 로 **일부러**
+         버튼 밖에 나가 있다. scrollWidth 로 재면 멀쩡한 버튼이 "넘침"으로 잡힌다.
+         (2026-11-04 `.tap-target` 오탐과 **같은 원인**. 세 번째다.)
+       → 버튼이 **직접 가진 글자**의 실제 사각형만 Range 로 잰다. */
+    const clipped = []
+    for (const b of box.querySelectorAll('button')) {
+      const cs = getComputedStyle(b)
+      if (cs.overflow !== 'visible') continue
+      const bb = b.getBoundingClientRect()
+      const L = bb.left + (parseFloat(cs.paddingLeft) || 0)
+      const R = bb.right - (parseFloat(cs.paddingRight) || 0)
+      let over = false
+      const walk = (node) => {
+        for (const nd of node.childNodes) {
+          if (nd.nodeType === 3 && nd.textContent.trim()) {
+            const rg = document.createRange(); rg.selectNodeContents(nd)
+            for (const r of rg.getClientRects())
+              if (r.width && (r.left < L - 2 || r.right > R + 2)) over = true
+          } else if (nd.nodeType === 1 &&
+                     getComputedStyle(nd).position === 'static') {
+            walk(nd)   // 절대배치 자식(배지)은 일부러 밖에 있으므로 보지 않는다
+          }
+        }
+      }
+      walk(b)
+      if (over) clipped.push((b.textContent || '').trim().slice(0, 16) || b.className)
+    }
+    return { n: kids.length, hits, clipped }
+  })
+  if (!hdr) fail('.top-nav-right 를 못 찾았다')
+  else if (hdr.hits.length)
+    fail(`상단 바 컨트롤이 겹친다 ${hdr.hits.length}쌍: ${hdr.hits.join(' / ')}`)
+  else if (hdr.clipped.length)
+    fail(`상단 바 버튼 내용이 폭을 넘는다: ${hdr.clipped.join(' / ')}`)
+  else ok(`상단 바 컨트롤 ${hdr.n}개 — 겹침 0 · 내용 넘침 0`)
+
   // 등록·가이드 → 설정 탭의 바로가기 카드
   if (await goTab('설정')) {
     for (const name of ['종목 등록', '가이드']) {

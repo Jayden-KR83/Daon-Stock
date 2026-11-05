@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-04",
+  "at": "2026-11-05",
   "measured": {
     "390:계좌": {
       "clipped": 0,
@@ -18,7 +18,7 @@
     },
     "390:시장": {
       "clipped": 0,
-      "height": 3077,
+      "height": 4168,
       "docOverflow": false
     },
     "1440:계좌": {
@@ -38,7 +38,7 @@
     },
     "1440:시장": {
       "clipped": 0,
-      "height": 2421,
+      "height": 3098,
       "docOverflow": false
     }
   }

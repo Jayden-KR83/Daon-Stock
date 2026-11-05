@@ -140,6 +140,27 @@ function aggregateOHLC(daily, level) {
   })
 }
 
+/* 차트 위 기준선의 이름표.
+ *
+ * 🟥 규약 — **오른쪽 여백은 Y축 눈금 전용이다.** 기준선 라벨을 거기 그리면
+ * 가격 숫자와 겹친다(2026-11-05 사고). 라벨은 플롯 영역 **안쪽 왼쪽**에 두고,
+ * 캔들 위에 글자가 얹히지 않도록 바탕 칩을 깐다.
+ *
+ * 글자 폭은 재지 않고 글자 수로 추정한다(SVG 에서 측정하려면 렌더 후 getBBox 가
+ * 필요해 한 프레임이 더 든다). 한글 9.5px 기준 글자당 약 9.6px + 좌우 여백 4px.
+ */
+function LineTag({ x, y, text, color, place = 'above' }) {
+  const w = text.length * 9.6 + 8
+  const dy = place === 'above' ? -5 : 13
+  return (
+    <g>
+      <rect x={x - 2} y={y + dy - 9} width={w} height={12} rx={2}
+        fill="var(--clr-surface)" opacity="0.88" />
+      <text x={x + 2} y={y + dy} fontSize={9.5} fontWeight={800} fill={color}>{text}</text>
+    </g>
+  )
+}
+
 /* ── 순수 SVG 캔들스틱 차트 (드래그 줌 지원) ── */
 function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoom, onResetZoom,
                             avgPrice = null, week52High = null, showDrawdown = false }) {
@@ -313,8 +334,13 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
               <line x1={PAD.left} y1={yTop} x2={PAD.left + W} y2={yTop}
                 stroke="var(--clr-neg-dark, #DC2626)" strokeWidth={1}
                 strokeDasharray="2 3" opacity="0.75" />
-              <text x={PAD.left + W + 4} y={yTop + 3}
-                fontSize={9.5} fontWeight={800} fill="var(--clr-neg-dark, #DC2626)">52주고</text>
+              {/* 🟥 라벨은 **차트 안 왼쪽**에 둔다. 오른쪽 여백(PAD.right)은
+                  Y축 눈금 숫자의 자리다 — 같은 x 에 그리면 반드시 겹친다.
+                  2026-11-05 오너: "52주 최고가 글자와 평단가 글자 모두 우측 Y축
+                  주가 숫자와 겹쳐서 안 보여."  내가 넣은 글자가 남의 자리에
+                  앉아 있었다. 규약은 docs/troubleshooting.md '차트 라벨' 항목. */}
+              <LineTag x={PAD.left + 4} y={yTop} text="52주고"
+                color="var(--clr-neg-dark, #DC2626)" place="above" />
               {/* 낙폭 숫자는 띠 안쪽에. 띠가 얇으면(5px 미만) 글자가 선을 뚫으므로 생략 */}
               {yCur - yTop > 16 && (
                 <text x={PAD.left + 6} y={yTop + (yCur - yTop) / 2 + 3}
@@ -332,10 +358,12 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
             <line x1={PAD.left} y1={yOf(avgPrice)} x2={PAD.left + W} y2={yOf(avgPrice)}
               stroke="var(--clr-text-strong)" strokeWidth={1.2}
               strokeDasharray="5 3" opacity="0.7" />
-            <text x={PAD.left + W + 4} y={yOf(avgPrice) + 3}
-              fontSize={9.5} fontWeight={800} fill="var(--clr-text-strong)">
-              평단
-            </text>
+            {/* 52주고 라벨과 세로로 가까우면 아래로 피한다 — 둘 다 왼쪽 안쪽에
+                앉으므로, 선 간격이 좁을 때 글자끼리 겹칠 수 있다. */}
+            <LineTag x={PAD.left + 4} y={yOf(avgPrice)} text="평단"
+              color="var(--clr-text-strong)"
+              place={hasHigh && Math.abs(yOf(avgPrice) - yOf(week52High)) < 16
+                ? 'below' : 'above'} />
           </g>
         )}
 
@@ -469,6 +497,13 @@ export default function ChartTab() {
   /* 52주 고점 대비 낙폭을 차트 위에 그릴지. 기본 켜짐 — 오너가 "시각적으로
      표현해주면 좋겠다"고 한 것이 이 선이고, 버튼으로 끌 수 있으니 켜 두고 시작한다. */
   const [showDrawdown, setShowDrawdown] = useState(true)
+  /* 평단선 — 2026-11-05 오너 지적으로 **기본 끔**.
+     "평단 점선 때문에 차트 세로 축이 고정된 것처럼 보이니 최신 캔들 바들이 몰려서
+     보이는 현상이 있네."  정확한 진단이다. 평단이 가격대에서 멀면 y 범위가 평단까지
+     늘어나고, 그만큼 **캔들이 쓰는 세로 공간이 줄어** 전부 납작해진다.
+     선 하나를 보여 주려고 차트 전체의 해상도를 깎고 있었다.
+     → 끄고 시작하고, 필요한 사람이 켠다. */
+  const [showAvg, setShowAvg] = useState(false)
   const [rangeOpt,     setRangeOpt]     = useState('1Y')  // 기본 1Y (전체 데이터는 5Y까지)
   const [scaleOpt,     setScaleOpt]     = useState('D')   // 'D' | 'W' | 'M' — 캔들 집계 단위
   const [zoomRange,    setZoomRange]    = useState(null)  // null 또는 [startIdx, endIdx] (집계된 데이터 기준)
@@ -881,6 +916,17 @@ export default function ChartTab() {
                   style={{ borderRadius: 6, border: '1px solid var(--clr-border-md)',
                     padding: '4px 10px', whiteSpace: 'nowrap' }}>52주고 대비</button>
               )}
+              {/* 평단선 — 보유 종목일 때만, 기본 꺼짐.
+                  켜면 y 범위가 평단까지 늘어나 캔들이 납작해진다. 그 대가를 아는
+                  사람이 필요할 때 켜도록 한다(2026-11-05 오너 요청). */}
+              {myAvgPrice > 0 && (
+                <button onClick={() => setShowAvg(v => !v)}
+                  className={`seg-btn ${showAvg ? 'active' : ''}`}
+                  title="내 평균단가 기준선. 켜면 차트 세로 범위가 평단까지 늘어나 캔들이 납작해집니다"
+                  style={{ borderRadius: 6, border: '1px solid var(--clr-border-md)',
+                    padding: '4px 10px', whiteSpace: 'nowrap' }}>
+                  {showAvg ? '☑' : '☐'} 평단선</button>
+              )}
 
               {/* 줌 리셋 — 줌 활성 시에만 노출 */}
               {zoomRange && (
@@ -910,7 +956,7 @@ export default function ChartTab() {
           {hist.length > 0 && (
             <div className="chart-card">
               <CandlestickChart data={hist} isUs={isUs} maVis={maVis}
-                range={rangeOpt} height={240} avgPrice={myAvgPrice}
+                range={rangeOpt} height={240} avgPrice={showAvg ? myAvgPrice : null}
                 week52High={stockData?.week_52_high} showDrawdown={showDrawdown}
                 onZoom={(i1, i2) => {
                   // 현재 표시 데이터 기준 인덱스 → scaledHist 절대 인덱스로 변환

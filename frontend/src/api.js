@@ -159,7 +159,8 @@ export const getCorrelation = (body) =>
 
 // B안-B4 실적 캘린더
 export const getMarketBrief = () => api.get('/market/brief').then(r => r.data)
-export const runMacroBrief  = () => api.post('/admin/macro_brief/run').then(r => r.data)
+export const runMacroBrief  = (force = false) =>
+  api.post('/admin/macro_brief/run', null, { params: { force } }).then(r => r.data)
 export const getEarningsCalendar = (body) =>
   api.post('/earnings/calendar', body, { timeout: 30_000 }).then(r => r.data)
 

@@ -171,15 +171,26 @@ export default function EarningsCalendar() {
                       {evs.length > 0 && (() => {
                         const sorted = [...evs].sort((a, b) => (b.held ? 1 : 0) - (a.held ? 1 : 0))
                         const n = sorted.length
-                        // 종목이 적을수록 크게 — 1개 34, 2개 28, 3~4개 22, 그 이상 16
-                        const sz = n <= 1 ? 34 : n === 2 ? 28 : n <= 4 ? 22 : 16
+                        /* 2026-11-05 오너: "심볼이 몰려있는 경우 너무 작아. 여백이
+                           있음에도. 최대한 다른 심볼 크기와 통일성 있게 해."
+
+                           전에는 개수로 크기를 정했다(1개 34 / 2개 28 / 3~4개 22 /
+                           5개 이상 16). 그 규칙은 **칸 높이가 74px 로 고정**이던
+                           시절의 것이다 — 넘치지 않게 글자를 줄인 셈인데, 넓은
+                           웹 화면에서는 칸에 자리가 남는데도 16px 로 쪼그라들었다.
+                           같은 날짜 줄에서 어떤 로고는 34, 어떤 로고는 16이라
+                           중요도 차이처럼 보이기까지 했다(실제로는 그냥 개수 차이).
+
+                           → **크기를 고정**하고, 모자라면 칸이 세로로 늘어나게 한다.
+                             같은 주의 칸들은 그리드가 높이를 맞춰 주므로 줄은 안 흔들린다. */
+                        const sz = 28
                         const showText = n <= 2   // 적을 땐 티커 글자도 표시
                         return (
                           <div style={{ display: 'flex', flexWrap: 'wrap',
                             gap: showText ? 8 : 4,
                             justifyContent: n <= 2 ? 'center' : 'flex-start',
                             paddingTop: 2 }}>
-                            {sorted.slice(0, 8).map((e, i) => {
+                            {sorted.slice(0, 12).map((e, i) => {
                               // KR 종목은 코드 대신 종목명(백엔드 name 또는 보유·관심 맵). US는 티커.
                               const label = isKrTicker(e.ticker)
                                 ? displayName(e.ticker, e.name || nameByTicker[String(e.ticker).toUpperCase()])
@@ -207,9 +218,9 @@ export default function EarningsCalendar() {
                               </div>
                               )
                             })}
-                            {n > 8 && (
+                            {n > 12 && (
                               <span style={{ fontSize: 9, color: 'var(--m-text-tertiary)',
-                                alignSelf: 'center' }}>+{n - 8}</span>
+                                alignSelf: 'center' }}>+{n - 12}</span>
                             )}
                           </div>
                         )

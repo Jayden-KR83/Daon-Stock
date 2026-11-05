@@ -108,6 +108,72 @@ else {
     await page.waitForTimeout(500)
   }
 
+  /* 3-b. 🟥 차트 안 글자끼리 겹치지 않는가 — 2026-11-05 규약.
+     오너: "52주 최고가 글자와 평단가 글자 모두 우측 Y축 주가 숫자와 겹쳐서
+     안 보여. 이런건 네가 스스로 점검해서 최적화 해야지."
+
+     맞는 지적이다. 내가 넣은 라벨 둘 다 Y축 눈금과 **같은 x**(PAD.left+W+4)에
+     앉아 있었다. 코드만 읽으면 "오른쪽 여백에 쓴다"로 보여서 넘어간다 —
+     겹침은 **그려 봐야** 보인다.
+
+     규약: 차트에 글자를 얹으면 **모든 <text> 쌍의 사각형이 겹치지 않아야 한다.**
+     축 눈금이든 기준선 이름표든 예외 없다. */
+  const overlaps = await page.evaluate(() => {
+    const svg = document.querySelector('.chart-card svg')
+    if (!svg) return null
+    const items = [...svg.querySelectorAll('text')]
+      .map(t => ({ s: t.textContent.trim(), b: t.getBoundingClientRect() }))
+      .filter(x => x.s && x.b.width > 0 && x.b.height > 0)
+    const hits = []
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i].b, c = items[j].b
+        // 1px 는 안티에일리어싱 여유로 봐준다
+        const ox = Math.min(a.right, c.right) - Math.max(a.left, c.left)
+        const oy = Math.min(a.bottom, c.bottom) - Math.max(a.top, c.top)
+        if (ox > 1 && oy > 1) hits.push(`"${items[i].s}" × "${items[j].s}"`)
+      }
+    }
+    return { n: items.length, hits }
+  })
+  if (!overlaps) fail('차트 SVG 를 못 찾아 글자 겹침을 보지 못했다')
+  else if (overlaps.hits.length)
+    fail(`차트 안 글자가 겹친다 ${overlaps.hits.length}쌍: ${overlaps.hits.slice(0, 4).join(' / ')}`)
+  else ok(`차트 글자 ${overlaps.n}개, 겹친 쌍 0 (평단선 꺼짐)`)
+
+  /* 3-c. 평단선을 **켠 상태**도 본다. 기본값만 검사하면 가장 겹치기 쉬운 조합
+     (52주고 + 평단 + Y축 눈금 셋이 한 화면)이 영영 안 쟤진다.
+     기본값만 통과시키는 검사기는 기본값만 지킨다. */
+  const avgBtn = page.getByRole('button', { name: /평단선/ }).first()
+  if (!(await avgBtn.count())) {
+    console.log('  --  평단선 버튼 없음 (이 종목은 미보유) — 켠 상태 검사 건너뜀')
+  } else {
+    await avgBtn.evaluate(el => el.click())
+    await page.waitForTimeout(900)
+    const r2 = await page.evaluate(() => {
+      const svg = document.querySelector('.chart-card svg')
+      if (!svg) return null
+      const items = [...svg.querySelectorAll('text')]
+        .map(t => ({ s: t.textContent.trim(), b: t.getBoundingClientRect() }))
+        .filter(x => x.s && x.b.width > 0)
+      const hits = []
+      for (let i = 0; i < items.length; i++)
+        for (let j = i + 1; j < items.length; j++) {
+          const a = items[i].b, c = items[j].b
+          if (Math.min(a.right, c.right) - Math.max(a.left, c.left) > 1 &&
+              Math.min(a.bottom, c.bottom) - Math.max(a.top, c.top) > 1)
+            hits.push(`"${items[i].s}" × "${items[j].s}"`)
+        }
+      return { hits, hasAvg: items.some(x => x.s === '평단') }
+    })
+    if (!r2?.hasAvg) fail('평단선을 켰는데 "평단" 라벨이 안 보인다')
+    else if (r2.hits.length)
+      fail(`평단선 켠 상태에서 글자가 겹친다: ${r2.hits.slice(0, 4).join(' / ')}`)
+    else ok('평단선 켠 상태에서도 겹친 쌍 0')
+    await avgBtn.evaluate(el => el.click())
+    await page.waitForTimeout(500)
+  }
+
   // 4. 52주 바의 '고점 대비'
   const bar = await page.evaluate(() =>
     document.body.innerText.includes('고점 대비') && document.body.innerText.includes('저점 대비'))

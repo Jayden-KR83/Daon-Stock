@@ -13,6 +13,7 @@ import {
 import { sendTestPush } from '../api'
 import { useStore } from '../store'
 import ToggleSwitch from './ToggleSwitch'
+import { isKrTicker } from '../utils/displayName'
 
 /* 시트 / 오버레이를 body 직속으로 portal — 부모 transform/overflow/z-index에 영향받지 않음 */
 function BodyPortal({ children }) {
@@ -218,11 +219,16 @@ export default function NotificationsBell() {
                   }}>테스트</button>
                 )}
                 {/* 2026-10-27: '켜기' 버튼이 상태인지 동작인지 구분되지 않았다(오너 지적).
-                    검은 강조 바탕이라 오히려 "켜져 있음"으로 읽혔다. */}
-                {(push === 'on' || push === 'off') && (
-                  <ToggleSwitch checked={push === 'on'} busy={pushBusy}
-                    label="푸시 알림" onChange={() => onTogglePush()} />
-                )}
+                    검은 강조 바탕이라 오히려 "켜져 있음"으로 읽혔다.
+
+                    2026-11-05 오너: "알림 꺼짐/켜짐을 고정으로 보이게 해 ... 왜 안보여?"
+                    권한이 차단(denied)·미지원(unsupported)이면 토글을 **통째로 없앴다.**
+                    그래서 같은 줄이 어떤 날은 토글이 있고 어떤 날은 설명문만 남았다.
+                    사라지는 컨트롤은 "고장났나"로 읽힌다 — 자리를 지키고,
+                    누를 수 없는 이유를 옆에 적는 편이 낫다. */}
+                <ToggleSwitch checked={push === 'on'} busy={pushBusy}
+                  disabled={push === 'unsupported' || push === 'denied'}
+                  label="푸시 알림" onChange={() => onTogglePush()} />
               </div>
 
               {/* Tabs */}
@@ -260,34 +266,7 @@ export default function NotificationsBell() {
                       desc={'보유·관심 종목이 하루 ±5% 넘게 움직이면 자동으로 알립니다.\n종목별 목표가·손절가는 설정 탭에서 등록하세요.'} />
                   ) : (
                     notif.notifications.map(n => (
-                      <div key={n.id} onClick={() => onItemClick(n)}
-                        style={{
-                          padding: '10px 12px', margin: '6px 0', borderRadius: 2,
-                          border: `1px solid ${!n.read_at ? 'var(--m-text)' : 'var(--m-outline-variant)'}`,
-                          background: !n.read_at ? 'var(--m-surface-variant)' : 'transparent',
-                          cursor: 'pointer',
-                        }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline',
-                          justifyContent: 'space-between', gap: 8 }}>
-                          <span className={KIND_META[n.kind]?.cls || 'sev-label is-med'}>
-                            {KIND_META[n.kind]?.label || '안내'}
-                          </span>
-                          <span style={{ fontSize: 10, color: 'var(--m-text-tertiary)',
-                            fontVariantNumeric: 'tabular-nums' }}>
-                            {n.change_pct != null && (
-                              <strong className={n.change_pct >= 0 ? 'num-pos' : 'num-neg'}
-                                style={{ marginRight: 8 }}>
-                                {n.change_pct >= 0 ? '+' : ''}{n.change_pct.toFixed(1)}%
-                              </strong>
-                            )}
-                            {fmtRelTime(n.created_at)}
-                          </span>
-                        </div>
-                        <div className="ko-keep" style={{ fontSize: 12.5, fontWeight: 700,
-                          color: 'var(--m-text)', marginTop: 4 }}>
-                          {n.message}
-                        </div>
-                      </div>
+                      <NotifRow key={n.id} n={n} onClick={() => onItemClick(n)} />
                     ))
                   )
                 )}
@@ -354,15 +333,101 @@ export default function NotificationsBell() {
 }
 
 /** 알림 종류별 라벨·의미색 — surge/plunge는 급등락 스캔(cron)이 만든다. */
+/* 알림 한 줄 — 2026-11-05 재설계.
+ *
+ * 오너: "알림 BOX 테두리, 내용을 뜻하는 글자 색 등 모든게 너무 칙칙해."
+ * 칙칙했던 이유는 색이 모자라서가 아니라 **위계가 없어서**다. 실측하면:
+ *   · 4면 테두리가 전부 같은 회색 → 줄 20개가 회색 격자 하나로 뭉친다
+ *   · 종류 라벨이 `text-transform: uppercase; letter-spacing: .08em`
+ *     — 한글에는 대문자가 없고, 자간만 벌어져 글자가 흐려진다
+ *   · 같은 정보가 **두 번** 찍힌다: 라벨 '급락' + 본문 '… -5.2% 급락 · 현재 ₩4,185'
+ *     본문 문자열은 서버가 미리 조립한 것인데, 행에는 kind·change_pct·
+ *     current_price 가 **필드로 이미 와 있다.**
+ *
+ * 그래서 색을 더 칠하는 대신:
+ *   1) 4면 테두리 → **왼쪽 신호 바 3px**. 종류를 색으로 말하고 격자를 없앤다.
+ *   2) 숫자를 가장 크게. 알림을 여는 이유는 "얼마나 움직였나"다.
+ *   3) 서버 문장을 다시 쓰지 않고 **필드로 조립**해 중복을 없앤다.
+ *      (필드가 없는 산문형 알림 — 분석·중기 — 은 문장을 그대로 쓴다)
+ *   4) 라벨의 uppercase·letter-spacing 제거.
+ *
+ * 색은 **등락 2색 + 중립**만 쓴다. 새 색을 들이지 않는다 — 등락색이 이미
+ * 이 앱에서 가장 강한 신호다.
+ */
+function NotifRow({ n, onClick }) {
+  const meta = KIND_META[n.kind] || { label: '안내', tone: 'neutral' }
+  const tone = meta.tone || 'neutral'
+  const bar = tone === 'neg' ? 'var(--m-negative)'
+            : tone === 'pos' ? 'var(--m-positive)'
+            : 'var(--m-outline)'
+  const unread = !n.read_at
+  // 서버 문장 앞머리의 [보유]/[지수]/[관심] — 필드가 아니라 문장에만 있다.
+  const scope = (String(n.message || '').match(/^\[([^\]]{1,4})\]/) || [])[1] || null
+  // 수치형 알림인가(급등락·목표가) vs 산문형인가(분석·중기·실적)
+  const numeric = n.change_pct != null || n.current_price != null
+  const title = n.name || n.ticker || ''
+  const price = n.current_price != null
+    ? (isKrTicker(n.ticker) ? '₩' + Math.round(n.current_price).toLocaleString()
+                            : '$' + Number(n.current_price).toFixed(2))
+    : null
+
+  return (
+    <div onClick={onClick} style={{
+      display: 'grid', gridTemplateColumns: '3px minmax(0,1fr)',
+      gap: 10, margin: '1px 0', padding: '9px 10px 9px 0',
+      borderBottom: '1px solid var(--m-outline-variant)',
+      background: unread ? 'var(--m-surface-variant)' : 'transparent',
+      cursor: 'pointer',
+    }}>
+      {/* 신호 바 — 읽은 것은 흐려진다. 읽음/안읽음을 테두리가 아니라 여기서 말한다. */}
+      <span style={{ background: bar, opacity: unread ? 1 : 0.28, borderRadius: 1 }} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 800,
+            color: bar, flexShrink: 0 }}>{meta.label}</span>
+          {scope && (
+            <span style={{ fontSize: 'var(--fs-micro)', fontWeight: 700,
+              color: 'var(--m-text-tertiary)', flexShrink: 0 }}>{scope}</span>
+          )}
+          <span className="ko-keep" style={{ fontSize: 'var(--fs-body-sm)', fontWeight: 800,
+            color: 'var(--m-text)', overflow: 'hidden', textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+            {numeric && title
+              ? title
+              : String(n.message || '').replace(/^\[[^\]]{1,4}\]\s*/, '')}
+          </span>
+          {n.change_pct != null && (
+            <b className={n.change_pct >= 0 ? 'num-pos' : 'num-neg'}
+              style={{ fontSize: 'var(--fs-body)', fontWeight: 800, flexShrink: 0,
+                fontVariantNumeric: 'tabular-nums' }}>
+              {n.change_pct >= 0 ? '+' : ''}{n.change_pct.toFixed(1)}%
+            </b>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 3,
+          fontSize: 'var(--fs-micro)', color: 'var(--m-text-tertiary)',
+          fontVariantNumeric: 'tabular-nums' }}>
+          {numeric && price && <span>현재 {price}</span>}
+          {n.target_price != null && <span>목표 {n.target_price}</span>}
+          <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{fmtRelTime(n.created_at)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* tone 은 **방향**이다(올랐나/내렸나), 심각도가 아니다.
+   예전 cls 는 급등을 'is-critical'(빨강), 급락을 'is-high'(주황)으로 줬다 —
+   오른 것이 빨강, 내린 것이 주황이라 **등락색과 반대로** 읽혔다. */
 const KIND_META = {
-  high:   { label: '목표가', cls: 'sev-label is-critical' },
-  low:    { label: '손절가', cls: 'sev-label is-high' },
-  surge:  { label: '급등',   cls: 'sev-label is-critical' },
-  plunge: { label: '급락',   cls: 'sev-label is-high' },
-  info:     { label: '안내', cls: 'sev-label is-med' },
-  earnings: { label: '실적', cls: 'sev-label is-med' },   // 실적발표 전날 cron
-  strategy: { label: '분석', cls: 'sev-label is-med' },   // AI 전략 리포트 완료·실패
-  midterm:  { label: '중기', cls: 'sev-label is-med' },   // 중기 국면이 바뀐 날만 — 방향이 아니라 '무엇이 바뀌면 생각을 바꾸나'를 말한다
+  high:   { label: '목표가', tone: 'pos' },      // 목표가 도달 = 위로
+  low:    { label: '손절가', tone: 'neg' },
+  surge:  { label: '급등',   tone: 'pos' },
+  plunge: { label: '급락',   tone: 'neg' },
+  info:     { label: '안내', tone: 'neutral' },
+  earnings: { label: '실적', tone: 'neutral' },   // 실적발표 전날 cron
+  strategy: { label: '분석', tone: 'neutral' },   // AI 전략 리포트 완료·실패
+  midterm:  { label: '중기', tone: 'neutral' },   // 중기 국면이 바뀐 날만
 }
 
 // R6: 다문장 안내 — 문장마다 줄바꿈(pre-line 으로 렌더)

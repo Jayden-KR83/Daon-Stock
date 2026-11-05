@@ -4155,56 +4155,95 @@ def _parse_kr_num(s) -> Optional[float]:
 
 @ttl_cache(1800)
 def _kr_fundamentals(ticker: str) -> dict:
-    """한국 종목 Valuation — Naver 종목 메인의 투자정보 ID(_per/_pbr/_eps/_dvr/_cns_per/
-    _market_sum) + 동일업종비교 ROE 스크래핑. yfinance KR info가 비는 격차 보완.
-    HTML 구조 변경 시 빈 dict 반환(프론트가 '데이터 없음'으로 분기)."""
+    """한국 종목 Valuation — 네이버 모바일 **JSON API**.
+
+    🟥 2026-11-05 사고. 이 함수는 네이버 PC 종목 페이지의 HTML 을 긁어
+    `_per`/`_pbr`/`_eps`/`_cns_per`/`_market_sum` ID 로 값을 뽑았다.
+    네이버가 그 페이지를 **클라이언트 렌더링으로 바꾸면서 그 ID 들이 전부
+    사라졌다.** 함수는 설계대로 조용히 `{}` 를 돌려줬고 — 주석에도
+    "HTML 구조 변경 시 빈 dict 반환"이라고 적혀 있다 — 아무 에러도 안 났다.
+
+    결과: **발굴 유니버스의 한국 종목 75종 전부가 '가치' 축을 잃었다.**
+    가치는 한국 가중치 35%, 가장 무거운 축이다. 그런데 점수는 결측 감점
+    (x완성도/5)이 흡수해 그럴듯한 숫자로 나왔고, 화면에는 '데이터 없음'
+    한 줄만 떴다. **조용한 실패가 가장 비싸다.**
+
+    어떻게 찾았나: 제3자 2차 검증(Gemini)이 "결측 감점이 축 가중치를 무시한다"
+    고 지적해 민감도 분석을 돌렸더니 **KR 가치 축 결측률이 100%** 로 나왔다.
+    100% 는 '데이터 부족'이 아니라 **수집 고장**이다. 지적은 공식에 대한
+    것이었는데, 숫자를 재 보니 공식이 아니라 파이프가 끊겨 있었다.
+
+    그래서 바꾼 것 둘:
+      1) HTML 스크래핑 -> 모바일 JSON API (구조가 훨씬 안정적이고 값도 많다)
+      2) 회귀 감지기 — `test_kr_value_axis_is_collected` 가 **한 시장의 한 축이
+         통째로 비면** 실패한다. 조용히 다시 끊기지 않게.
+    """
     code = kr_code(ticker)
-    out: dict = {}
     try:
-        r = _session.get(f'https://finance.naver.com/item/main.naver?code={code}',
-                         headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+        r = _session.get(
+            f'https://m.stock.naver.com/api/stock/{code}/integration',
+            headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://m.stock.naver.com/'},
+            timeout=6)
         if r.status_code != 200:
             return {}
-        soup = BeautifulSoup(r.text, 'html.parser')
-        def by_id(eid):
-            el = soup.find(id=eid)
-            return _parse_kr_num(el.get_text(strip=True)) if el else None
-        # 시가총액 — _market_sum "1,882조 5,017" (조 + 억)
-        mc = None
-        msum = soup.find(id='_market_sum')
-        if msum:
-            txt = msum.get_text(' ', strip=True)
-            jo = re.search(r'([\d,]+)\s*조', txt)
-            rest = re.sub(r'[\d,]+\s*조', '', txt)
-            ok = re.search(r'([\d,]+)', rest)
-            if jo:
-                mc = int(jo.group(1).replace(',', '')) * 10**12 \
-                     + (int(ok.group(1).replace(',', '')) if ok else 0) * 10**8
-            elif ok:
-                mc = int(ok.group(1).replace(',', '')) * 10**8
-        # ROE — 동일업종비교 self(첫) 컬럼
-        roe = None
-        sec = soup.select_one('.section.trade_compare')
-        if sec:
-            for tr in sec.select('table tbody tr'):
-                th = tr.find('th')
-                if th and 'ROE' in th.get_text():
-                    td = tr.find('td')
-                    if td:
-                        roe = _parse_kr_num(td.get_text(strip=True))
-                    break
-        out = {
-            'market_cap':    int(mc) if mc else None,
-            'trailing_pe':   by_id('_per'),
-            'forward_pe':    by_id('_cns_per'),   # 추정 PER(컨센서스)
-            'price_to_book': by_id('_pbr'),
-            'diluted_eps':   by_id('_eps'),
-            'div_yield':     by_id('_dvr'),
-            'roe':           roe,
-        }
+        d = r.json()
     except Exception:
         return {}
+
+    # totalInfos: [{code, key, value}, ...] — code 로 찾는다(키 이름은 한글이라 바뀔 수 있다)
+    vals = {}
+    for it in (d.get('totalInfos') or []):
+        c = it.get('code')
+        if c:
+            vals[c] = it.get('value')
+
+    # API 값에는 단위가 붙어 온다: '9.04배' · '22,292원' · '0.83%'.
+    # 옛 HTML 은 맨숫자였기 때문에 `_parse_kr_num` 은 단위를 모른다.
+    # 공유 함수를 고치면 '1,178조 251억' 같은 값이 '1178251' 로 잘못 읽히므로
+    # 여기서만 벗긴다 — 벗길 단위를 **명시적으로 나열**한다(모르는 단위는 통과시켜
+    # `_parse_kr_num` 이 None 을 내게 둔다. 조용히 틀린 숫자보다 없는 편이 낫다).
+    _UNITS = ('배', '원', '%', '주', '포인트')
+
+    def num(c):
+        v = vals.get(c)
+        if v in (None, '', '-', 'N/A'):
+            return None
+        t = str(v).strip()
+        for u in _UNITS:
+            if t.endswith(u):
+                t = t[:-len(u)].strip()
+                break
+        return _parse_kr_num(t)
+
+    # 시총 — "1,178조 251억" 또는 "921,881,364"(백만원 단위) 두 형태가 온다
+    mc = None
+    msum = vals.get('marketValue')
+    if msum:
+        txt = str(msum)
+        jo = re.search(r'([\d,]+)\s*조', txt)
+        if jo:
+            rest = re.sub(r'[\d,]+\s*조', '', txt)
+            ok = re.search(r'([\d,]+)', rest)
+            mc = int(jo.group(1).replace(',', '')) * 10**12 \
+                 + (int(ok.group(1).replace(',', '')) if ok else 0) * 10**8
+        else:
+            ok = re.search(r'([\d,]+)', txt)
+            if ok:
+                mc = int(ok.group(1).replace(',', '')) * 10**6   # 백만원 단위
+
+    out = {
+        'market_cap':    int(mc) if mc else None,
+        'trailing_pe':   num('per'),
+        'forward_pe':    num('cnsPer'),      # 추정 PER(컨센서스)
+        'price_to_book': num('pbr'),
+        'diluted_eps':   num('eps'),
+        'div_yield':     num('dividendYieldRatio'),
+        # ROE 는 이 API 에 없다. 지어내지 않고 비워 둔다 —
+        # _discovery_raw_metrics 가 yfinance 쪽에서 따로 채운다.
+        'roe':           None,
+    }
     return out if any(v is not None for v in out.values()) else {}
+
 
 def _stock_fundamentals(ticker: str) -> dict:
     if is_kr(ticker):
@@ -5571,30 +5610,60 @@ def _macro_link_basis(user_id: str) -> dict:
     }
 
 
+# 2026-11-05 오너: "오늘의 시황은 그냥 숫자 등락에 대한 나열 밖에 없네?
+#   투자에 있어 빅테크나 채권 비트코인 등 주의 사항이나 조언을 해주는 내용이 있어야지."
+#
+# 맞는 지적이고, 원인은 **내 프롬프트**다. 1차 규칙 1번이 "모든 문장에 숫자가
+# 들어가야 한다"였다. 숫자를 넣는 가장 쉬운 방법은 시세를 옮겨 적는 것이고,
+# 모델은 그렇게 했다. 규칙이 시킨 대로 한 것이다.
+#
+# 고친 방향: 숫자는 **근거의 자리**로 내리고, 문장의 결론은 "그래서 무엇을
+# 주의할 것인가"로 올린다. 그리고 자산군(빅테크·채권·가상자산·원자재·한국)별로
+# 칸을 따로 만든다 — 칸이 없으면 모델은 지수 이야기만 하고 끝낸다.
 MACRO_BRIEF_RULES = (
     "[절대 규칙]\n"
-    "1. 모든 문장에 **숫자**가 들어가야 합니다. 숫자 없는 형용사(크게·급등·불안한)만으로 쓰지 마세요.\n"
+    "1. 🟥 **시세를 옮겨 적지 마세요.** 숫자는 이미 화면에 표로 나옵니다.\n"
+    "   '나스닥이 1.8% 내렸습니다'는 데이터지 해설이 아닙니다.\n"
+    "   모든 문장의 결론은 **'그래서 무엇을 주의/확인할 것인가'** 여야 합니다.\n"
+    "   숫자는 그 판단의 **근거로만** 한 번 인용하세요.\n"
     "2. 사라/팔라고 단정하지 마세요. 무엇을 **확인해 보실 수 있는지**로 쓰세요.\n"
     "3. 모르는 것은 '확인 필요'라고 쓰세요. 추정값을 사실처럼 쓰지 마세요.\n"
     "4. 인과를 단정하지 마세요. 같은 날 같이 움직인 것은 상관이지 원인이 아닙니다.\n"
     "   ('금리 때문에 떨어졌다' X / '금리가 +2.1% 오른 날 성장주가 밀렸습니다' O)\n"
     "5. 한국어로만. 각 문장은 한 가지만 말하고 2줄을 넘기지 마세요.\n"
     "6. 특정 종목의 매수·매도를 권하지 마세요. 이 글은 시장 해설이지 추천이 아닙니다.\n"
+    "7. 🟥 **조건을 붙이세요.** 좋은 주의사항은 '무엇이 어긋나면 생각을 바꿔야 하는가'를\n"
+    "   말합니다. ('변동성에 유의하세요' X / '10년물이 4.5%를 넘으면 성장주 밸류에이션\n"
+    "   논리가 다시 시험대에 오릅니다' O)\n"
+    "8. 오늘 조용한 자산군은 **조용하다고 쓰세요.** 억지로 이야기를 만들지 마세요.\n"
 )
 
 MACRO_BRIEF_SCHEMA = (
     '{\n'
-    '  "headline": "오늘 시장을 한 문장으로. 숫자 1개 이상 포함. 30자 내외.",\n'
+    '  "headline": "오늘 시장이 투자자에게 묻는 것 한 문장. 시세 나열 금지. 40자 내외.",\n'
     '  "movers": [\n'
     '    {"what": "무엇이 움직였나 (지표명)", "number": "수치 (예: +1.8%, 4.21%)",\n'
-    '     "meaning": "그래서 무슨 뜻인지 1~2문장. 인과 단정 금지."}\n'
+    '     "meaning": "그 움직임이 **무엇을 바꾸는지** 1~2문장. 수치 재인용 금지. 인과 단정 금지."}\n'
     '  ],\n'
-    '  "actions": ["투자자로서 오늘 확인해 볼 것. 2~3개. 각 1문장."],\n'
+    '  "views": [\n'
+    '    {"asset": "자산군 이름. 다음 다섯 중에서만: 빅테크·성장주 / 채권·금리 /\n'
+    '              가상자산 / 원자재·에너지 / 한국 증시",\n'
+    '     "stance": "지금 이 자산군이 처한 상태 1문장. 오늘 조용했으면 조용했다고 쓸 것.",\n'
+    '     "caution": "🟥 주의할 것 1문장. **무엇이 어긋나면 생각을 바꿔야 하는지**를\n'
+    '                조건으로 쓸 것. 숫자 기준선이 있으면 함께."}\n'
+    '  ],\n'
+    '  "actions": ["투자자로서 오늘 확인해 볼 것. 2~3개. 각 1문장. 포괄적으로."],\n'
     '  "watch": "앞으로 48시간 안에 나올 일정·발표 중 가장 중요한 것 1문장.",\n'
     '  "facts": {"cpi": "최근 발표된 미국 CPI 전년대비 (모르면 확인 필요)",\n'
     '            "policy_rate": "현재 미국 기준금리 목표범위 (모르면 확인 필요)",\n'
     '            "next_event": "다음 FOMC 또는 주요 지표 발표일 (모르면 확인 필요)"}\n'
     '}'
+)
+# 🟥 스키마 문자열은 **{ 로 시작해 } 로 끝난다.** 뒤에 지시문을 붙이면 모델이
+#    그 줄까지 JSON 의 일부로 보려다 모양을 깨뜨린다. 분량 지시는 본문에 따로 둔다.
+#    (2026-11-05: 붙였다가 test_brief_schema_is_valid_json_shape 가 잡았다)
+MACRO_BRIEF_SHAPE = (
+    'views 는 다섯 자산군을 **모두** 채우세요. movers 는 2~3개면 충분합니다.'
 )
 
 
@@ -5632,6 +5701,8 @@ def _gen_macro_brief(session: str, snap: list) -> dict:
                '한국 장이 끝난 오후입니다. 곧 미국 장이 열립니다.')
     prompt = (
         "당신은 개인 투자자 한 사람에게 매일 시황을 전하는 애널리스트입니다.\n"
+        "그 사람은 시세표를 **이미 보고 있습니다**. 당신에게 기대하는 것은 숫자가 아니라\n"
+        "'그래서 오늘 무엇을 주의해야 하는가'입니다.\n"
         + when_ko + "\n\n"
         "[오늘의 시세]\n" + _macro_quote_lines(snap) + "\n\n"
         + ("[검색으로 확인할 것]\n"
@@ -5643,15 +5714,18 @@ def _gen_macro_brief(session: str, snap: list) -> dict:
            "[주의] 이 세션은 웹 검색을 쓰지 않습니다. facts 의 세 항목은 모두 "
            "'확인 필요'로 두세요. 모르는 것을 지어내지 마세요.\n\n")
         + MACRO_BRIEF_RULES + "\n"
+        + MACRO_BRIEF_SHAPE + "\n"
         "JSON 으로만 답하세요. 스키마:\n" + MACRO_BRIEF_SCHEMA
     )
 
     try:
+        # views 5칸이 늘면서 출력이 길어졌다. 상한에 걸려 잘리면 JSON 이 깨지고
+        # **브리핑 전체가 사라진다**(부분 복구가 안 된다). 넉넉히 준다.
         if is_pre:
             text, _src = _call_claude_with_search(
-                api_key, MODEL_ANALYSIS, prompt, max_tokens=2500, max_searches=3, timeout=180)
+                api_key, MODEL_ANALYSIS, prompt, max_tokens=4500, max_searches=3, timeout=240)
         else:
-            text = _call_claude(api_key, MODEL_ANALYSIS, prompt, 2000, 120)
+            text = _call_claude(api_key, MODEL_ANALYSIS, prompt, 4000, 150)
         data = _parse_claude_json(text)
     except Exception as e:
         return {'ok': False, 'reason': 'api_error', 'error': str(e)[:200]}
@@ -5785,7 +5859,7 @@ def _gen_user_macro_note(uid: str, brief: dict, links: list) -> str | None:
 
 
 @app.post("/api/admin/macro_brief/run")
-def admin_run_macro_brief(cu: dict = Depends(require_admin)):
+def admin_run_macro_brief(force: bool = False, cu: dict = Depends(require_admin)):
     """관리자가 지금 바로 시황을 만든다.
 
     왜 필요한가: 생성은 cron 이 하는데, cron 은 하루 2번뿐이다. 기능을 새로
@@ -5794,13 +5868,17 @@ def admin_run_macro_brief(cu: dict = Depends(require_admin)):
     꺼내 쓰는 과정 자체가 유출 경로다(2026-10 화면 캡처로 노출된 전례).
 
     같은 세션을 이미 만들었으면 다시 만들지 않는다 — 버튼을 연타해도 돈이
-    한 번만 나간다. 다시 만들고 싶으면 force=1.
+    한 번만 나간다.
+
+    force=1 은 그 보호를 **의도적으로** 끈다. 프롬프트를 고친 날에는 이미 있는
+    글이 옛 프롬프트 결과라서, 다시 만들지 못하면 다음 cron(최대 9시간 뒤)까지
+    고친 것을 볼 수 없다. 돈이 한 번 더 나가므로 화면에서도 그렇게 적는다.
     """
     session = _macro_session_key()
     with _db() as conn:
         exists = conn.execute(
             "SELECT 1 FROM macro_brief WHERE session_key=?", (session,)).fetchone()
-    if exists:
+    if exists and not force:
         return {'ok': True, 'session': session, 'skipped': 'already_exists'}
 
     snap  = _macro_snapshot()

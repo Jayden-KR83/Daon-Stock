@@ -25,7 +25,10 @@
 .top-nav-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  /* 알림 종 배지는 버튼 밖으로 4px 튀어나온다(top:-4; right:-4). gap 6px 이면
+     그 4px 이 옆 버튼 위에 얹힌다 — 2026-11-05 오너 캡처의 겹침이 이것이다.
+     배지가 넘는 만큼(4px)보다 넉넉히 둔다. */
+  gap: 10px;
   margin-left: auto;
 }
 
@@ -81,6 +84,11 @@
   color: var(--clr-text-strong);
 }
 
+/* 🟥 아이콘 전용 정사각 버튼. **글자를 넣을 거면 이 클래스를 쓰면 안 된다** —
+   width 가 34px 로 고정이라 내용이 넘쳐 옆 요소를 침범한다.
+   2026-11-05: 테마 버튼에 '☀️ 화이트 → 🌙' 글자를 넣으면서 이 클래스를 그대로
+   썼고, 34px 안에 들어갈 리 없는 내용이 알림 배지 위로 올라탔다.
+   글자가 있는 버튼은 아래 .top-nav-theme-btn 처럼 width 를 풀어 준다. */
 .top-nav-app-btn {
   display: flex; align-items: center; justify-content: center;
   width: 34px; height: 34px;
@@ -95,6 +103,14 @@
   background: var(--clr-pos-bg-soft);
   color: var(--clr-pos-dark);
   border-color: var(--clr-pos-border-md);
+}
+/* 테마 버튼은 글자('☀️ 화이트 → 🌙')를 담으므로 폭을 내용에 맡긴다. */
+.top-nav-theme-btn {
+  width: auto;
+  min-width: 34px;
+  padding: 0 9px;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 /* ── 아바타 ── */
