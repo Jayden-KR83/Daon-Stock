@@ -10,10 +10,16 @@ import './SideNavBar.css'
  * 같이' 라고 적어 두고 빠뜨렸다.
  *
  * 주 5개: 계좌 · 관심 · 발굴 · 시장 · 설정
- * 구분선 아래 '바로가기': 분석 · 종목 · 등록 · 가이드
- *   — 모바일에서는 각자의 진입점(계좌의 분석 버튼, 설정의 등록 등)으로 들어가지만,
- *     데스크톱은 폭이 넉넉하므로 길을 하나 더 열어 둔다. 숨기는 것이 목적이 아니라
- *     **주/부를 가르는 것**이 목적이다.
+ * 구분선 아래: 종목 (차트는 어느 화면에서든 종목을 누르면 열리지만, 직전에
+ *   보던 종목으로 되돌아올 길이 하나 있어야 한다)
+ *
+ * 2026-11-05 — 오너가 같은 지적을 두 번 했다: "분석 탭도 없애고(계좌에 편입),
+ * 등록·여정·가이드 모두 설정에 넣어." 앞선 재편에서 **모바일 하단 바만** 고치고
+ * 여기는 '데스크톱은 폭이 넉넉하니 길을 하나 더'라는 이유로 네 개를 남겼다.
+ * 그 이유가 틀렸다 — 폭이 남는다는 것은 메뉴를 늘릴 **권리**가 아니다.
+ * 두 화면의 메뉴가 다르면 "내가 아까 본 그 메뉴가 어디 갔지"가 생긴다.
+ *   분석 -> 계좌 탭 상단 '보유 종목 종합 분석' 버튼
+ *   등록·가이드·여정 -> 설정 탭 '바로가기' 카드
  */
 const SIDE_TABS = [
   {
@@ -51,35 +57,9 @@ const SIDE_TABS = [
   },
   { type: 'divider' },
   {
-    label: '분석', idx: 2,
-    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>
-    </svg>
-  },
-  {
     label: '종목', idx: 3,
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
-    </svg>
-  },
-  {
-    label: '등록', idx: 5,
-    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
-    </svg>
-  },
-  {
-    label: '가이드', idx: 7,
-    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-    </svg>
-  },
-  { type: 'divider' },
-  {
-    label: '여정', idx: 8, adminOnly: true,
-    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
-      <line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>
     </svg>
   },
 ]

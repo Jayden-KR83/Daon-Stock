@@ -107,7 +107,10 @@ const ALL_TABS = [
   { label: '종목',       idx: 3, iconKey: 'chart',      nav: false },
   { label: '등록',       idx: 5, iconKey: 'register',   nav: false },
   { label: '가이드',     idx: 7, iconKey: 'guide',      nav: false },
-  { label: '여정',       idx: 8, iconKey: 'journey', adminOnly: true },
+  /* 2026-11-05: 여정은 관리자에게만 보이던 메뉴인데 하단 바 한 칸을 차지했다.
+     오너 지시대로 설정 탭 '바로가기'로 옮긴다 — nav:false 면 '전체' 시트에는
+     남아 길이 끊기지 않는다. */
+  { label: '여정',       idx: 8, iconKey: 'journey', adminOnly: true, nav: false },
   { label: '관리자',     idx: 9, iconKey: 'admin',   adminOnly: true },
 ]
 

@@ -142,7 +142,7 @@ function aggregateOHLC(daily, level) {
 
 /* ── 순수 SVG 캔들스틱 차트 (드래그 줌 지원) ── */
 function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoom, onResetZoom,
-                            avgPrice = null }) {
+                            avgPrice = null, week52High = null, showDrawdown = false }) {
   const containerRef = useRef(null)
   const svgRef       = useRef(null)
   const [width, setWidth] = useState(0)
@@ -177,7 +177,13 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
   /* 평단가를 y 범위에 포함시킨다. 안 넣으면 평단이 차트 밖일 때 기준선이
      잘려 보이지 않는다 — "내 평단이 어디쯤인가"가 이 선의 존재 이유다. */
   const hasAvg = typeof avgPrice === 'number' && isFinite(avgPrice) && avgPrice > 0
-  const spanPrices = hasAvg ? [...allPrices, avgPrice] : allPrices
+  /* 52주 고점선 — y 범위에 **반드시 포함**시킨다. 넣지 않으면 기간을 3M 으로
+     줄였을 때 고점이 화면 밖이라 선이 안 보이고, "고점 대비 얼마"라는 질문에
+     답할 수 없게 된다. 평단선과 같은 이유다. */
+  const hasHigh = showDrawdown && typeof week52High === 'number'
+    && isFinite(week52High) && week52High > 0
+  let spanPrices = hasAvg ? [...allPrices, avgPrice] : allPrices
+  if (hasHigh) spanPrices = [...spanPrices, week52High]
   const minY = Math.min(...spanPrices) * 0.997
   const maxY = Math.max(...spanPrices) * 1.003
   const yRange = maxY - minY || 1
@@ -290,6 +296,35 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
             stroke="var(--clr-border)" strokeWidth={1} />
         ))}
 
+        {/* 52주 고점 대비 낙폭 (2026-11-05 오너 요청).
+            고점선 하나만 그으면 "얼마나 떨어졌나"를 눈으로 재야 한다. 고점과
+            현재가 **사이를 칠해서** 그 거리를 면적으로 만든다.
+            칠은 캔들 뒤에 깔린다 — 캔들을 덮으면 가격을 읽을 수 없다. */}
+        {hasHigh && (() => {
+          const last = [...data].reverse().find(d => d.close != null)
+          const cur  = last ? last.close : null
+          if (cur == null || cur >= week52High) return null
+          const yTop = yOf(week52High), yCur = yOf(cur)
+          const dd   = (cur - week52High) / week52High * 100
+          return (
+            <g>
+              <rect x={PAD.left} y={yTop} width={W} height={Math.max(0, yCur - yTop)}
+                fill="var(--clr-neg-dark, #DC2626)" opacity="0.07" />
+              <line x1={PAD.left} y1={yTop} x2={PAD.left + W} y2={yTop}
+                stroke="var(--clr-neg-dark, #DC2626)" strokeWidth={1}
+                strokeDasharray="2 3" opacity="0.75" />
+              <text x={PAD.left + W + 4} y={yTop + 3}
+                fontSize={9.5} fontWeight={800} fill="var(--clr-neg-dark, #DC2626)">52주고</text>
+              {/* 낙폭 숫자는 띠 안쪽에. 띠가 얇으면(5px 미만) 글자가 선을 뚫으므로 생략 */}
+              {yCur - yTop > 16 && (
+                <text x={PAD.left + 6} y={yTop + (yCur - yTop) / 2 + 3}
+                  fontSize={10.5} fontWeight={800} fill="var(--clr-neg-dark, #DC2626)"
+                  opacity="0.9">고점 대비 {dd.toFixed(1)}%</text>
+              )}
+            </g>
+          )
+        })()}
+
         {/* 내 평단가 기준선 — 보유 종목일 때만.
             캔들이 이 선 위에 있으면 이익, 아래면 손실. 숫자를 읽지 않아도 보인다. */}
         {hasAvg && (
@@ -345,8 +380,12 @@ function CandlestickChart({ data, isUs, maVis, range = '1Y', height = 240, onZoo
           })
           if (seg.length) segments.push(seg)
           return segments.map((s, si) => (
+            /* 2026-11-05 오너: "이평선을 더 얇게 해줘. 캔들보다 굵으니 촌스러워 보여."
+               캔들 몸통은 슬롯 폭에 따라 3~8px 인데 이평선이 1.8px 였다. 1Y 처럼
+               캔들이 촘촘한 구간에서는 선이 몸통보다 굵어 보인다. 0.9px 로 낮춘다 —
+               선은 **배경 추세**지 주인공이 아니다. */
             <polyline key={`${maKey}-${si}`} points={s.join(' ')}
-              fill="none" stroke={color} strokeWidth={1.8} />
+              fill="none" stroke={color} strokeWidth={0.9} />
           ))
         })}
 
@@ -424,7 +463,12 @@ export default function ChartTab() {
   const [searchQ,      setSearchQ]      = useState('')
   const [showDrop,     setShowDrop]     = useState(false)
   const [alertSheetOpen, setAlertSheetOpen] = useState(false)
-  const [maVis,        setMaVis]        = useState({ ma20: true, ma60: true, ma120: false, ma200: true })
+  /* 2026-11-05 오너: "평소때 왜 이평선 120일은 해제 되어있는지?? 기본적으로 보이게 해줘."
+     기본값에 이유가 없었다 — 넷 중 하나만 꺼 둘 근거가 어디에도 없었다. 전부 켠다. */
+  const [maVis,        setMaVis]        = useState({ ma20: true, ma60: true, ma120: true, ma200: true })
+  /* 52주 고점 대비 낙폭을 차트 위에 그릴지. 기본 켜짐 — 오너가 "시각적으로
+     표현해주면 좋겠다"고 한 것이 이 선이고, 버튼으로 끌 수 있으니 켜 두고 시작한다. */
+  const [showDrawdown, setShowDrawdown] = useState(true)
   const [rangeOpt,     setRangeOpt]     = useState('1Y')  // 기본 1Y (전체 데이터는 5Y까지)
   const [scaleOpt,     setScaleOpt]     = useState('D')   // 'D' | 'W' | 'M' — 캔들 집계 단위
   const [zoomRange,    setZoomRange]    = useState(null)  // null 또는 [startIdx, endIdx] (집계된 데이터 기준)
@@ -790,8 +834,11 @@ export default function ChartTab() {
             />
           )}
 
-          {/* 52주 바 — 개별 주식만 표시 (지수/코인/환율 제외) */}
-          {isUs && !isIndex && !isForex && !isBond && stockData.week_52_high && stockData.week_52_low && (
+          {/* 52주 바 — 개별 주식만 표시 (지수/코인/환율 제외).
+              2026-11-05: `isUs &&` 를 뺐다. 한국 종목도 백엔드가 일봉 1년치에서
+              week_52_high/low 를 계산해 주는데(get_stock), 이 조건 하나 때문에
+              **한국 종목만 52주 범위를 못 봤다.** 가진 데이터를 막고 있었다. */}
+          {!isIndex && !isForex && !isBond && stockData.week_52_high && stockData.week_52_low && (
             <WeekBar cur={cur} low={stockData.week_52_low} high={stockData.week_52_high} isUs={isUs} />
           )}
 
@@ -824,6 +871,17 @@ export default function ChartTab() {
                     onClick={() => setMaVis(p => ({ ...p, [k]: !p[k] }))}>{label}</button>
                 ))}
               </div>
+              {/* 52주 고점 대비 (2026-11-05 오너: "또는 버튼 추가해서 그래프에서
+                  선택하면 보이게 해"). 52주 고가를 모르는 자산(지수·환율 일부)에는
+                  **버튼 자체를 만들지 않는다** — 눌러도 아무 일 없는 버튼이 더 나쁘다. */}
+              {stockData?.week_52_high > 0 && (
+                <button onClick={() => setShowDrawdown(v => !v)}
+                  className={`seg-btn ${showDrawdown ? 'active' : ''}`}
+                  title="52주 최고가와 현재가 사이를 칠해 낙폭을 보여줍니다"
+                  style={{ borderRadius: 6, border: '1px solid var(--clr-border-md)',
+                    padding: '4px 10px', whiteSpace: 'nowrap' }}>52주고 대비</button>
+              )}
+
               {/* 줌 리셋 — 줌 활성 시에만 노출 */}
               {zoomRange && (
                 <button onClick={() => setZoomRange(null)}
@@ -853,6 +911,7 @@ export default function ChartTab() {
             <div className="chart-card">
               <CandlestickChart data={hist} isUs={isUs} maVis={maVis}
                 range={rangeOpt} height={240} avgPrice={myAvgPrice}
+                week52High={stockData?.week_52_high} showDrawdown={showDrawdown}
                 onZoom={(i1, i2) => {
                   // 현재 표시 데이터 기준 인덱스 → scaledHist 절대 인덱스로 변환
                   const base = zoomRange ? zoomRange[0] : 0
@@ -1371,9 +1430,24 @@ function WeekBar({ cur, low, high, isUs }) {
   const fmt = v => isUs ? `$${v.toFixed(2)}` : `₩${Math.round(v).toLocaleString()}`
   return (
     <div style={{ padding: '6px 2px 4px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--clr-text-muted)', marginBottom: 8 }}>
-        <span>52주 범위</span>
-        <span>{((cur - low) / (high - low) * 100).toFixed(1)}% 위치</span>
+      {/* 2026-11-05 오너: "52주 최고가 대비 현재가 몇 % 하락해 있는지".
+          전에는 '몇 % 위치'만 있었다. 그것은 **저점으로부터**의 거리라, 고점에서
+          얼마나 내려왔는지를 묻는 사람에게는 답이 아니다. 둘 다 쓴다 —
+          고점 대비를 먼저, 크게. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+        alignItems: 'baseline', marginBottom: 8, gap: 8 }}>
+        <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--clr-text-muted)' }}>52주 범위</span>
+        <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <b style={{ fontSize: 'var(--fs-body)', fontWeight: 800,
+            color: cur >= high ? 'var(--clr-pos-dark)' : 'var(--clr-neg-dark)',
+            fontVariantNumeric: 'tabular-nums' }}>
+            고점 대비 {((cur - high) / high * 100).toFixed(1)}%
+          </b>
+          <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--clr-text-muted)',
+            fontVariantNumeric: 'tabular-nums' }}>
+            저점 대비 +{((cur - low) / low * 100).toFixed(1)}%
+          </span>
+        </span>
       </div>
       <div style={{ position: 'relative', height: 5, background: '#E2E8F0', borderRadius: 3, margin: '0 4px' }}>
         <div style={{ position: 'absolute', left: 0, width: `${pct}%`, height: '100%',

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, Suspense, lazy } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
-import { useStore, THEME_META } from './store'
+import { useStore, THEME_META, THEME_ORDER } from './store'
 import ChatPanel from './components/ChatPanel'
 import { useSwipeNav } from './useSwipeNav'
 import { getUsdKrw, getApiKeyStatus, authMe, getAdminStatus, getAccounts, getPortfolio, getPricesBatch, captureNetWorthSnapshot } from './api'
@@ -486,20 +486,32 @@ function ChatFab() {
 
 /* 앱 모드 상단의 테마 빠른 전환.
    라벨은 store 의 THEME_META 하나만 본다 — 예전에는 여기서 'light/dark 가 아니면
-   프로' 로 판정해 auto 일 때도 '📈 프로' 가 찍혔다. */
+   프로' 로 판정해 auto 일 때도 '📈 프로' 가 찍혔다.
+
+   2026-11-05 오너: "앱 화면에서 다크모드 화이트 모드 전환 버튼이 없네?"
+   버튼은 **있었다.** 그런데 '☀️ 화이트'라고만 적혀 있어서, 그 글자가 지금
+   상태인지 누르면 될 상태인지 알 수 없었다 — 토글 스위치와 **똑같은 문제**다.
+   보이지 않은 게 아니라 **무엇인지 못 알아본 것**이다.
+   -> 다음에 무엇이 되는지를 화살표로 같이 보여 준다: `☀️ 화이트 → 🌙`.
+      지금은 왼쪽, 누르면 오른쪽. 읽는 순서가 곧 일어날 일의 순서다. */
 function ThemeQuickToggle() {
   const theme      = useStore(s => s.theme)
   const cycleTheme = useStore(s => s.cycleTheme)
   const meta  = THEME_META[theme] || THEME_META.light
-  const icon  = meta.icon
-  const label = meta.label
+  const nextKey = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length]
+  const next    = THEME_META[nextKey] || THEME_META.dark
   return (
     <button className="app-theme-hint" onClick={cycleTheme}
-      title={theme === 'auto'
-        ? '테마: 자동 — OS 설정을 따릅니다 (탭하여 변경)'
-        : `테마: ${label} (탭하여 변경)`}>
-      <span style={{ fontSize: 12, lineHeight: 1 }}>{icon}</span>
-      {label}
+      aria-label={`테마 ${meta.label} — 누르면 ${next.label}`}
+      title={`지금 테마: ${meta.label}${theme === 'auto' ? ' (OS 설정을 따름)' : ''}`
+        + ` · 누르면 ${next.label} 로 바뀝니다 · 전체 목록은 설정 > 테마 모드`}>
+      {/* 이모지 크기도 타이포 사다리를 쓴다 — 래칫은 '글자'와 '아이콘 글리프'를
+          구분하지 못하고, 구분할 이유도 없다. 예외를 한 번 열면 사다리가 샌다. */}
+      <span style={{ fontSize: 'var(--fs-body-sm)', lineHeight: 1 }}>{meta.icon}</span>
+      {meta.label}
+      <span aria-hidden="true" style={{ opacity: 0.55, fontWeight: 700 }}>→</span>
+      <span aria-hidden="true" style={{ fontSize: 'var(--fs-body-sm)', lineHeight: 1, opacity: 0.85 }}>
+        {next.icon}</span>
     </button>
   )
 }

@@ -1332,34 +1332,42 @@ button.chat-send:not(.btn-primary) {
 }
 .cp-del:hover { color: var(--clr-neg-dark, #DC2626); }
 
-/* ── 켜짐/꺼짐 토글 — 2026-10-27 ─────────────────────────────────
-   '켜기' 버튼은 지금 상태인지 누르면 할 일인지 구분되지 않았다(오너 지적).
-   손잡이 위치가 상태를 말하고, 옆 글자가 같은 말을 한 번 더 한다 —
-   위치만으로는 색각·저시력 사용자에게 전달되지 않기 때문이다. */
-.sw-wrap { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; }
-.sw-state {
-  font-size: 11px; font-weight: 800; letter-spacing: -.2px;
-  color: var(--clr-text-muted); min-width: 24px; text-align: right;
-}
-.sw-state.is-on { color: var(--clr-text-strong); }
+/* ── 켜짐/꺼짐 토글 — 2026-11-05 (2차) ───────────────────────────
+   1차는 트랙 **옆**에 상태 글자를 뒀다. 읽을 것이 둘로 늘었고, 결정적으로
+   그 글자가 눌리지 않았다 — 오너: "토글키가 헷갈리게 되어 있어. 그냥 토글키
+   내 버튼이 '꺼짐'/'켜짐'으로 두고 그 글자를 누르면 적용되게 해줘."
+   -> 글자를 손잡이 안으로. 읽을 것 = 누를 것.
+
+   폭을 고정값(66px)으로 박는 이유: '꺼짐'·'켜짐' 둘 다 2글자라 손잡이 폭이
+   변하지 않는다. auto 로 두면 busy('…') 일 때 폭이 줄며 트랙이 덜컹거린다. */
+/* (구) .sw-wrap — 2026-11-05 토글 2차 개편으로 쓰이지 않는다. 글자가 손잡이
+   안으로 들어가면서 바깥 래퍼가 필요 없어졌다. 선택자를 남겨 두면 다음 사람이
+   "이게 어디 붙는 거지"를 찾느라 시간을 쓴다. */
 .sw-track {
-  position: relative; width: 40px; height: 23px; flex-shrink: 0;
+  position: relative; width: 66px; height: 28px; flex-shrink: 0;
   border-radius: 999px; border: 1px solid var(--clr-border-md);
   background: var(--clr-bg); cursor: pointer; padding: 0;
+  display: inline-block;
   transition: background .16s ease, border-color .16s ease;
 }
 .sw-track.is-on { background: var(--clr-text-strong); border-color: var(--clr-text-strong); }
 .sw-track:disabled { opacity: .5; cursor: default; }
 .sw-track:focus-visible { outline: 2px solid var(--clr-accent, #0EA5E9); outline-offset: 2px; }
 .sw-knob {
-  position: absolute; top: 2px; left: 2px; width: 17px; height: 17px;
-  border-radius: 50%; background: var(--clr-surface);
+  position: absolute; top: 2px; left: 2px;
+  width: 36px; height: 22px;
+  border-radius: 999px; background: var(--clr-surface);
   border: 1px solid var(--clr-border-md);
-  transition: transform .16s ease;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; letter-spacing: -.3px;
+  color: var(--clr-text-muted);
+  font-family: inherit; white-space: nowrap;
+  transition: transform .16s ease, color .16s ease;
 }
 .sw-track.is-on .sw-knob {
-  transform: translateX(17px);
-  background: var(--clr-surface); border-color: transparent;
+  /* 66 - 36 - (2*2 안쪽여백) = 26 */
+  transform: translateX(26px);
+  color: var(--clr-text-strong); border-color: transparent;
 }
 
 /* ── 원칙 제안(미승인) — 2026-10-23 ──────────────────────────────

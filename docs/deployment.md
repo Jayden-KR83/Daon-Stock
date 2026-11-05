@@ -148,6 +148,14 @@ WantedBy=multi-user.target
 # 일별 KST 08:00(UTC 23:00) — 실적발표 '내일' 종목 알림 + 푸시 (AI 미사용·비용 0)
 #   상한은 코드에 있다: EARNINGS_SCAN_MAX_USERS=50 / EARNINGS_SCAN_MAX_TICKERS=200
 0 23 * * * /usr/local/bin/daon-earnings-alerts.sh
+# 일별 KST 07:00 / 16:00 — 거시 시황 브리핑 (2026-11-05)
+#   07:00 = 장 전(간밤 미국 장) · 웹 검색 1회 포함  /  16:00 = 장 후(한국 장 마감) · 검색 없음
+#   세션(pre/post) 구분은 **서버가 시각으로 판단**한다 — cron 은 이름을 넘기지 않는다.
+#   같은 세션 중복 호출은 서버가 건너뛴다(already_exists) → 겹쳐 돌아도 돈이 두 번 안 나간다.
+#   발굴 스캔(0 22)과 같은 분을 피해 10분 미뤘다 — 1GB VM 이라 무거운 작업이
+#   겹치면 OOM 위험이 있다. 무게가 달라도 겹치지 않는 편이 싸다.
+10 22 * * * /usr/local/bin/daon-macro-brief.sh
+0  7  * * * /usr/local/bin/daon-macro-brief.sh
 ```
 
 > **보유 종목 AI 분석 갱신은 서버 cron 이 아니다 (2026-08-20 변경).**

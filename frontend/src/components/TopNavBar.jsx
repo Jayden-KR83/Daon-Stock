@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { searchStocks } from '../api'
-import { useStore, THEME_META } from '../store'
+import { useStore, THEME_META, THEME_ORDER } from '../store'
 import NotificationsBell from './NotificationsBell'
 import { displayNameOf } from '../utils/userName'
 import './TopNavBar.css'
@@ -212,19 +212,29 @@ function ThemeQuickBtn() {
   const theme      = useStore(s => s.theme)
   const cycleTheme = useStore(s => s.cycleTheme)
   /* 앱 모드 알약과 같은 표(THEME_META)를 본다. 예전에는 여기서도
-     'light/dark 가 아니면 프로' 로 판정해 auto 가 '프로'로 찍혔다. */
-  const meta  = THEME_META[theme] || THEME_META.light
-  const icon  = meta.icon
-  const label = meta.label
+     'light/dark 가 아니면 프로' 로 판정해 auto 가 '프로'로 찍혔다.
+
+     2026-11-05 오너: "앱 화면에서 다크모드 화이트 모드 전환 버튼이 없네?"
+     웹 모드의 이 버튼은 **이모지 하나뿐**이었다. ☀️ 하나로는 그것이 테마
+     버튼인지, 날씨인지, 장식인지 알 수 없다. 앱 모드에는 글자가 있었는데
+     여기만 없었다 — 같은 기능이 두 화면에서 다르게 생긴 것.
+     -> 글자를 붙이고, 누르면 무엇이 되는지를 화살표로 같이 보여 준다. */
+  const meta    = THEME_META[theme] || THEME_META.light
+  const nextKey = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length]
+  const next    = THEME_META[nextKey] || THEME_META.dark
   return (
     // 스타일은 앱 전환 버튼과 공유하되 클래스는 분리 — 같은 클래스만 쓰면
     // .top-nav-app-btn 선택이 모호해진다(테마 버튼이 먼저 잡힘)
     <button className="top-nav-app-btn top-nav-theme-btn" onClick={cycleTheme}
-      title={theme === 'auto'
-        ? '테마: 자동 — OS 설정을 따릅니다 (클릭하여 변경)'
-        : `테마: ${label} (클릭하여 변경)`}
-      style={{ fontSize: 14, lineHeight: 1 }}>
-      <span style={{ fontSize: 14 }}>{icon}</span>
+      aria-label={`테마 ${meta.label} — 누르면 ${next.label}`}
+      title={`지금 테마: ${meta.label}${theme === 'auto' ? ' (OS 설정을 따름)' : ''}`
+        + ` · 누르면 ${next.label} 로 바뀝니다 · 전체 목록은 설정 > 테마 모드`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 'var(--fs-caption)', fontWeight: 700, lineHeight: 1, whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 'var(--fs-body-sm)' }}>{meta.icon}</span>
+      {meta.label}
+      <span aria-hidden="true" style={{ opacity: 0.5 }}>→</span>
+      <span aria-hidden="true" style={{ fontSize: 'var(--fs-body-sm)', opacity: 0.85 }}>{next.icon}</span>
     </button>
   )
 }

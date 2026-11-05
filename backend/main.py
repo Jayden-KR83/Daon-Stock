@@ -476,6 +476,28 @@ def _init_db():
             ts   REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_login_attempts ON login_attempts(key, ts);
+        -- 거시 시황 브리핑 (2026-11-05) — 지수·금리·환율·원자재·코인을 하루 2번 읽고
+        -- '투자자가 오늘 무엇을 확인해야 하는가'를 쓴다.
+        --
+        -- 왜 ai_cache 에 넣지 않았나: ai_cache 는 **종목 분석(stock_v2) 전용**이라는
+        -- 규약이 있고 회귀 테스트가 그것을 지킨다. 거시 브리핑도 개인정보가 아니라
+        -- 넣을 수야 있지만, 그 순간 "공유 캐시 = 종목 분석"이라는 한 줄 규칙이
+        -- "종목 분석과 거시"가 된다. 규칙이 늘어나면 다음 사람이 또 늘린다.
+        -- 테이블 하나가 더 싸다.
+        CREATE TABLE IF NOT EXISTS macro_brief (
+            session_key  TEXT PRIMARY KEY,      -- 'YYYY-MM-DD:pre' | 'YYYY-MM-DD:post'
+            created_at   REAL NOT NULL,
+            payload_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_macro_brief_ts ON macro_brief(created_at DESC);
+        -- 같은 브리핑을 **내 종목에 비춘 한 줄**. 개인 스코프라 user_id 가 PK 에 들어간다.
+        CREATE TABLE IF NOT EXISTS macro_brief_user (
+            user_id      TEXT NOT NULL,
+            session_key  TEXT NOT NULL,
+            created_at   REAL NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY(user_id, session_key)
+        );
         """)
 
 _init_db()
@@ -5299,6 +5321,581 @@ def get_apikey_status(cu: dict = Depends(get_current_user)):
     return {"has_key": bool(_stored_api_key())}
 
 # Market
+# ===========================================================================
+# 거시 시황 브리핑 — "오늘 시장에서 무엇을 확인할 것인가" (2026-11-05)
+# ===========================================================================
+# 오너 요청: 지수·환율·금리·원자재·코인이 매일 움직이는데, 투자자로서 취할 것과
+# 내 종목에 비춘 것을 매일 한 자리에서 보고 싶다.
+#
+# 설계에서 가른 두 가지:
+#
+# (1) **거시 해설은 공용, 내 종목 연결은 개인.** 거시는 모든 사용자에게 같은 글이라
+#     하루 2번 한 번만 만들어 나눠 쓴다(macro_brief). 내 종목에 비추는 부분만
+#     사용자별로 만든다(macro_brief_user). 전자를 사용자 수만큼 만들면 같은 글에
+#     같은 돈을 N 번 낸다.
+#
+# (2) **연결은 규칙이 먼저, AI 는 나중.** "금리가 올랐다 -> 내 성장주 비중이 n%"는
+#     계산이지 추론이 아니다. 계산할 수 있는 것을 AI 에게 시키면 **틀릴 수 있는
+#     형태로 바꾸는 것**이다. 그래서 숫자는 서버가 세고, AI 는 그 숫자를 읽고
+#     "그래서 무엇을 볼 것인가"만 쓴다.
+#
+# 못 재는 것을 재는 척하지 않는다. 시세로는 물가·기준금리를 읽을 수 없다.
+# 장 전 세션에서만 웹 검색으로 가져오고, 못 찾으면 '확인 필요'로 남긴다.
+
+# 브리핑이 읽는 것 — _market_data 의 12종에 금리 곡선·유가·구리를 더한다.
+# (name, ticker, 분류) · 분류는 프런트 묶음과 프롬프트 섹션 양쪽에 쓴다.
+#
+# 주의: 야후는 미국 2년물을 주지 않는다. 금리 곡선은 13주(^IRX) · 5년(^FVX) ·
+# 10년(^TNX) · 30년(^TYX) 넷으로 읽는다. 없는 만기를 있는 척 라벨링하면
+# 그 숫자를 보고 장단기 역전을 판단하게 된다.
+MACRO_TICKERS = [
+    ('S&P500',    '^GSPC',    'index'),
+    ('나스닥',     '^IXIC',    'index'),
+    ('다우',       '^DJI',     'index'),
+    ('러셀2000',   '^RUT',     'index'),
+    ('VIX',       '^VIX',     'index'),
+    ('코스피',     '^KS11',    'index'),
+    ('코스닥',     '^KQ11',    'index'),
+    ('미국 13주',  '^IRX',     'rate'),
+    ('미국 5년',   '^FVX',     'rate'),
+    ('미국 10년',  '^TNX',     'rate'),
+    ('미국 30년',  '^TYX',     'rate'),
+    ('달러/원',    'KRW=X',    'fx'),
+    ('달러지수',   'DX-Y.NYB', 'fx'),
+    ('WTI 유가',   'CL=F',     'commodity'),
+    ('금',        'GC=F',     'commodity'),
+    ('은',        'SI=F',     'commodity'),
+    ('구리',      'HG=F',     'commodity'),
+    ('비트코인',   'BTC-USD',  'crypto'),
+    ('이더리움',   'ETH-USD',  'crypto'),
+]
+
+MACRO_GROUP_KO = {
+    'index': '지수', 'rate': '금리', 'fx': '환율',
+    'commodity': '원자재', 'crypto': '가상자산',
+}
+
+# 시세로 읽히지 않는 것 — 브리핑이 **스스로 밝히는** 한계.
+MACRO_UNMEASURED = (
+    '소비자물가(CPI)·기준금리는 시세가 아니라 발표값이라 장 전 세션에서 웹 검색으로만 확인합니다',
+    '실적 발표·가이던스 등 개별 기업 이벤트는 이 브리핑이 보지 않습니다',
+    '수급(기관·외국인 매매동향)과 옵션 만기는 포함되지 않습니다',
+    '미국 2년물은 시세 제공처에 없어 13주·5년으로 대신 읽습니다',
+)
+
+
+def _macro_snapshot() -> list:
+    """MACRO_TICKERS 를 병렬로 한 번에. 실패한 티커는 **빼지 않고 값만 비운다** —
+    빠지면 '오늘은 금리가 조용했다'로 읽히지만 실제로는 못 읽은 것이다."""
+    def _one(item):
+        label, tkr, grp = item
+        try:
+            res = _yf_chart(tkr, '1mo', '1d')
+            if res:
+                pr = _chart_to_price(res)
+                if pr:
+                    return {'label': label, 'ticker': tkr, 'group': grp,
+                            'price': pr.get('current_price'),
+                            'pct': pr.get('change_pct')}
+        except Exception:
+            pass
+        return {'label': label, 'ticker': tkr, 'group': grp, 'price': None, 'pct': None}
+
+    out = {}
+    with _cf.ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_one, it): it for it in MACRO_TICKERS}
+        for fut in _as_completed_safe(futs, timeout=20):
+            try:
+                r = fut.result(timeout=0)
+                out[r['ticker']] = r
+            except Exception:
+                pass
+    ordered = []
+    for label, tkr, grp in MACRO_TICKERS:
+        ordered.append(out.get(tkr) or {'label': label, 'ticker': tkr, 'group': grp,
+                                        'price': None, 'pct': None})
+    return ordered
+
+
+def _macro_session_key(now=None) -> str:
+    """KST 기준 세션 키.
+
+    pre  = 한국 장 열기 전(00:00~15:00 KST). 미국 장이 막 닫힌 뒤라 '간밤에 무슨 일'.
+    post = 한국 장 닫힌 뒤(15:00~24:00 KST). '오늘 한국 장'과 '곧 열릴 미국 장'.
+    """
+    n = now or datetime.now()
+    return "%s:%s" % (n.strftime('%Y-%m-%d'), 'pre' if n.hour < 15 else 'post')
+
+
+# -- 내 종목에 비추기 — **계산이지 추론이 아니다** -------------------------
+# "관련 있다"가 아니라 **몇 종목·비중 몇 %인지** 숫자를 낸다. 숫자가 없으면
+# 그 줄은 만들지 않는다 — 근거 없는 연결은 점성술이다.
+MACRO_LINK_RULES = [
+    {
+        'key': 'rate_up',
+        'title': '금리가 올랐습니다',
+        'ticker': '^TNX',
+        'when': lambda pct: pct is not None and pct >= 1.5,
+        'why': '할인율이 오르면 먼 미래 이익의 현재가치가 먼저 깎입니다. '
+               '성장주·고PER 종목이 민감합니다.',
+        'sectors': ('기술', '통신서비스', '소비재'),
+        'look': '내 성장주 비중이 감당할 수 있는 크기인지',
+    },
+    {
+        'key': 'rate_down',
+        'title': '금리가 내렸습니다',
+        'ticker': '^TNX',
+        'when': lambda pct: pct is not None and pct <= -1.5,
+        'why': '할인율이 내리면 성장주에 유리합니다. 다만 금리 하락이 경기 둔화 '
+               '신호일 때는 이익 전망이 같이 내려갑니다.',
+        'sectors': ('기술', '통신서비스', '소비재'),
+        'look': '금리가 내린 이유가 물가 안정인지 경기 둔화인지',
+    },
+    {
+        'key': 'oil',
+        'title': '유가가 크게 움직였습니다',
+        'ticker': 'CL=F',
+        'when': lambda pct: pct is not None and abs(pct) >= 3.0,
+        'why': '에너지 기업의 이익에 직접 들어가고, 나머지 업종에는 비용으로 들어갑니다.',
+        'sectors': ('에너지',),
+        'look': '에너지 보유가 있다면 이익 방향, 없다면 비용 상승 쪽',
+    },
+    {
+        'key': 'fx',
+        'title': '달러/원이 크게 움직였습니다',
+        'ticker': 'KRW=X',
+        'when': lambda pct: pct is not None and abs(pct) >= 1.0,
+        'why': '미국 주식은 주가와 환율 두 가지로 평가액이 바뀝니다. '
+               '원화가 약해지면 같은 주가라도 원화 평가액이 올라갑니다.',
+        'sectors': None,
+        'us_only': True,
+        'look': '미국 비중이 환율 변동을 견딜 크기인지',
+    },
+    {
+        'key': 'vix',
+        'title': '변동성(VIX)이 튀었습니다',
+        'ticker': '^VIX',
+        'when': lambda pct: pct is not None and pct >= 10.0,
+        'why': '공포가 커지면 종목을 가리지 않고 같이 내려갑니다. 분산이 작동하지 않는 구간입니다.',
+        'sectors': None,
+        'look': '현금 비중과, 지금 팔면 후회할 종목이 무엇인지',
+    },
+    {
+        'key': 'btc',
+        'title': '비트코인이 크게 움직였습니다',
+        'ticker': 'BTC-USD',
+        'when': lambda pct: pct is not None and abs(pct) >= 5.0,
+        'why': '위험선호의 대리 지표로 읽히기도 하지만, 주식과의 관계는 시기마다 바뀝니다. '
+               '원인이 아니라 같은 바람을 맞는 풍향계로 보세요.',
+        'sectors': None,
+        'look': '위험자산 전반의 분위기',
+    },
+]
+
+
+def _user_macro_links(user_id: str, snap: list) -> list:
+    """거시 움직임 -> **내 보유의 실제 숫자**. AI 를 쓰지 않는다(계산이라서).
+
+    비중의 분모는 '시세가 잡힌 보유 종목의 평가액 합'이다. 응답에 같이 싣는다 —
+    분모를 안 적으면 같은 비중을 보고 서로 다른 값을 계산한다(2026-10-27 사고).
+    """
+    by_ticker = {x['ticker']: x for x in snap}
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ticker, name, quantity, avg_price, sector FROM portfolios "
+            "WHERE user_id=? AND quantity > 0 ORDER BY ticker", (user_id,)).fetchall()
+    if not rows:
+        return []
+
+    tickers = sorted({r['ticker'] for r in rows})
+    prices  = _cached_prices_only(tickers)
+    usdkrw  = _usd_krw() or 1300.0
+    vals = {}
+    for r in rows:
+        cur = (prices.get(r['ticker']) or {}).get('current_price')
+        if cur is None:
+            continue
+        mul = 1.0 if is_kr(r['ticker']) else float(usdkrw)
+        vals[r['ticker']] = {
+            'value': float(r['quantity']) * float(cur) * mul,
+            'name': r['name'] or r['ticker'],
+            'sector': r['sector'] or '',
+            'is_kr': is_kr(r['ticker']),
+        }
+    total = sum(v['value'] for v in vals.values())
+    if total <= 0:
+        return []
+
+    out = []
+    for rule in MACRO_LINK_RULES:
+        q = by_ticker.get(rule['ticker'])
+        if not q or not rule['when'](q.get('pct')):
+            continue
+        if rule.get('us_only'):
+            hit = dict((t, v) for t, v in vals.items() if not v['is_kr'])
+            scope = '미국 보유'
+        elif rule.get('sectors'):
+            hit = dict((t, v) for t, v in vals.items()
+                       if any(sc in (v['sector'] or '') for sc in rule['sectors']))
+            scope = ' · '.join(rule['sectors'])
+        else:
+            hit = dict(vals)
+            scope = '보유 전체'
+        if not hit:
+            continue
+        w = sum(v['value'] for v in hit.values()) / total * 100.0
+        names = [v['name'] for v in sorted(hit.values(), key=lambda x: -x['value'])][:4]
+        out.append({
+            'key':    rule['key'],
+            'title':  rule['title'],
+            'metric': "%s %+.2f%%" % (q['label'], q['pct']),
+            'why':    rule['why'],
+            'scope':  scope,
+            'count':  len(hit),
+            'weight': round(w, 1),
+            'names':  names,
+            'look':   rule['look'],
+        })
+    return out
+
+
+def _macro_link_basis(user_id: str) -> dict:
+    """비중의 분모를 밝힌다 — 적지 않으면 같은 비중에서 서로 다른 값이 나온다."""
+    with _db() as conn:
+        n = conn.execute("SELECT COUNT(*) c FROM portfolios WHERE user_id=? AND quantity>0",
+                         (user_id,)).fetchone()['c']
+    return {
+        'weight_basis': '시세가 조회된 보유 종목의 평가액 합 (예수금 제외)',
+        'holdings_counted': int(n),
+        'fx_basis': 'USD/KRW 1시간 캐시 환율로 원화 환산',
+    }
+
+
+MACRO_BRIEF_RULES = (
+    "[절대 규칙]\n"
+    "1. 모든 문장에 **숫자**가 들어가야 합니다. 숫자 없는 형용사(크게·급등·불안한)만으로 쓰지 마세요.\n"
+    "2. 사라/팔라고 단정하지 마세요. 무엇을 **확인해 보실 수 있는지**로 쓰세요.\n"
+    "3. 모르는 것은 '확인 필요'라고 쓰세요. 추정값을 사실처럼 쓰지 마세요.\n"
+    "4. 인과를 단정하지 마세요. 같은 날 같이 움직인 것은 상관이지 원인이 아닙니다.\n"
+    "   ('금리 때문에 떨어졌다' X / '금리가 +2.1% 오른 날 성장주가 밀렸습니다' O)\n"
+    "5. 한국어로만. 각 문장은 한 가지만 말하고 2줄을 넘기지 마세요.\n"
+    "6. 특정 종목의 매수·매도를 권하지 마세요. 이 글은 시장 해설이지 추천이 아닙니다.\n"
+)
+
+MACRO_BRIEF_SCHEMA = (
+    '{\n'
+    '  "headline": "오늘 시장을 한 문장으로. 숫자 1개 이상 포함. 30자 내외.",\n'
+    '  "movers": [\n'
+    '    {"what": "무엇이 움직였나 (지표명)", "number": "수치 (예: +1.8%, 4.21%)",\n'
+    '     "meaning": "그래서 무슨 뜻인지 1~2문장. 인과 단정 금지."}\n'
+    '  ],\n'
+    '  "actions": ["투자자로서 오늘 확인해 볼 것. 2~3개. 각 1문장."],\n'
+    '  "watch": "앞으로 48시간 안에 나올 일정·발표 중 가장 중요한 것 1문장.",\n'
+    '  "facts": {"cpi": "최근 발표된 미국 CPI 전년대비 (모르면 확인 필요)",\n'
+    '            "policy_rate": "현재 미국 기준금리 목표범위 (모르면 확인 필요)",\n'
+    '            "next_event": "다음 FOMC 또는 주요 지표 발표일 (모르면 확인 필요)"}\n'
+    '}'
+)
+
+
+def _macro_quote_lines(snap: list) -> str:
+    """시세 묶음을 프롬프트용 텍스트로. 못 읽은 것은 '조회 실패'로 **남긴다**."""
+    out = []
+    for grp in ('index', 'rate', 'fx', 'commodity', 'crypto'):
+        items = [x for x in snap if x['group'] == grp]
+        if not items:
+            continue
+        out.append("[%s]" % MACRO_GROUP_KO[grp])
+        for x in items:
+            if x['pct'] is None or x['price'] is None:
+                out.append("- %s: 조회 실패" % x['label'])
+            else:
+                out.append("- %s: %s (%+.2f%%)" % (
+                    x['label'], _fmt_num(x['price']), x['pct']))
+    return "\n".join(out)
+
+
+def _gen_macro_brief(session: str, snap: list) -> dict:
+    """거시 브리핑 1건. 공용이라 하루 2번만 만든다.
+
+    장 전(pre) 세션만 웹 검색을 쓴다 — CPI·기준금리는 시세에 없어서 검색 말고는
+    길이 없다. 장 후(post) 는 같은 발표값을 또 찾을 이유가 없으니 시세만 읽는다.
+    검색 1회에도 돈이 들기 때문에, 필요한 세션에만 켠다.
+    """
+    api_key = _stored_api_key()
+    if not api_key:
+        return {'ok': False, 'reason': 'no_api_key'}
+
+    is_pre = session.endswith(':pre')
+    when_ko = ('한국 장이 열리기 전 아침입니다. 간밤의 미국 장이 막 끝났습니다.'
+               if is_pre else
+               '한국 장이 끝난 오후입니다. 곧 미국 장이 열립니다.')
+    prompt = (
+        "당신은 개인 투자자 한 사람에게 매일 시황을 전하는 애널리스트입니다.\n"
+        + when_ko + "\n\n"
+        "[오늘의 시세]\n" + _macro_quote_lines(snap) + "\n\n"
+        + ("[검색으로 확인할 것]\n"
+           "- 가장 최근 발표된 미국 소비자물가(CPI) 전년동월대비\n"
+           "- 현재 미국 연방기금금리 목표범위\n"
+           "- 다음 FOMC 또는 주요 지표 발표 일정\n"
+           "검색으로 확인되지 않으면 '확인 필요'라고 쓰세요.\n\n"
+           if is_pre else
+           "[주의] 이 세션은 웹 검색을 쓰지 않습니다. facts 의 세 항목은 모두 "
+           "'확인 필요'로 두세요. 모르는 것을 지어내지 마세요.\n\n")
+        + MACRO_BRIEF_RULES + "\n"
+        "JSON 으로만 답하세요. 스키마:\n" + MACRO_BRIEF_SCHEMA
+    )
+
+    try:
+        if is_pre:
+            text, _src = _call_claude_with_search(
+                api_key, MODEL_ANALYSIS, prompt, max_tokens=2500, max_searches=3, timeout=180)
+        else:
+            text = _call_claude(api_key, MODEL_ANALYSIS, prompt, 2000, 120)
+        data = _parse_claude_json(text)
+    except Exception as e:
+        return {'ok': False, 'reason': 'api_error', 'error': str(e)[:200]}
+    if not isinstance(data, dict) or not data.get('headline'):
+        return {'ok': False, 'reason': 'parse_failed'}
+
+    data['ok'] = True
+    data['session'] = session
+    data['searched'] = bool(is_pre)
+    data['quotes'] = snap
+    data['unmeasured'] = list(MACRO_UNMEASURED)
+    data['model'] = MODEL_ANALYSIS
+    return data
+
+
+def _save_macro_brief(session: str, payload: dict) -> None:
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO macro_brief(session_key, created_at, payload_json) "
+            "VALUES(?,?,?)", (session, time(), json.dumps(payload, ensure_ascii=False)))
+        # 90일보다 오래된 것은 지운다 — 지난 시황은 다시 읽히지 않는다.
+        conn.execute("DELETE FROM macro_brief WHERE created_at < ?", (time() - 90 * 86400,))
+
+
+def _load_macro_brief(session: str | None = None) -> dict | None:
+    """세션을 지정하면 그것만, 아니면 **가장 최근 것**.
+
+    최근 것으로 떨어지는 길을 남기는 이유: cron 이 한 번 실패해도 화면이 비면
+    안 된다. 대신 언제 만든 것인지 같이 내보내 오래된 글을 오늘 글로 읽지
+    않게 한다.
+    """
+    with _db() as conn:
+        if session:
+            row = conn.execute(
+                "SELECT session_key, created_at, payload_json FROM macro_brief "
+                "WHERE session_key=?", (session,)).fetchone()
+            if row:
+                d = json.loads(row['payload_json'])
+                d['created_at'] = row['created_at']
+                return d
+        row = conn.execute(
+            "SELECT session_key, created_at, payload_json FROM macro_brief "
+            "ORDER BY created_at DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    d = json.loads(row['payload_json'])
+    d['created_at'] = row['created_at']
+    return d
+
+
+@app.get("/api/market/brief")
+def get_market_brief(cu: dict = Depends(require_approved)):
+    """시장 탭 맨 위에 서는 '오늘의 시황'.
+
+    **AI 를 여기서 부르지 않는다.** 이 엔드포인트는 읽기만 한다 — 탭을 열 때마다
+    모델을 부르면 열어 본 횟수만큼 돈이 나간다. 생성은 cron(하루 2번)이 한다.
+
+    내 종목 연결(links)만 **요청 시점에 계산**한다. 저장하면 가격이 굳는다.
+    """
+    uid = cu['user_id']
+    want = _macro_session_key()
+    brief = _load_macro_brief(want)
+    fresh = bool(brief and brief.get('session') == want)
+
+    snap = brief.get('quotes') if brief else None
+    if not snap:
+        snap = _macro_snapshot()
+
+    links = []
+    try:
+        links = _user_macro_links(uid, snap)
+    except Exception:
+        pass
+
+    note = None
+    if brief:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM macro_brief_user WHERE user_id=? AND session_key=?",
+                (uid, brief.get('session') or want)).fetchone()
+        if row:
+            try:
+                note = json.loads(row['payload_json']).get('note')
+            except Exception:
+                note = None
+
+    return {
+        'ok':      bool(brief),
+        'brief':   brief,
+        'session': want,
+        'fresh':   fresh,
+        'links':   links,
+        'basis':   _macro_link_basis(uid),
+        'note':    note,
+        'unmeasured': list(MACRO_UNMEASURED),
+    }
+
+
+def _gen_user_macro_note(uid: str, brief: dict, links: list) -> str | None:
+    """거시 브리핑을 **내 보유에 비춘 한 줄**.
+
+    숫자는 이미 서버가 셌다(links). AI 가 하는 일은 그 숫자를 읽고 우선순위를
+    말하는 것뿐이다. 그래서 가벼운 모델로 충분하고, 틀릴 여지도 작다.
+    """
+    if not links:
+        return None
+    api_key = _stored_api_key()
+    if not api_key:
+        return None
+    lines = []
+    for l in links:
+        lines.append("- %s (%s): %s %d종 · 내 보유의 %.1f%% (%s)" % (
+            l['title'], l['metric'], l['scope'], l['count'], l['weight'],
+            ', '.join(l['names'])))
+    prompt = (
+        "오늘 시장 요약: " + str(brief.get('headline') or '') + "\n\n"
+        "이 사람의 보유에 비친 것 (숫자는 이미 계산되어 있습니다. 바꾸지 마세요):\n"
+        + "\n".join(lines) + "\n\n"
+        "위 중에서 **가장 먼저 볼 것 하나**만 골라 2문장으로 쓰세요.\n"
+        "규칙: 주어진 숫자를 그대로 인용할 것 · 새 숫자를 만들지 말 것 · "
+        "사라/팔라 금지, '확인해 보실 수 있습니다' 형태 · 한국어.\n"
+        'JSON 으로만: {"note": "본문"}'
+    )
+    try:
+        text = _call_claude(api_key, MODEL_LIGHT, prompt, 500, 45)
+        data = _parse_claude_json(text)
+        note = (data or {}).get('note')
+        return note if isinstance(note, str) and note.strip() else None
+    except Exception:
+        return None
+
+
+@app.post("/api/admin/macro_brief/run")
+def admin_run_macro_brief(cu: dict = Depends(require_admin)):
+    """관리자가 지금 바로 시황을 만든다.
+
+    왜 필요한가: 생성은 cron 이 하는데, cron 은 하루 2번뿐이다. 기능을 새로
+    올린 날이나 cron 이 실패한 날에는 **기다리는 것 말고 할 수 있는 일이 없었다.**
+    그리고 cron 을 손으로 부르려면 cron_secret 이 있어야 하는데, 그 값을
+    꺼내 쓰는 과정 자체가 유출 경로다(2026-10 화면 캡처로 노출된 전례).
+
+    같은 세션을 이미 만들었으면 다시 만들지 않는다 — 버튼을 연타해도 돈이
+    한 번만 나간다. 다시 만들고 싶으면 force=1.
+    """
+    session = _macro_session_key()
+    with _db() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM macro_brief WHERE session_key=?", (session,)).fetchone()
+    if exists:
+        return {'ok': True, 'session': session, 'skipped': 'already_exists'}
+
+    snap  = _macro_snapshot()
+    brief = _gen_macro_brief(session, snap)
+    if not brief.get('ok'):
+        return {'ok': False, 'session': session, 'reason': brief.get('reason'),
+                'error': brief.get('error')}
+    _save_macro_brief(session, brief)
+
+    uid = cu['user_id']
+    note_made = False
+    if not _is_demo(cu):
+        try:
+            links = _user_macro_links(uid, snap)
+            note  = _gen_user_macro_note(uid, brief, links)
+            if note:
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO macro_brief_user"
+                        "(user_id, session_key, created_at, payload_json) VALUES(?,?,?,?)",
+                        (uid, session, time(), json.dumps({'note': note}, ensure_ascii=False)))
+                note_made = True
+        except Exception:
+            pass
+
+    _log_event(uid, 'admin_macro_brief', {'session': session})
+    return {'ok': True, 'session': session, 'searched': brief.get('searched'),
+            'note': note_made}
+
+
+class MacroBriefReq(BaseModel):
+    cron_secret: str = ''
+    session: str = ''        # 비우면 지금 시각 기준
+    max_users: int = 20
+
+
+@app.post("/api/cron/macro_brief")
+def cron_macro_brief(req: MacroBriefReq):
+    """하루 2번(장 전·장 후) 거시 브리핑을 만든다.
+
+    같은 세션을 두 번 요청하면 다시 만들지 않는다 — cron 이 중복 실행돼도
+    돈이 두 번 나가지 않게 한다.
+    """
+    secret = ''
+    with _db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='cron_secret'").fetchone()
+        if row:
+            secret = row['value']
+    if not secret or req.cron_secret != secret:
+        raise HTTPException(403, "invalid cron secret")
+
+    session = req.session or _macro_session_key()
+    with _db() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM macro_brief WHERE session_key=?", (session,)).fetchone()
+    if exists:
+        return {'ok': True, 'session': session, 'skipped': 'already_exists'}
+
+    snap  = _macro_snapshot()
+    brief = _gen_macro_brief(session, snap)
+    if not brief.get('ok'):
+        _log_event('__cron__', 'cron_macro_brief_failed',
+                   {'session': session, 'reason': brief.get('reason')})
+        return {'ok': False, 'session': session, 'reason': brief.get('reason')}
+    _save_macro_brief(session, brief)
+
+    # 사용자별 한 줄 — ai_enabled 승인 사용자만, 데모 제외.
+    with _db() as conn:
+        users = [r['user_id'] for r in conn.execute(
+            "SELECT user_id FROM users WHERE ai_enabled=1 AND status='approved'").fetchall()]
+    cap = max(1, min(int(req.max_users or 20), 200))
+    notes = 0
+    for uid in users[:cap]:
+        if _is_demo({'user_id': uid}):
+            continue
+        try:
+            links = _user_macro_links(uid, snap)
+            note  = _gen_user_macro_note(uid, brief, links)
+            if not note:
+                continue
+            with _db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO macro_brief_user"
+                    "(user_id, session_key, created_at, payload_json) VALUES(?,?,?,?)",
+                    (uid, session, time(), json.dumps({'note': note}, ensure_ascii=False)))
+            notes += 1
+        except Exception:
+            continue
+
+    _log_event('__cron__', 'cron_macro_brief',
+               {'session': session, 'searched': brief.get('searched'), 'notes': notes})
+    return {'ok': True, 'session': session, 'notes': notes,
+            'searched': brief.get('searched')}
+
+
 @app.get("/api/market")
 def get_market(): return _market_data()
 

@@ -10,6 +10,7 @@ import { useStore } from '../store'
 import LogoCircle from '../components/LogoCircle'
 import Sparkline from '../components/Sparkline'
 import EarningsCalendar from '../components/EarningsCalendar'
+import MarketBriefCard from '../components/MarketBriefCard'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Cell,
@@ -185,6 +186,19 @@ export default function TrendsTab() {
 
   return (
     <div className="trends-tab">
+
+      {/* ══════════════════════════════════
+          0. 오늘의 시황 — 이 탭에서 **가장 먼저** 읽을 것 (2026-11-05)
+          ══════════════════════════════════
+          왜 맨 위인가: 아래 블록들(헤드라인·거래대금·섹터 히트맵)은 전부
+          '무엇이 일어났나'다. 오너가 원한 것은 '그래서 무엇을 볼 것인가'였다.
+          뒤에 두면 사실을 다 읽고 나서야 해석이 나온다 — 순서가 거꾸로다. */}
+      <MarketBriefCard />
+
+      {/* ══════════════════════════════════
+          0-b. 실적 캘린더 — 날짜는 **미리** 알아야 쓸모가 있다
+          ══════════════════════════════════ */}
+      <EarningsCalendar />
 
       {/* ══════════════════════════════════
           A. Market Headlines (뉴스)
@@ -383,13 +397,12 @@ export default function TrendsTab() {
         ))}
       </div>
 
-      {/* ── 실적 캘린더 (B4) ──
-          아래에 있던 '차트 비교'·'한·미 ETF 비교'는 2026-10-11 제거했다(한 번도 안 씀).
-          왜 뺐는지와 되살리는 법: docs/removed-features.md */}
-      <div style={{ marginTop: 18 }}>
-        <EarningsCalendar />
-      </div>
-
+      {/* 2026-11-05: 실적 캘린더가 **여기**(문서 2,400px 아래)에 있었다.
+          오너: "시장에 실적 캘린더가 안 보여." 없는 게 아니라 **스크롤 2,400px
+          아래**에 있었다 — 실측값이다(390px 폭에서 top=2401, 1440px 에서 1880).
+          보이지 않는 자리에 있는 기능은 없는 기능이다. → 시황 바로 아래로 올렸다.
+          내려간 자리에는 아무것도 두지 않는다. 화면 끝은 끝이어야 한다.
+          함께 있던 '차트 비교'·'한·미 ETF 비교'는 2026-10-11 제거(docs/removed-features.md). */}
       <div style={{ height: 24 }} />
     </div>
   )

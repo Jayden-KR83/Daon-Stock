@@ -14,14 +14,23 @@
       "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no portfolio.py daon_icon.png ubuntu@168.107.13.20:~/portfolio/)",
       "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\user\\\\AgentDev\\\\daon\\\\portfolio.py\" ubuntu@168.107.13.20:~/portfolio/)",
       "Bash(scp -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\user\\\\AgentDev\\\\daon\\\\portfolio.py\" \"C:\\\\Users\\\\user\\\\AgentDev\\\\daon\\\\.streamlit\\\\config.toml\" ubuntu@168.107.13.20:~/portfolio/)",
-            "Bash(ssh -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20 \"ls ~/portfolio/.streamlit/ 2>/dev/null || echo ''NO .streamlit DIR''\")",
+      "Bash(ssh -i \"C:\\\\Users\\\\user\\\\Downloads\\\\oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20 \"ls ~/portfolio/.streamlit/ 2>/dev/null || echo ''NO .streamlit DIR''\")",
       "Bash(scp -i \"C:/Users/user/Downloads/oracle-key.key\" -o StrictHostKeyChecking=no *)",
       "Bash(scp -r -i \"C:/Users/user/Downloads/oracle-key.key\" -o StrictHostKeyChecking=no *)",
-      "Bash(ssh -i \"C:/Users/user/Downloads/oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20*)"
+      "Bash(ssh -i \"C:/Users/user/Downloads/oracle-key.key\" -o StrictHostKeyChecking=no ubuntu@168.107.13.20*)",
+      "PowerShell(.\\scripts\\deploy.ps1)",
+      "PowerShell(.\\scripts\\deploy.ps1 *)",
+      "Bash(git push origin main)"
     ],
-
     "additionalDirectories": [
       "C:\\Users\\user\\AgentDev\\daon"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "daon 운영 서버(ubuntu@168.107.13.20)의 ~/portfolio/daon.db 를 sqlite3 로 읽기 전용 조회하는 것은 허용한다. 쓰기(INSERT/UPDATE/DELETE/DROP/ALTER)와 파일 수정은 허용하지 않는다.",
+      "daon 운영 서버에서 systemctl status·journalctl 로 로그를 읽는 것은 허용한다."
     ]
   }
 }

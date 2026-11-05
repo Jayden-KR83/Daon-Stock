@@ -55,20 +55,50 @@ try {
     fail(`주 5개 순서가 하단 바와 다르다: ${head.join('·')} (기대 ${want.join('·')})`)
   else ok('주 5개 순서가 하단 바와 같다')
 
-  // 부 항목도 도달 가능해야 한다 (데스크톱은 폭이 넉넉하니 숨기지 않는다)
-  for (const k of ['분석', '종목', '등록', '가이드']) {
-    if (!labels.includes(k)) fail(`'${k}' 로 가는 길이 사이드바에 없다`)
-  }
-  ok('분석·종목·등록·가이드 모두 사이드바에 있다')
+  /* 2026-11-05 — 이 검사는 **방향이 뒤집혔다.**
+     전에는 "분석·등록·가이드가 사이드바에 있어야 한다"를 지켰다. 오너가 같은
+     지시를 두 번 했다: 분석은 계좌에, 등록·여정·가이드는 설정에. 그러니 이제
+     그 넷이 사이드바에 **없어야** 한다.
 
-  // 실제로 눌러서 화면이 바뀌는가 (분석)
-  const an = page.locator('.side-nav-btn', { hasText: '분석' }).first()
-  if (await an.count()) {
-    await an.evaluate(el => el.click())
-    await page.waitForTimeout(3000)
-    const seg = await page.getByRole('button', { name: 'Ⅱ 진단', exact: true }).count()
-    if (!seg) fail('사이드바 분석을 눌렀는데 장 세그먼트가 안 보인다')
-    else ok('사이드바 분석 → 장 세그먼트 렌더')
+     검사기를 안 고쳤다면 오너가 시킨 변경이 '회귀'로 보고되고, 되돌리는 쪽이
+     '통과'가 된다 — 검사기가 폐기된 결정을 지키는 형태다.
+
+     ⚠ 옛 코드에는 버그도 있었다: for 루프에서 fail() 을 여러 번 부른 뒤
+       조건 없이 ok('…모두 있다') 를 찍었다. 실패 3건과 "모두 있다"가 **같은
+       화면에 나란히 찍혔다.** 실패 여부로 분기한다. */
+  const MUST_NOT = ['분석', '등록', '가이드', '여정']
+  const leftovers = MUST_NOT.filter(k => labels.includes(k))
+  if (leftovers.length)
+    fail(`사이드바에 아직 남아 있다: ${leftovers.join('·')} — 분석은 계좌, 나머지는 설정으로 갔다`)
+  else ok('분석·등록·가이드·여정이 사이드바에서 빠졌다 (각자 새 자리로)')
+
+  // 뺐으면 **다른 길이 있어야** 한다. 숨기는 것이 목적이 아니다.
+  const goTab = async (name) => {
+    const b = page.locator('.side-nav-btn', { hasText: name }).first()
+    if (!await b.count()) return false
+    await b.evaluate(el => el.click()); await page.waitForTimeout(2500)
+    return true
+  }
+
+  // 분석 → 계좌 탭의 진입 버튼
+  if (await goTab('계좌')) {
+    const an = page.getByRole('button', { name: /보유 종목 종합 분석/ }).first()
+    if (!await an.count()) fail('계좌에 분석 진입 버튼이 없다 — 분석으로 가는 길이 끊겼다')
+    else {
+      await an.evaluate(el => el.click()); await page.waitForTimeout(3000)
+      const seg = await page.getByRole('button', { name: 'Ⅱ 진단', exact: true }).count()
+      if (!seg) fail('계좌 → 분석을 눌렀는데 장 세그먼트가 안 보인다')
+      else ok('계좌 → 보유 종목 종합 분석 → 분석 렌더')
+    }
+  }
+
+  // 등록·가이드 → 설정 탭의 바로가기 카드
+  if (await goTab('설정')) {
+    for (const name of ['종목 등록', '가이드']) {
+      const b = page.getByRole('button', { name: new RegExp(name) }).first()
+      if (!await b.count()) fail(`설정 바로가기에 '${name}' 이 없다`)
+      else ok(`설정 → ${name} 진입 있음`)
+    }
   }
 } catch (e) {
   if (String(e.message) !== 'stop') fail('예외: ' + String(e.message).slice(0, 240))

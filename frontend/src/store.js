@@ -31,8 +31,12 @@ export const THEME_META = {
     preview: { bg: '#0B1120', surface: '#111C2D', text: '#F1F5F9', accent: '#34D399' } },
   /* 예전 이름은 '프로'였다. 실제로 바뀌는 건 색 팔레트뿐인데 이름이 '프로'라
      정보가 더 조밀해질 거라는 기대를 줬다. 색으로 부른다. */
-  pro:   { icon: '⚫', label: '차콜',   desc: '중성 회색 다크 · 파랑 강조',
-    preview: { bg: '#0D1117', surface: '#161B22', text: '#F0F6FC', accent: '#58A6FF' } },
+  /* 2026-11-04 에 tokens.css 의 pro 배경을 순흑(#000)으로 내렸는데 **여기 미리보기
+     swatch 는 옛 값(#0D1117)으로 남아 있었다.** 설정 카드가 보여 주는 색과 실제
+     적용되는 색이 달랐다 — 같은 것을 두 곳에 적으면 반드시 어긋난다.
+     이름도 '차콜'에서 '고대비'로 바꾼다: 바뀐 것은 색 계열이 아니라 **대비**다. */
+  pro:   { icon: '◼', label: '고대비', desc: '순흑 배경 · OLED · 장시간 숫자 읽기용',
+    preview: { bg: '#000000', surface: '#0A0A0A', text: '#F0F6FC', accent: '#388BFD' } },
   auto:  { icon: '🖥️', label: '자동',   desc: 'OS 설정을 그대로 따라감',
     preview: { bg: '#0B1120', surface: '#FFFFFF', text: '#0F172A', accent: '#38BDF8' } },
 }

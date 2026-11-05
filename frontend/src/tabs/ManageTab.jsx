@@ -36,21 +36,12 @@ export default function ManageTab() {
           관리자 탭으로 옮겼다. 설정 탭은 '내 설정'만 담는다 — 두 탭에 같은 기능이
           흩어져 있으면 어디서 고쳐야 하는지 매번 헷갈린다(실측: 겹친 API 호출 3개). */}
 
-      {/* 종목 등록으로 가는 길 (2026-11-03 네비 재편 — '등록'을 설정에 합쳤다).
-          등록은 가끔 쓰는 기능이라 하단 바 한 칸을 차지할 이유가 없다.
-          단 **길이 사라지면 안 되므로** 설정 첫 줄에 둔다. */}
-      <button
-        onClick={() => setActiveTab(5)}
-        style={{
-          width: '100%', marginBottom: 12, padding: '12px 14px', borderRadius: 4,
-          border: '1px solid var(--clr-border)', background: 'var(--clr-surface)',
-          color: 'var(--clr-text-strong)', fontFamily: 'inherit',
-          fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-        <span>종목 등록 · 증권사 파일 가져오기</span>
-        <span style={{ color: 'var(--clr-accent)', fontSize: 12, fontWeight: 800 }}>›</span>
-      </button>
+      {/* 바로가기 (2026-11-05 네비 재편 2차).
+          오너 지시: 등록·여정·가이드를 전부 설정에 넣는다. 전에는 '등록'만
+          여기 있고 가이드·여정은 사이드 내비에 따로 남아, **같은 앱인데 PC 와
+          휴대폰의 메뉴가 달랐다.** 메뉴를 한 곳으로 모으고, 들어가는 길은
+          세 개 다 남긴다 — 숨기는 것이 아니라 한 자리에 두는 것이 목적이다. */}
+      <ShortcutCard setActiveTab={setActiveTab} isAdmin={!!currentUser?.is_admin} />
 
       {/* 2단계 인증 — 로그인 잠금(무차별 대입 차단)과 짝이 되는 계정 방어선 */}
       {currentUser && <TwoFactorCard />}
@@ -265,6 +256,45 @@ function BackupRestoreCard({ onRestored }) {
   )
 }
 
+
+/* ──────────────────────────────────────────────────────
+   바로가기 — 자주 쓰지 않지만 **길이 끊기면 안 되는** 화면들
+   ────────────────────────────────────────────────────── */
+const SHORTCUTS = [
+  { idx: 5, label: '종목 등록', sub: '직접 입력 · 증권사 파일 가져오기' },
+  { idx: 7, label: '가이드',   sub: '앱 사용법 · 지표 읽는 법' },
+  { idx: 8, label: '여정',     sub: '이 앱이 지나온 기록', adminOnly: true },
+]
+
+function ShortcutCard({ setActiveTab, isAdmin }) {
+  const items = SHORTCUTS.filter(x => !x.adminOnly || isAdmin)
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--clr-text-strong)',
+        marginBottom: 10 }}>바로가기</div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {items.map(it => (
+          <button key={it.idx} onClick={() => setActiveTab(it.idx)}
+            style={{
+              width: '100%', padding: '11px 13px', borderRadius: 4,
+              border: '1px solid var(--clr-border)', background: 'var(--clr-bg)',
+              fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+              display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center',
+              gap: 8,
+            }}>
+            <span>
+              <span style={{ display: 'block', fontSize: 'var(--fs-body)', fontWeight: 700,
+                color: 'var(--clr-text-strong)' }}>{it.label}</span>
+              <span className="ko-keep" style={{ display: 'block', fontSize: 'var(--fs-caption)',
+                color: 'var(--clr-text-muted)', marginTop: 2 }}>{it.sub}</span>
+            </span>
+            <span style={{ color: 'var(--clr-accent)', fontSize: 'var(--fs-body)', fontWeight: 800 }}>›</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 /* ──────────────────────────────────────────────────────
    테마 전환 카드 — Light / Dark / Pro 3종
