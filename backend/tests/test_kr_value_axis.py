@@ -131,3 +131,45 @@ def test_no_axis_is_totally_empty_for_a_market():
         + f' | 스캔은 {age_h:.1f}시간 전 것이다.'
         + ' 수집 코드를 방금 고쳤다면 발굴 탭 [갱신](관리자)을 누르거나'
           ' 다음 cron(매일 KST 07:00)을 기다린 뒤 다시 확인할 것.')
+
+
+# ── 스캔이 멈춘 것을 감지한다 (2026-11-07) ─────────────────────────
+@pytest.mark.net
+def test_discover_scan_is_fresh():
+    """🟥 발굴 스캔이 **81.7시간(3.4일) 멈춰 있었다.**
+
+    그동안 화면에는 `3일 전 · 매일 자동` 이 찍혀 있었다 — 한 문장 안에 모순이
+    있는데(3일 전이면 매일이 아니다) 10.5px 회색으로, 가장 조용한 스타일이었다.
+    아무도 안 봤다.
+
+    더 나쁜 것: 스캔은 **아무 기록도 남기지 않았다.** 남는 흔적은
+    `discovery_scores.computed_at` 뿐이고 그것은 **성공했을 때만** 갱신된다.
+    실패는 흔적이 없는 구조였다 — "돌다가 실패"와 "아예 안 돎"을 가릴 수 없었다.
+
+    임계 36시간: 매일 cron 기준 한 번 거르는 것까지는 봐 주고 두 번째부터 센다.
+    """
+    import json
+    import time as _t
+    import urllib.request
+    ua = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    base = 'https://daonwealth.com'
+    try:
+        req = urllib.request.Request(
+            base + '/api/auth/demo', data=b'{}',
+            headers={'Content-Type': 'application/json', 'User-Agent': ua})
+        token = json.loads(urllib.request.urlopen(req, timeout=30).read())['token']
+        req = urllib.request.Request(
+            base + '/api/discover?limit=10',
+            headers={'Authorization': 'Bearer ' + token, 'User-Agent': ua})
+        data = json.loads(urllib.request.urlopen(req, timeout=90).read())
+    except Exception as e:                      # pragma: no cover
+        pytest.skip(f'운영 API 에 닿지 못했다: {str(e)[:80]}')
+
+    ts = float(data.get('computed_at') or 0)
+    assert ts > 0, '스캔 기록이 아예 없다'
+    age_h = (_t.time() - ts) / 3600
+    assert age_h < 36, (
+        f'발굴 스캔이 {age_h:.1f}시간({age_h / 24:.1f}일) 멈췄다. '
+        '매일 22:00 UTC cron(daon-discover-scan.sh)이 도는지 확인할 것. '
+        '앱 안에서는 /api/admin/cron_health 로 볼 수 있다.')

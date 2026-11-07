@@ -2246,6 +2246,91 @@ def admin_status(cu: dict = Depends(get_current_user)):
         'unlock_expires': _admin_sessions.get(cu['user_id']) if cu.get('is_admin') else None,
     }
 
+# ── 예약 작업 건강 상태 (2026-11-07) ─────────────────────────────
+# 왜 필요한가: 발굴 스캔이 **3일 넘게 멈춰 있었는데** 앱 안에서는 알 길이 없었다.
+# 서버 로그를 읽어야만 알 수 있는 고장은, 로그를 읽지 않는 날에는 없는 고장이다.
+# audit_log 에 남은 cron 이벤트를 모아 "마지막으로 돈 때"와 "그때 어땠나"를 준다.
+#
+# 🟥 "마지막 성공" 하나만 보면 안 된다. 돌다가 실패하는 것과 아예 안 도는 것은
+#    고칠 곳이 다르다(전자는 코드, 후자는 crontab). 시작·성공·실패를 따로 센다.
+CRON_JOBS = {
+    'discover_scan':  ('발굴 스캔',      24),   # (표시 이름, 기대 주기 시간)
+    'macro_brief':    ('시황 브리핑',    12),
+    'earnings_alerts': ('실적 알림',     24),
+    'refresh_strategy': ('전략 리포트',  24),
+    'midterm_scan':   ('중기 국면',      24),
+}
+
+
+@app.get("/api/admin/cron_health")
+def admin_cron_health(cu: dict = Depends(require_admin)):
+    """예약 작업이 **실제로 돌고 있는가.**
+
+    기대 주기의 1.5배를 넘겨 소식이 없으면 'stale'. 1.5배인 이유: 한 번 거르는
+    것은 흔하고(일시적 네트워크·OOM), 두 번째부터가 신호다.
+    """
+    now = time()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT event_type, ts, details FROM audit_log "
+            "WHERE event_type LIKE 'cron_%' OR event_type LIKE 'discover_scan%' "
+            "ORDER BY ts DESC LIMIT 400").fetchall()
+
+    seen: dict = {}
+    for r in rows:
+        et = r['event_type']
+        for key in CRON_JOBS:
+            if key not in et:
+                continue
+            kind = ('failed' if et.endswith('_failed')
+                    else 'start' if et.endswith('_start') else 'done')
+            slot = seen.setdefault(key, {})
+            if kind not in slot:
+                try:
+                    det = json.loads(r['details'] or '{}')
+                except Exception:
+                    det = {}
+                slot[kind] = {'ts': r['ts'], 'ago_h': round((now - r['ts']) / 3600, 1),
+                              'details': det}
+            break
+
+    out = []
+    for key, (label, period_h) in CRON_JOBS.items():
+        slot = seen.get(key) or {}
+        done = slot.get('done')
+        started = slot.get('start')
+        failed = slot.get('failed')
+        last_ok_h = done['ago_h'] if done else None
+        if last_ok_h is None:
+            status = 'never'          # 기록 자체가 없다 — 배선이 안 됐거나 로깅 전
+        elif last_ok_h > period_h * 1.5:
+            status = 'stale'
+        else:
+            status = 'ok'
+        # 돌긴 했는데 끝나지 않았다면(시작 기록이 성공보다 최근) 중간에 죽은 것이다
+        if started and done and started['ts'] > done['ts']:
+            status = 'died_midway' if (now - started['ts']) > 3600 else 'running'
+        out.append({
+            'job': key, 'label': label, 'period_h': period_h, 'status': status,
+            'last_ok_h': last_ok_h,
+            'last_start_h': started['ago_h'] if started else None,
+            'last_fail_h': failed['ago_h'] if failed else None,
+            'last_fail': (failed or {}).get('details'),
+            'last_ok_details': (done or {}).get('details'),
+        })
+
+    # 발굴 스캔은 결과물 시각이 따로 있다 — 이벤트가 없어도 이건 믿을 수 있다.
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT MAX(computed_at) AS t FROM discovery_scores").fetchone()
+    scan_age_h = (round((now - float(row['t'])) / 3600, 1)
+                  if row and row['t'] else None)
+
+    return {'jobs': out, 'discover_data_age_h': scan_age_h,
+            'note': ('로깅은 2026-11-07 부터 쌓인다 — 그 전 실행은 기록이 없어 '
+                     "'never' 로 보인다. discover_data_age_h 는 그 전에도 믿을 수 있다.")}
+
+
 @app.post("/api/admin/unlock")
 def admin_unlock(req: AdminUnlockReq, cu: dict = Depends(get_current_user)):
     """admin 암호를 검증하고 세션 해제 (1시간 유효)"""
@@ -9763,8 +9848,16 @@ def _store_discovery_rows(conn, rows: list, now: float):
 
 def _do_discover_scan() -> dict:
     """개별종목(GARP) + ETF(전용 모델) 스캔 → discovery_scores 저장. (cron·관리자 공용)
-    Oracle 1GB RAM(MemoryMax 850M) — 동시성 2 제한(4는 OOM-kill 확인). 종목당 예외 흡수."""
+    Oracle 1GB RAM(MemoryMax 850M) — 동시성 2 제한(4는 OOM-kill 확인). 종목당 예외 흡수.
+
+    🟥 2026-11-07: 이 함수는 **아무 기록도 남기지 않았다.** 스캔이 3일 넘게
+    멈췄는데 "돌다가 실패했는가" 와 "아예 안 돌았는가" 를 가릴 방법이 없었다.
+    남는 흔적은 `discovery_scores.computed_at` 하나뿐이고, 그것은 **성공했을
+    때만** 갱신된다 — 실패는 흔적을 남기지 않는 구조였다.
+    시작·성공·실패를 모두 이벤트로 남긴다. 다음에 멈추면 어디서 멈췄는지 보인다.
+    """
     _discover_scan_busy['v'] = True
+    _log_event('__cron__', 'discover_scan_start', {})
     try:
         t0 = time()
         # 1) 개별종목 (GARP)
@@ -9815,10 +9908,31 @@ def _do_discover_scan() -> dict:
             # 안 하면 제거된 티커(예: PXD)가 옛 gate_pass=1로 영구 잔존해 추천에 노출됨.
             conn.execute("DELETE FROM discovery_scores WHERE computed_at < ?", (now - 1,))
 
-        return {'scanned': len(universe) + len(etf_uni) + len(innov_uni),
-                'stocks': len(scored), 'etfs': len(etf_scored), 'innov': len(innov_scored),
-                'gate_passed': sum(1 for r in scored + etf_scored + innov_scored if r.get('gate_pass')),
-                'elapsed_s': round(time() - t0, 1)}
+        out = {'scanned': len(universe) + len(etf_uni) + len(innov_uni),
+               'stocks': len(scored), 'etfs': len(etf_scored), 'innov': len(innov_scored),
+               'gate_passed': sum(1 for r in scored + etf_scored + innov_scored if r.get('gate_pass')),
+               'elapsed_s': round(time() - t0, 1)}
+        # 🟥 축별 결측률도 같이 남긴다. 한 시장의 한 축이 100% 비면 그건
+        #   '데이터 부족'이 아니라 '수집 고장'이다(2026-11-05 KR 가치 축 사고).
+        #   스캔이 성공했다는 기록만으로는 그 고장을 못 본다.
+        miss = {}
+        for mk in ('US', 'KR'):
+            grp = [r for r in scored if r.get('market') == mk]
+            if not grp:
+                continue
+            for ax in ('value', 'growth', 'quality', 'momentum', 'sentiment'):
+                n_miss = sum(1 for r in grp if r.get('pct_' + ax) is None)
+                if n_miss == len(grp):
+                    miss[f'{mk}/{ax}'] = f'{n_miss}/{len(grp)}'
+        if miss:
+            out['axis_all_missing'] = miss
+        _log_event('__cron__', 'discover_scan_done', out)
+        return out
+    except Exception as e:
+        # 예외를 삼키지 않는다 — 다만 **기록은 남기고** 다시 올린다.
+        # 남기지 않으면 cron 로그에만 남고, 로그를 읽을 수 없는 날에는 사라진다.
+        _log_event('__cron__', 'discover_scan_failed', {'error': str(e)[:200]})
+        raise
     finally:
         _discover_scan_busy['v'] = False
 

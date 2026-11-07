@@ -486,6 +486,33 @@ function ScoreTrackCard() {
   )
 }
 
+/* 스캔 신선도. 하루 반을 넘기면 조용한 각주가 아니라 **경고**가 된다.
+   임계 36시간 = 매일 cron 기준으로 한 번 거른 것까지는 봐 주고, 두 번째부터
+   말한다. 숫자(몇 시간/며칠 전)를 같이 적는다 — '낡음' 만으로는 얼마나
+   낡았는지 모르고, 그러면 아무도 행동하지 않는다. */
+const SCAN_STALE_H = 36
+
+function ScanFreshness({ computedAt, ago }) {
+  if (!computedAt) {
+    return <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--m-text-tertiary)',
+      fontWeight: 600 }}>스캔 기록 없음</span>
+  }
+  const h = (Date.now() / 1000 - computedAt) / 3600
+  if (h < SCAN_STALE_H) {
+    return <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--m-text-tertiary)',
+      fontWeight: 600 }}>{ago} · 매일 자동</span>
+  }
+  const label = h < 48 ? `${Math.round(h)}시간` : `${(h / 24).toFixed(1)}일`
+  return (
+    <span className="ko-keep" title="발굴 점수는 매일 22시(UTC) 스캔으로 갱신됩니다. 이 값이 멈추면 점수가 옛 시세로 굳습니다."
+      style={{ fontSize: 'var(--fs-micro)', fontWeight: 800,
+        color: 'var(--m-negative)', border: '1px solid var(--m-negative)',
+        borderRadius: 2, padding: '1px 6px' }}>
+      스캔 {label} 멈춤 — 자동 갱신이 돌지 않았습니다
+    </span>
+  )
+}
+
 function AxisBars({ items }) {
   return (
     <div style={{ display: 'grid', gap: 7 }}>
@@ -998,7 +1025,14 @@ export default function DiscoverTab() {
             </div>
           </details>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10.5, color: 'var(--m-text-tertiary)', fontWeight: 600 }}>{ago ? `${ago} · 매일 자동` : '매일 자동'}</span>
+            {/* 🟥 2026-11-07: 여기에는 `3일 전 · 매일 자동` 이 찍혀 있었다.
+                한 문장 안에 모순이 있다 — 3일 전이면 매일 자동이 **아니다.**
+                그런데 그 모순이 10.5px 회색으로, 가장 조용한 스타일로 적혀 있었다.
+                발굴 스캔이 81.7시간(3.4일) 멈춰 있었는데 화면은 평소와 똑같았다.
+                (오너 메모의 "멈추면 조용히 늙는다" 가 여기서도 일어났다.)
+                → 하루를 넘기면 **경고로 승격**하고, 지키지 못하는 약속
+                  ('매일 자동')은 그때 입에 담지 않는다. */}
+            <ScanFreshness computedAt={data?.computed_at} ago={ago} />
             {/* 교차검증용 내보내기 — 점수 산출 조건을 함께 실어 보낸다(2026-10-28).
                 값만 주면 읽는 쪽은 믿거나 버리거나 둘뿐이다. */}
             <button onClick={onExportMd} disabled={!view.length} className="btn-secondary"
