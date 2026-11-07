@@ -5,7 +5,7 @@ import WatchStar from '../components/WatchStar'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { useStore } from '../store'
-import { getDiscover, getDiscoverTrack, rescanDiscover, getCachedAnalysis } from '../api'
+import { getDiscover, getDiscoverTrack, rescanDiscover, discoverScanStatus, getCachedAnalysis } from '../api'
 import InfoTip from '../components/InfoTip'
 import { Basis } from '../components/report'
 
@@ -923,15 +923,41 @@ export default function DiscoverTab() {
     setSecFilter(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n })
   }
 
+  /* 🟥 2026-11-07: 전에는 "7~10분 후 자동 반영됩니다" 한 줄을 띄우고
+     **10분을 통째로 기다렸다.** 그 사이 스캔이 죽어도 화면은 똑같았고,
+     오너는 "갱신된 게 맞나?"를 물을 수밖에 없었다.
+     기다리는 사람에게 필요한 것은 '시작했다'가 아니라 **'지금 몇 분째인가'** 다.
+     → 30초마다 상태를 묻고 경과 분을 보여 준다. 죽으면 죽었다고 말한다. */
   async function onRescan() {
     setRescanMsg('갱신 요청 중…')
     try {
       const r = await rescanDiscover()
-      if (r.status === 'started') {
-        setRescanMsg('갱신 시작 — 7~10분 후 자동 반영됩니다.')
-        setTimeout(() => { qc.invalidateQueries({ queryKey: ['discover'] }); setRescanMsg('') }, 600_000)
-      } else if (r.status === 'already_running') setRescanMsg('이미 갱신 중입니다.')
-      else setRescanMsg('')
+      if (r.status !== 'started' && r.status !== 'already_running') {
+        setRescanMsg(''); return
+      }
+      if (r.status === 'already_running') {
+        setRescanMsg(`이미 갱신 중입니다 (${r.elapsed_min ?? '?'}분째)`)
+      }
+      const until = Date.now() + 30 * 60 * 1000
+      while (Date.now() < until) {
+        await new Promise(res => setTimeout(res, 30_000))
+        let st
+        try { st = await discoverScanStatus() } catch { continue }
+        if (st.status === 'running') {
+          setRescanMsg(`갱신 중… ${st.elapsed_min}분째 (보통 7~10분)`)
+        } else if (st.status === 'stalled') {
+          setRescanMsg(`갱신이 ${st.elapsed_min}분째 끝나지 않습니다 — 멈춘 것으로 보입니다`)
+          break
+        } else if (st.status === 'failed') {
+          setRescanMsg(`갱신 실패: ${st.error || '원인 불명'}`)
+          break
+        } else {
+          setRescanMsg('갱신 완료')
+          await qc.invalidateQueries({ queryKey: ['discover'] })
+          setTimeout(() => setRescanMsg(''), 8000)
+          break
+        }
+      }
     } catch (e) { setRescanMsg(e.response?.data?.detail || '갱신 실패') }
   }
 

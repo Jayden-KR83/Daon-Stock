@@ -16,7 +16,11 @@ if [ -z "$SECRET" ]; then
   exit 0
 fi
 
-# ~185종목 yfinance 수집(동시성 4) → 스캔이 길어질 수 있어 타임아웃 넉넉히(15분)
+# 2026-11-07 실측: 유니버스 212 + ETF 29 + 혁신 20 = 261종, 종목당 4~9초,
+#   동시성 **2**(주석에 4로 적혀 있었으나 코드는 2다 — 1GB VM OOM 때문에 낮췄다).
+#   => 11분 이상. 타임아웃 15분과 **가깝다.** 유니버스를 늘리면 여기부터 넘친다.
+#   스캔이 어디까지 갔는지는 audit_log 의 discover_scan_progress 로 본다
+#   (앱에서 /api/admin/cron_health).
 curl -s -m 900 -X POST "$API" \
   -H 'Content-Type: application/json' \
   -d "{\"cron_secret\":\"$SECRET\"}" >> "$LOG" 2>&1

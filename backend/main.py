@@ -9809,7 +9809,14 @@ def mark_all_notifications_read(cu: dict = Depends(require_approved)):
 class DiscoverScanReq(BaseModel):
     cron_secret: str = ''   # TriggerReq와 동일 형태지만, 정의 순서 의존 회피 위해 별도 선언
 
-_discover_scan_busy = {'v': False}   # 동시 스캔 방지 (cron·관리자 수동 겹침 차단)
+# 동시 스캔 방지 + **상태 노출**.
+# 🟥 2026-11-07: 오너가 [지금 갱신]을 눌렀는데 화면이 "7~10분 후 반영"이라고만
+#   하고 그 뒤로 아무 말이 없었다. 스캔은 7~10분이 걸리는데, 그동안
+#   "도는 중"과 "죽었음"을 **가릴 방법이 전혀 없었다** — 이 플래그가 프로세스
+#   메모리에만 있고 어디로도 안 나갔기 때문이다.
+#   기다리는 사람에게 필요한 것은 "시작했다"가 아니라 "지금 몇 분째인가"다.
+_discover_scan_busy = {'v': False, 'started_at': 0.0,
+                       'finished_at': 0.0, 'last_error': ''}
 
 def _store_discovery_rows(conn, rows: list, now: float):
     """스코어된 행(개별종목·ETF 공용)을 discovery_scores + history에 저장."""
@@ -9857,6 +9864,8 @@ def _do_discover_scan() -> dict:
     시작·성공·실패를 모두 이벤트로 남긴다. 다음에 멈추면 어디서 멈췄는지 보인다.
     """
     _discover_scan_busy['v'] = True
+    _discover_scan_busy['started_at'] = time()
+    _discover_scan_busy['last_error'] = ''
     _log_event('__cron__', 'discover_scan_start', {})
     try:
         t0 = time()
@@ -9868,9 +9877,26 @@ def _do_discover_scan() -> dict:
             m.update({'ticker': item['ticker'], 'name': item['name'],
                       'market': item['market'], 'sector': item['sector']})
             return m
+        # 🟥 2026-11-07: 이 스캔은 **전부 끝나야만** 저장한다(아래 _store_discovery_rows).
+        #   중간에 죽으면 **아무것도 남지 않는다** — 3일 넘게 멈췄는데 어디까지
+        #   갔는지조차 알 수 없었던 이유가 이것이다.
+        #   저장 구조를 바꾸는 것은 고아행 삭제(computed_at 기준)와 얽혀 위험하므로,
+        #   먼저 **진척을 기록**한다. 다음에 죽으면 몇 종목째인지 바로 보인다.
+        #   실측(2026-11-07): 유니버스 212 + ETF 29 + 혁신 20 = 261종,
+        #   종목당 4~9초, 동시성 2 → **11분 이상**. cron 타임아웃 15분과 가깝다.
+        _n_done = 0
         with _cf.ThreadPoolExecutor(max_workers=2) as ex:
             for m in ex.map(_fetch, universe):
                 rows.append(m)
+                _n_done += 1
+                if _n_done % 50 == 0:
+                    _log_event('__cron__', 'discover_scan_progress',
+                               {'stage': 'stocks', 'done': _n_done,
+                                'total': len(universe),
+                                'elapsed_s': round(time() - t0, 1)})
+        _log_event('__cron__', 'discover_scan_progress',
+                   {'stage': 'stocks_done', 'done': _n_done,
+                    'elapsed_s': round(time() - t0, 1)})
         scored = _garp_score(rows)
 
         # 2) ETF (추세·저비용·규모 전용 모델)
@@ -9884,6 +9910,9 @@ def _do_discover_scan() -> dict:
         with _cf.ThreadPoolExecutor(max_workers=2) as ex:
             for m in ex.map(_fetch_etf, etf_uni):
                 etf_rows.append(m)
+        _log_event('__cron__', 'discover_scan_progress',
+                   {'stage': 'etf_done', 'done': len(etf_rows),
+                    'elapsed_s': round(time() - t0, 1)})
         etf_scored = _etf_score(etf_rows)
 
         # 3) 저점 발굴 (AI·바이오 혁신/턴어라운드 전용 모델)
@@ -9931,10 +9960,12 @@ def _do_discover_scan() -> dict:
     except Exception as e:
         # 예외를 삼키지 않는다 — 다만 **기록은 남기고** 다시 올린다.
         # 남기지 않으면 cron 로그에만 남고, 로그를 읽을 수 없는 날에는 사라진다.
+        _discover_scan_busy['last_error'] = str(e)[:200]
         _log_event('__cron__', 'discover_scan_failed', {'error': str(e)[:200]})
         raise
     finally:
         _discover_scan_busy['v'] = False
+        _discover_scan_busy['finished_at'] = time()
 
 
 @app.post("/api/cron/discover_scan")
@@ -9956,13 +9987,43 @@ def cron_discover_scan(req: DiscoverScanReq):
     return _do_discover_scan()
 
 
+@app.get("/api/discover/scan_status")
+def discover_scan_status(cu: dict = Depends(require_approved)):
+    """스캔이 **지금 돌고 있는가, 몇 분째인가.**
+
+    왜 따로 두나: `/api/discover` 의 `computed_at` 은 **성공했을 때만** 움직인다.
+    그래서 그 값만 보면 '도는 중'과 '죽었음'이 똑같아 보인다 — 둘 다 옛 시각이다.
+    기다리는 사람에게 필요한 것은 "시작했다"가 아니라 "지금 몇 분째인가"다.
+
+    상태:
+      running    — 돌고 있다 (elapsed_min 함께)
+      stalled    — 돌고 있다고 표시되는데 25분이 넘었다. 사실상 죽은 것이다
+                   (정상 소요 7~10분).
+      failed     — 마지막 실행이 예외로 끝났다 (last_error)
+      idle       — 돌고 있지 않다
+    """
+    st = _discover_scan_busy
+    now = time()
+    if st.get('v'):
+        el = (now - float(st.get('started_at') or now)) / 60.0
+        return {'status': 'stalled' if el > 25 else 'running',
+                'elapsed_min': round(el, 1)}
+    if st.get('last_error'):
+        return {'status': 'failed', 'error': st['last_error'],
+                'finished_min_ago': round((now - float(st.get('finished_at') or now)) / 60.0, 1)}
+    return {'status': 'idle',
+            'finished_min_ago': (round((now - float(st['finished_at'])) / 60.0, 1)
+                                 if st.get('finished_at') else None)}
+
+
 @app.post("/api/discover/rescan")
 def discover_rescan(cu: dict = Depends(require_approved)):
     """관리자 수동 갱신 — 백그라운드 스레드로 스캔(UI 안 막힘). 즉시 상태 반환."""
     if not cu.get('is_admin'):
         raise HTTPException(403, "관리자만 갱신할 수 있습니다.")
     if _discover_scan_busy['v']:
-        return {'status': 'already_running'}
+        el = (time() - float(_discover_scan_busy.get('started_at') or time())) / 60.0
+        return {'status': 'already_running', 'elapsed_min': round(el, 1)}
     import threading
     threading.Thread(target=_do_discover_scan, daemon=True).start()
     return {'status': 'started'}
